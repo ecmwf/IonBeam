@@ -1,0 +1,66 @@
+---
+encoder:
+  name: odb
+
+output: test_output.odb
+
+source:
+  name: watch-directory
+  paths:
+    - watch_data
+    - watch_data2
+  patterns: "*test*"
+  include_dirname: true
+
+preprocessing:
+  - match: (?P<dataset>watch_data).*/file(?P<index>\d+)
+    metadata:
+      class: sample
+    parser:
+      name: csv
+      header: true
+      metadata_columns:
+        - title: TIME
+          type: datetime
+          identifying: true
+          date_format: "%Y-%m-%d %H:%M:%S%z"
+          name: an
+        - title: BATT
+          name: battery
+      value_columns:
+        - title: CCS811_VOCS
+        - title: LIGHT
+        - title: PM_1
+        - title: PM_10
+        - title: PM_25
+        - title: PRESS
+          name: pressure
+        - title: TEMP
+          name: temperature
+          unit: C
+
+  - match: (?P<dataset>watch_data).*/group/file(?P<index>\d+)
+    metadata:
+      class: group
+    parser:
+      name: csv
+      header: true
+      metadata_columns:
+        - title: TIME
+          type: datetime
+          identifying: true
+          date_format: "%Y-%m-%d %H:%M:%S%z"
+          name: an
+        - title: BATT
+          name: battery
+      value_columns:
+        - title: CCS811_VOCS
+        - title: LIGHT
+        - title: PM_1
+        - title: PM_10
+        - title: PM_25
+        - title: PRESS
+          name: pressure
+        - title: TEMP
+          name: temperature
+          unit: C
