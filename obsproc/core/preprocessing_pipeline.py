@@ -71,7 +71,6 @@ class PreprocessingPipelines:
 
     def _generate(self):
         for raw in self.source:
-            print("RW: ", raw)
             for p in self.pipelines:
                 if p.matches(raw):
                     for processed in p.process(raw):
