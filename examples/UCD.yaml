@@ -10,7 +10,8 @@ source:
     - test_data/UCD
 
 preprocessing:
-  - match: (?P<dataset>test_data)/UCD/AirQuality_(?P<index>\d+)
+  #- match: (?P<dataset>test_data)/UCD/AirQuality_(?P<index>\d+)
+  - match: (?P<dataset>test_data)/UCD/AirQuality_^(?:(?!~\$).)+\.(?:csv?)$
     metadata:
       class: sample
     parser:
@@ -57,7 +58,8 @@ preprocessing:
           name: air_temperature
           unit: C
 
-  - match: (?P<dataset>test_data)/UCD/Traffic_(?P<index>\d+)
+  #- match: (?P<dataset>test_data)/UCD/Traffic_(?P<index>\d+)
+  - match: (?P<dataset>test_data)/UCD/Traffic_^(?:(?!~\$).)+\.(?:csv?)$
     metadata:
       class: sample
     parser:
