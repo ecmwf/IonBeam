@@ -282,6 +282,17 @@ preprocessing:
     parser:
       name: csv
       header: true
+      header_columns:
+        - title: Name
+          name: location
+        - title: Long
+          name: longitude
+          unit: degE
+        - title: Lat
+          name: latitude
+          unit: degN
+        - title: ModuleName
+          name: module
       metadata_columns:
         - title: Timestamp
           type: seconds_since_epoch

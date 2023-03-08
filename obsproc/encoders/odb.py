@@ -2,6 +2,7 @@
 from ..parsers import ParsedData
 from ..encoders import EncodedData
 import io
+import pytz
 
 try:
     import codc as odc
@@ -33,9 +34,10 @@ class ODCEncoder:
         df = data.df
         if len(dt_columns) > 0:
             df = df.copy()
+            df = tz.normalize(df).astimezone(pytz.utc)
 
         for colname in dt_columns:
-            # @todo Ensure forced to UTC
+            # @todo Ensure forced to UTC -> dt_columns
             col = df[colname]
             df[f"{colname}date"] = 10000 * col.dt.year + 100 * col.dt.month + col.dt.day
             df[f"{colname}time"] = col.dt.hour

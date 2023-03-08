@@ -39,7 +39,7 @@ if __name__ == '__main__':
     #     for t in output.df.dtypes:
     #         print(t, type(t))
 
-    # @todo - this should be treated in the same way as the PreprocessingPipelines --> matches() and multiple options
+    # @kodo - this should be treated in the same way as the PreprocessingPipelines --> matches() and multiple options
     encoder = load_encoder(**config['encoder'])
 
     with open(config['output'], 'wb') as fout:
