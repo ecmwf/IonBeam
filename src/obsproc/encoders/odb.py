@@ -34,7 +34,8 @@ class ODCEncoder:
         df = data.df
         if len(dt_columns) > 0:
             df = df.copy()
-            df = tz.normalize(df).astimezone(pytz.utc)
+            #  What timezone should we be using here?
+            # df = tz.normalize(df).astimezone(pytz.utc)
 
         for colname in dt_columns:
             # @todo Ensure forced to UTC -> dt_columns
