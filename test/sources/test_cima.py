@@ -1,6 +1,8 @@
 import logging
+import pytest
 from obsproc.sources.cima import CIMA_API
 
+@pytest.mark.network
 def test_live_server(caplog):
     # do pytest --log-cli--level=true to see the log output
     logger = logging.getLogger()

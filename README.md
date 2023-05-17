@@ -14,5 +14,5 @@ $ conda activate iot_ingester
 
 Install the local files with pip so that the remain editable
 ```sh
-$ pip install -e .
+$ pip install --editable ".[dev]"
 ```
