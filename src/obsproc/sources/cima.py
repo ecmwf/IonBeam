@@ -1,5 +1,6 @@
 import logging
 from functools import cached_property
+import itertools
 
 import Levenshtein
 import requests
@@ -10,6 +11,10 @@ from munch import Munch
 # To deal with the Open-Id/OAuth2 that the API uses
 from oauthlib.oauth2 import LegacyApplicationClient
 from requests_oauthlib import OAuth2Session
+
+from datetime import timedelta
+
+import pandas as pd
 
 
 class CIMA_API_Error(BaseException):
@@ -139,7 +144,7 @@ class CIMA_API:
         """
 
         # If the given name is in English and in the translation table, translate it
-        self.sensor_name_translations_EN2IT.get(name, name)
+        name = self.sensor_name_translations_EN2IT.get(name) or name
 
         if name not in self.sensor_names.IT:
             raise ValueError(
@@ -154,6 +159,9 @@ class CIMA_API:
 
         return r.json()
 
+    def station_name_to_id(self, name):
+        return name.lower().replace(" ", "_").replace("-", "_")
+
     @cached_property
     def stations(self):
         self.logger.debug("Retrieving the list of stations and sensors, this takes a while the first time...")
@@ -164,11 +172,10 @@ class CIMA_API:
 
             for sensor_info in stations:
                 station_name = sensor_info["name"]
-                station_id = station_name.lower().replace(" ", "_").replace("-", "_")
 
                 # Use dict.setdefault to create an entry for this station if it doesn't already exist
                 station_info = all_stations.setdefault(
-                    station_id,
+                    station_name,
                     dict(
                         name=station_name,
                         lat=sensor_info["lat"],
@@ -184,7 +191,7 @@ class CIMA_API:
                 sensor_record = {
                     "unit": sensor_info["mu"],
                     "id": sensor_info["id"],  # This an alphanumeric ID provided by the API for all
-                    # streams of readings, i.e all unique (station_id, sensor_type) pairs
+                    # streams of readings, i.e all unique (station_name, sensor_type) pairs
                 }
 
                 station_info["sensors"][sensor_name] = sensor_record
@@ -205,3 +212,137 @@ class CIMA_API:
     def sensors(self):
         self.stations
         return self.sensors
+
+    def _single_request_station_and_sensor(
+        self, station_name, sensor_name, start_date, end_date, aggregation_time_seconds=60
+    ):
+        if end_date - start_date > timedelta(days=3):
+            raise ValueError(
+                f"Maximum time period for a single request is 72 hours, this one is {end_date - start_date}"
+            )
+
+        station_info = Munch(self.stations[station_name])
+        sensor_id = station_info.sensors[sensor_name]["id"]
+
+        r = self.get(
+            self.api_url + f"sensors/data/{sensor_name}/{sensor_id}",
+            params={
+                "from": start_date.strftime("%Y%m%d%H%M"),
+                "to": end_date.strftime("%Y%m%d%H%M"),
+                "aggr": aggregation_time_seconds,
+                "date_as_string": True,
+            },
+        )
+
+        j = r.json()[0]
+        return j
+
+    def get_data_by_station_and_sensor(self, station_name, sensor_name, start_date, end_date, aggregation_time_seconds):
+        "Iterate over the date range in increments of 3 days"
+        station_info = Munch(self.stations[station_name])
+
+        if aggregation_time_seconds < 60:
+            raise ValueError("Minimum aggregation time is 60 seconds")
+
+        sensor_name = self.sensor_name_translations_EN2IT.get(sensor_name) or sensor_name
+        if sensor_name not in self.sensors:
+            raise KeyError(f"Sensor name {sensor_name} not valid, closest match {self.match_sensor_names(sensor_name)}")
+        if sensor_name not in station_info.sensors:
+            raise KeyError("Station does not support this sensor")
+
+        sensor_unit = station_info.sensors[sensor_name]["unit"]
+
+        dates = pd.date_range(start=start_date, end=end_date, freq="3D")
+        if dates[-1] != end_date:
+            dates = dates.union(
+                [
+                    end_date,
+                ]
+            )
+        logging.debug(f"This date range will require {len(dates) - 1} API requests")
+
+        # might be better to use a pre-allocated numpy array here
+        columns = {
+            sensor_name: [],
+            "time_index": [],
+        }
+
+        date_ranges = list(zip(dates[:-1], dates[1:]))
+
+        for s, e in date_ranges:
+            json_data = self._single_request_station_and_sensor(
+                station_name,
+                sensor_name,
+                start_date=s,
+                end_date=e,
+                aggregation_time_seconds=aggregation_time_seconds,
+            )
+            columns[sensor_name].append(json_data["values"])
+            columns["time_index"].append(json_data["timeline"])
+
+        # flatten the lists of lists
+        for key in columns:
+            columns[key] = list(itertools.chain.from_iterable(columns[key]))
+
+        df = pd.DataFrame(
+            {
+                f"{sensor_name} [{sensor_unit}]": columns[sensor_name],
+            },
+            index=pd.to_datetime(columns["time_index"], format="%Y%m%d%H%M"),
+        )
+        return df
+
+    def get_data_by_station(self, station_name, start_date, end_date, aggregation_time_seconds):
+        "Iterate over the date range in increments of 3 days"
+        station_info = Munch(self.stations[station_name])
+
+        if aggregation_time_seconds < 60:
+            raise ValueError("Minimum aggregation time is 60 seconds")
+
+        dates = pd.date_range(start=start_date, end=end_date, freq="3D")
+        if dates[-1] != end_date:
+            dates = dates.union(
+                [
+                    end_date,
+                ]
+            )
+        logging.debug(f"This date range will require {len(dates) - 1} API requests")
+
+        # might be better to use a pre-allocated numpy array here
+        columns = {sensor_name: [] for sensor_name in station_info.sensors}
+        columns["time_index"] = []
+
+        for s, e in list(zip(dates[:-1], dates[1:])):
+            self.oauth.token = self.oauth.refresh_token(self.endpoints.token_endpoint)
+
+            time_points = None
+            for sensor_name, sensor_info in station_info.sensors.items():
+                json_data = self._single_request_station_and_sensor(
+                    station_name,
+                    sensor_name,
+                    start_date=s,
+                    end_date=e,
+                    aggregation_time_seconds=aggregation_time_seconds,
+                )
+                columns[sensor_name].append(json_data["values"])
+
+                # Check that the sensor readings were really taken at the same times
+                if time_points is not None:
+                    assert json_data["timeline"] == time_points
+                else:
+                    time_points = json_data["timeline"]
+
+            columns["time_index"].append(time_points)
+
+        # flatten the lists of lists
+        for key in columns:
+            columns[key] = list(itertools.chain.from_iterable(columns[key]))
+
+        df = pd.DataFrame(
+            {
+                f"{sensor_name} [{sensor_info['unit']}]": columns[sensor_name]
+                for sensor_name, sensor_info in station_info.sensors.items()
+            },
+            index=pd.to_datetime(columns["time_index"], format="%Y%m%d%H%M"),
+        )
+        return df

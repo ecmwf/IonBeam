@@ -21,3 +21,14 @@ Recommeneded: Install pre-commit hooks that run ruff, black, isort and flake8 on
 ```sh
 pre-commit install
 ```
+
+## Testing
+To run the default battery of smoke tests, just run pytest:
+```sh
+$ pytest
+```
+
+To run against live APIs use:
+```sh
+$ pytest -m network
+```
