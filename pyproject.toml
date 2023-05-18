@@ -6,3 +6,7 @@ build-backend = "setuptools.build_meta"
 markers = [
     "network", # For slow tests that interface with live APIs, not good for CI
 ]
+
+[tool.isort]
+profile = "black"
+skip_gitignore = true
