@@ -1,8 +1,7 @@
 ---
 encoder:
-   name: odb
-
- output: test_output.odb
+  name: odb
+  output: test_output.odb
 
 source:
   name: multi-file
@@ -39,7 +38,7 @@ preprocessing:
           unit: gV
         - title: HUM
           name: relative_humidity
-          unit: %
+          unit: '%'
         - title: LIGHT
           name: light
           unit: W m**-2
@@ -131,7 +130,7 @@ preprocessing:
           unit: mbar
         - title: Hum[%]
           name: relative_humidity
-          unit: %
+          unit: '%'
         - title: Alt[m]
           name: altitude
           unit: m
@@ -180,7 +179,7 @@ preprocessing:
           unit: C
         - title: Hum [%]
           name: relative_humidity
-          unit: %
+          unit: '%'
         - title: Press [mbar]
           name: barometric_pressure
           unit: mbar
@@ -211,11 +210,11 @@ preprocessing:
           name: an
         - title: battery in % (Battery SCK)
           name: battery_charge
-          unit: %
+          unit: '%'
       value_columns:
         - title: air humidity in % (SHT31 - Humidity)
           name: relative_humidity
-          unit: %
+          unit: '%'
         - title: air temperature in ºC (SHT31 - Temperature)
           name: air_temperature
           unit: C
@@ -300,7 +299,6 @@ preprocessing:
           type: seconds_since_epoch
           name: seconds_since_epoch
           unit: seconds
-          name: an
         - title: Timestamp
           type: seconds_since_epoch
           identifying: true

@@ -1,8 +1,8 @@
-
-from typing import Iterable, Dict, Generator
-from ..parsers import load_parser, ParsedData
-from ..sources import RawData
 import re
+from typing import Dict, Generator, Iterable
+
+from ..parsers import ParsedData, load_parser
+from ..sources import RawData
 
 
 class PreprocessingPipeline:
@@ -14,12 +14,8 @@ class PreprocessingPipeline:
     :param metadata: Additional metadata to annotate all of the data for this dataset
     :param match: A regex to identify matching data on the supplied id. Named groups identify metadata
     """
-    def __init__(self,
-                 parser: Dict,
-                 match: str,
-                 name='<unnamed>',
-                 metadata=None):
 
+    def __init__(self, parser: Dict, match: str, name="<unnamed>", metadata=None):
         self.match = re.compile(match)
         self.name = name
         self.parser = load_parser(**parser)
@@ -38,7 +34,6 @@ class PreprocessingPipeline:
             yield d
 
     def process(self, rawdata):
-
         m = self.match.match(rawdata.id)
         assert m
         id_metadata = m.groupdict()
@@ -51,14 +46,11 @@ class PreprocessingPipeline:
 
 
 class PreprocessingPipelines:
-
     _generator = None
 
     def __init__(self, config: Iterable[Dict], source: Iterable[RawData]):
         print(config)
-        self.pipelines = [
-            PreprocessingPipeline(**pipeline_config) for pipeline_config in config
-        ]
+        self.pipelines = [PreprocessingPipeline(**pipeline_config) for pipeline_config in config]
         self.source = source
 
     def __iter__(self):

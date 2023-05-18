@@ -1,20 +1,26 @@
-
-from . import Source, RawData
-from typing import Iterable
-from watchdog.observers import Observer
-from watchdog.events import PatternMatchingEventHandler
-from queue import Queue
-import logging
 import os
+from queue import Queue
+from typing import Iterable
+
+from watchdog.events import PatternMatchingEventHandler
+from watchdog.observers import Observer
+
+from . import RawData, Source
 
 
 class WatchDirectorySource(PatternMatchingEventHandler, Source):
-
     # @todo: Provide a sensible way of stopping the observer threads...
 
-    def __init__(self, path: str=None, paths: Iterable[str]=None, include_dirname=False,
-                 patterns=None, ignore_patterns=None,
-                 ignore_directories=False, case_sensitive=True):
+    def __init__(
+        self,
+        path: str = None,
+        paths: Iterable[str] = None,
+        include_dirname=False,
+        patterns=None,
+        ignore_patterns=None,
+        ignore_directories=False,
+        case_sensitive=True,
+    ):
         """
         :param path: The directory to watch
         :param paths: A list of directories to watch
@@ -49,7 +55,6 @@ class WatchDirectorySource(PatternMatchingEventHandler, Source):
         return f"MultiFileSource({self.paths})"
 
     def on_created(self, event):
-
         data_path = os.path.abspath(event.src_path)
 
         basepath = None

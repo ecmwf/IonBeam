@@ -1,4 +1,3 @@
-
 import os
 import sys
 from importlib import import_module
@@ -34,7 +33,7 @@ def find_plugin(search_dir, search_module, category, plugin_name):
     """
 
     candidates = set()
-    name_lower = plugin_name.replace('-', '_')
+    name_lower = plugin_name.replace("-", "_")
 
     # Lookup if this plugin has been called before
 
@@ -49,7 +48,7 @@ def find_plugin(search_dir, search_module, category, plugin_name):
 
     for filename in os.listdir(search_dir):
         name, ext = os.path.splitext(filename)
-        if name[0] != '_' and ext == '.py':
+        if name[0] != "_" and ext == ".py":
             if name == name_lower:
                 mod = import_module(f".{name}", package=search_module)
                 klass = getattr(mod, category)
@@ -66,5 +65,5 @@ def find_plugin(search_dir, search_module, category, plugin_name):
             return klass
         candidates.add(e.name)
 
-    candidates = {c.replace('_', '-') for c in candidates}
+    candidates = {c.replace("_", "-") for c in candidates}
     raise NameError(f"Cannot find {category} plugin '{plugin_name}'. Candidates are: {candidates}")
