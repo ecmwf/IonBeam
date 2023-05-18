@@ -1,6 +1,5 @@
 import io
 
-
 from ..encoders import EncodedData
 from ..parsers import ParsedData
 

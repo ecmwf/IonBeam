@@ -4,10 +4,8 @@ from functools import cached_property
 import Levenshtein
 import requests
 import yaml
-
 # Convenience
 from munch import Munch
-
 # To deal with the Open-Id/OAuth2 that the API uses
 from oauthlib.oauth2 import LegacyApplicationClient
 from requests_oauthlib import OAuth2Session
