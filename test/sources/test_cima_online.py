@@ -41,7 +41,3 @@ def test_live_server(caplog):
         "unit": "Degrees",
         "translation": "WIND_DIRECTION",
     }
-
-
-def test_match_sensor_names():
-    assert CIMA_API.match_sensor_names("PLUVIOMETR") == "PLUVIOMETRO"

@@ -5,16 +5,15 @@ import Levenshtein
 import requests
 import yaml
 
-# Convenience
 from munch import Munch
 
 # To deal with the Open-Id/OAuth2 that the API uses
 from oauthlib.oauth2 import LegacyApplicationClient
 from requests_oauthlib import OAuth2Session
 
-# get a nice progress bar, and autodetect if we're juptyter or CLI
 
-# import geopandas as gpd
+class CIMA_API_Error(BaseException):
+    pass
 
 
 class CIMA_API:
@@ -122,7 +121,7 @@ class CIMA_API:
         if r.headers["Content-Type"] != "application/json":
             self.logger.info(f"Failed request ({r.status_code}) to {r.url}")
             self.logger.debug(f"Response: {r.text}")
-            raise (f"Request failed, code {r.status_code}")
+            raise CIMA_API_Error(f"Request failed, code {r.status_code}")
         return r
 
     @classmethod
