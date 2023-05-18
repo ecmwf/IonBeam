@@ -184,9 +184,8 @@ class CIMA_API:
 
                 sensor_record = {
                     "unit": sensor_info["mu"],
-                    "id": sensor_info[
-                        "id"
-                    ],  # This an alphanumeric ID provided by the API for all streams of readings, i.e all unique (station_id, sensor_type) pairs
+                    "id": sensor_info["id"],  # This an alphanumeric ID provided by the API for all
+                    # streams of readings, i.e all unique (station_id, sensor_type) pairs
                 }
 
                 station_info["sensors"][sensor_name] = sensor_record
