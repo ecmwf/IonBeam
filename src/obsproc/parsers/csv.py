@@ -1,10 +1,11 @@
 
-from typing import Generator
-from ..sources import RawData
-from . import Parser, ParsedData
-import pandas as pd
 import itertools
+from typing import Generator
 
+import pandas as pd
+
+from ..sources import RawData
+from . import ParsedData, Parser
 
 # @todo - Processing of the various different types should be based on this class, or on derived types
 #         built in a factory. The work done in CSVParser is a bit yucky...

@@ -1,8 +1,10 @@
 
-from ..parsers import ParsedData
-from ..encoders import EncodedData
 import io
+
 import pytz
+
+from ..encoders import EncodedData
+from ..parsers import ParsedData
 
 try:
     import codc as odc

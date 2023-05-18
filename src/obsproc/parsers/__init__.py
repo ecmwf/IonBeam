@@ -1,9 +1,11 @@
 
-from ..sources import RawData
-from ..core.plugins import find_plugin
-from typing import Generator, Dict
-import pandas as pd
 import os
+from typing import Dict, Generator
+
+import pandas as pd
+
+from ..core.plugins import find_plugin
+from ..sources import RawData
 
 
 class ParsedData:

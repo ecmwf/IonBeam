@@ -1,6 +1,9 @@
 import logging
+
 import pytest
+
 from obsproc.sources.cima import CIMA_API
+
 
 @pytest.mark.network
 def test_live_server(caplog):

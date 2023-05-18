@@ -1,8 +1,9 @@
 
-from typing import Iterable, Dict, Generator
-from ..parsers import load_parser, ParsedData
-from ..sources import RawData
 import re
+from typing import Dict, Generator, Iterable
+
+from ..parsers import ParsedData, load_parser
+from ..sources import RawData
 
 
 class PreprocessingPipeline:

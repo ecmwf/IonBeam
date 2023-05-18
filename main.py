@@ -1,9 +1,11 @@
 
-from obsproc.sources import load_source
+import sys
+
+import yaml
+
 from obsproc.core.preprocessing_pipeline import PreprocessingPipelines
 from obsproc.encoders import load_encoder
-import yaml
-import sys
+from obsproc.sources import load_source
 
 if __name__ == '__main__':
 

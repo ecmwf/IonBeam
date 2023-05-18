@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import os
+
 from obsproc.sources import load_source
 from obsproc.sources.multi_file import MultiFileSource
+
 # import pytest
 
 examples_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'examples')

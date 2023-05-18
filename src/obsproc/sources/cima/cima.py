@@ -1,29 +1,25 @@
+import itertools
+import json
 import logging
+from datetime import datetime, timedelta, timezone
+from functools import cached_property
 
+import Levenshtein
+import pandas as pd
 import requests
-
+import yaml
+# Convenience
+from munch import Munch
 # To deal with the Open-Id/OAuth2 that the API uses
 from oauthlib.oauth2 import LegacyApplicationClient
 from requests_oauthlib import OAuth2Session
-
-import json
-import yaml
-
-from datetime import datetime, timedelta, timezone
-
-import pandas as pd
+# get a nice progress bar, and autodetect if we're juptyter or CLI
+from tqdm import tqdm
 
 # import geopandas as gpd
 
-# Convenience
-from munch import Munch
-import Levenshtein
 
-import itertools
-from functools import cached_property
 
-# get a nice progress bar, and autodetect if we're juptyter or CLI
-from tqdm import tqdm
 
 
 class CIMA_API:

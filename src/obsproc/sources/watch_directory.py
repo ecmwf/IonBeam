@@ -1,11 +1,13 @@
 
-from . import Source, RawData
-from typing import Iterable
-from watchdog.observers import Observer
-from watchdog.events import PatternMatchingEventHandler
-from queue import Queue
 import logging
 import os
+from queue import Queue
+from typing import Iterable
+
+from watchdog.events import PatternMatchingEventHandler
+from watchdog.observers import Observer
+
+from . import RawData, Source
 
 
 class WatchDirectorySource(PatternMatchingEventHandler, Source):

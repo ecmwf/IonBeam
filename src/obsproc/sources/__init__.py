@@ -1,6 +1,7 @@
 
-from ..core.plugins import find_plugin
 import os
+
+from ..core.plugins import find_plugin
 
 
 class RawData:

@@ -1,8 +1,9 @@
 
+import os
+from typing import Generator
+
 from ..core.plugins import find_plugin
 from ..parsers import ParsedData
-from typing import Generator
-import os
 
 
 class EncodedData:

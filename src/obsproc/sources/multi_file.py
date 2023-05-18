@@ -1,8 +1,9 @@
 
-from . import Source, RawData
-from typing import Iterable
 import logging
 import os
+from typing import Iterable
+
+from . import RawData, Source
 
 
 class MultiFileSource(Source):
