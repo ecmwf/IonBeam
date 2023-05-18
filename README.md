@@ -6,13 +6,18 @@ $ git clone ...
 $ cd iot_ingester
 ```
 
-Create a conda environemnt or similar
+Create a conda environemnt, vevnv or similar
 ```sh
 $ conda env create -f conda_env.yml
 $ conda activate iot_ingester
 ```
 
-Install the local files with pip so that the remain editable
+Install the package for development
 ```sh
 $ pip install --editable ".[dev]"
+```
+
+Recommeneded: Install pre-commit hooks that run ruff, black, isort and flake8 on the code before you commit
+```sh
+pre-commit install
 ```
