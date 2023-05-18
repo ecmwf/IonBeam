@@ -1,8 +1,7 @@
 ---
 encoder:
    name: odb
-
- output: test_output.odb
+   output: test_output.odb
 
 source:
   name: multi-file
@@ -38,7 +37,7 @@ preprocessing:
           unit: mbar
         - title: Hum[%]
           name: relative_humidity
-          unit: %
+          unit: '%'
         - title: Alt[m]
           name: altitude
           unit: m
@@ -57,4 +56,3 @@ preprocessing:
         - title: Solar[]
           name: light
           unit: NaN
-
