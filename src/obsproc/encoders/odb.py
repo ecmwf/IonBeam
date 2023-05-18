@@ -1,4 +1,3 @@
-
 import io
 
 import pytz
@@ -13,7 +12,6 @@ except ImportError:
 
 
 class ODCEncoder:
-
     def __init__(self, seconds=False, minutes=False):
         self.seconds = seconds
         self.minutes = minutes
@@ -23,12 +21,11 @@ class ODCEncoder:
         return f"ODCEncoder()"
 
     def encode(self, data: ParsedData):
-
         fout = io.BytesIO()
 
         # Preprocess time fields for odb output
 
-        dt_columns = data.df.select_dtypes(include=['datetimetz', 'datetime'])
+        dt_columns = data.df.select_dtypes(include=["datetimetz", "datetime"])
 
         # Our remapping modifies columns/structure. But the dataframe could be constructed of sliced dataframes
         # already (see for instance last step of csv.py) - with (e.g.) metadata columns shared with other dfs.
@@ -52,8 +49,8 @@ class ODCEncoder:
 
         # And encode the supplied data
 
-        odc.encode_odb(df, fout, properties={'encoded_by': 'obsproc'})
-        yield EncodedData(format='odb', data=fout.getbuffer(), metadata=data.metadata)
+        odc.encode_odb(df, fout, properties={"encoded_by": "obsproc"})
+        yield EncodedData(format="odb", data=fout.getbuffer(), metadata=data.metadata)
 
 
 encoder = ODCEncoder

@@ -1,4 +1,3 @@
-
 import logging
 import os
 from queue import Queue
@@ -11,12 +10,18 @@ from . import RawData, Source
 
 
 class WatchDirectorySource(PatternMatchingEventHandler, Source):
-
     # @todo: Provide a sensible way of stopping the observer threads...
 
-    def __init__(self, path: str=None, paths: Iterable[str]=None, include_dirname=False,
-                 patterns=None, ignore_patterns=None,
-                 ignore_directories=False, case_sensitive=True):
+    def __init__(
+        self,
+        path: str = None,
+        paths: Iterable[str] = None,
+        include_dirname=False,
+        patterns=None,
+        ignore_patterns=None,
+        ignore_directories=False,
+        case_sensitive=True,
+    ):
         """
         :param path: The directory to watch
         :param paths: A list of directories to watch
@@ -29,7 +34,9 @@ class WatchDirectorySource(PatternMatchingEventHandler, Source):
         super().__init__(patterns, ignore_patterns, ignore_directories, case_sensitive)
 
         assert path is not None or paths is not None
-        self.paths = [os.path.abspath(p) for p in ([path] if path is not None else paths)]
+        self.paths = [
+            os.path.abspath(p) for p in ([path] if path is not None else paths)
+        ]
         self.include_dirname = include_dirname
 
         # The output queue
@@ -51,7 +58,6 @@ class WatchDirectorySource(PatternMatchingEventHandler, Source):
         return f"MultiFileSource({self.paths})"
 
     def on_created(self, event):
-
         data_path = os.path.abspath(event.src_path)
 
         basepath = None

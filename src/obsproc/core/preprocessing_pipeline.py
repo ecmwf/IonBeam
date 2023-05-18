@@ -1,4 +1,3 @@
-
 import re
 from typing import Dict, Generator, Iterable
 
@@ -15,12 +14,8 @@ class PreprocessingPipeline:
     :param metadata: Additional metadata to annotate all of the data for this dataset
     :param match: A regex to identify matching data on the supplied id. Named groups identify metadata
     """
-    def __init__(self,
-                 parser: Dict,
-                 match: str,
-                 name='<unnamed>',
-                 metadata=None):
 
+    def __init__(self, parser: Dict, match: str, name="<unnamed>", metadata=None):
         self.match = re.compile(match)
         self.name = name
         self.parser = load_parser(**parser)
@@ -32,14 +27,15 @@ class PreprocessingPipeline:
     def matches(self, rawdata: RawData):
         return self.match.match(rawdata.id)
 
-    def annotate(self, parsed_data, extra_metadata) -> Generator[ParsedData, None, None]:
+    def annotate(
+        self, parsed_data, extra_metadata
+    ) -> Generator[ParsedData, None, None]:
         for d in parsed_data:
             d.metadata.update(self.metadata)
             d.metadata.update(extra_metadata)
             yield d
 
     def process(self, rawdata):
-
         m = self.match.match(rawdata.id)
         assert m
         id_metadata = m.groupdict()
@@ -52,7 +48,6 @@ class PreprocessingPipeline:
 
 
 class PreprocessingPipelines:
-
     _generator = None
 
     def __init__(self, config: Iterable[Dict], source: Iterable[RawData]):

@@ -1,4 +1,3 @@
-
 import logging
 import os
 from typing import Iterable
@@ -7,7 +6,6 @@ from . import RawData, Source
 
 
 class MultiFileSource(Source):
-
     def __init__(self, paths: Iterable[str], basepath=None):
         self.paths = paths
         self.basepath = basepath or os.getcwd()

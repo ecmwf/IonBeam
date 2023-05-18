@@ -1,11 +1,9 @@
-
 import os
 
 from ..core.plugins import find_plugin
 
 
 class RawData:
-
     def __init__(self, location, id):
         self.location = location
         self.id = id
@@ -38,6 +36,5 @@ class Source:
 
 
 def load_source(name: str, **kwargs) -> Source:
-
-    klass = find_plugin(os.path.dirname(__file__), __name__, 'source', name)
+    klass = find_plugin(os.path.dirname(__file__), __name__, "source", name)
     return klass(**kwargs)

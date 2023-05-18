@@ -8,18 +8,18 @@ import Levenshtein
 import pandas as pd
 import requests
 import yaml
+
 # Convenience
 from munch import Munch
+
 # To deal with the Open-Id/OAuth2 that the API uses
 from oauthlib.oauth2 import LegacyApplicationClient
 from requests_oauthlib import OAuth2Session
+
 # get a nice progress bar, and autodetect if we're juptyter or CLI
 from tqdm import tqdm
 
 # import geopandas as gpd
-
-
-
 
 
 class CIMA_API:
