@@ -7,9 +7,7 @@ from obsproc.sources.multi_file import MultiFileSource
 
 # import pytest
 
-examples_dir = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "examples"
-)
+examples_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "examples")
 
 config = {
     "name": "multi-file",

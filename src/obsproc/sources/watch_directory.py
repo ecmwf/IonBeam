@@ -33,9 +33,7 @@ class WatchDirectorySource(PatternMatchingEventHandler, Source):
         super().__init__(patterns, ignore_patterns, ignore_directories, case_sensitive)
 
         assert path is not None or paths is not None
-        self.paths = [
-            os.path.abspath(p) for p in ([path] if path is not None else paths)
-        ]
+        self.paths = [os.path.abspath(p) for p in ([path] if path is not None else paths)]
         self.include_dirname = include_dirname
 
         # The output queue

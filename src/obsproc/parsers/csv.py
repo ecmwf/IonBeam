@@ -37,9 +37,7 @@ class CSVParser(Parser):
 
         all_columns = metadata_columns + value_columns
 
-        self.columns_mapping = {
-            c["title"]: c["name"] for c in all_columns if "title" in c and "name" in c
-        }
+        self.columns_mapping = {c["title"]: c["name"] for c in all_columns if "title" in c and "name" in c}
 
         self.identifying_columns = {
             col["name"] if "name" in col else col["title"]: ColDetails(**col)
@@ -52,8 +50,7 @@ class CSVParser(Parser):
             if not col.get("identifying", False)
         }
         self.value_columns = {
-            col["name"] if "name" in col else col["title"]: ColDetails(**col)
-            for col in value_columns
+            col["name"] if "name" in col else col["title"]: ColDetails(**col) for col in value_columns
         }
 
         self.datetime_cols = {
@@ -80,9 +77,7 @@ class CSVParser(Parser):
 
         # Modify any columns as needed
 
-        fixed_output_cols = list(self.identifying_columns.keys()) + list(
-            self.metadata_columns.keys()
-        )
+        fixed_output_cols = list(self.identifying_columns.keys()) + list(self.metadata_columns.keys())
 
         # Split the data into data frames for each of the value types
 

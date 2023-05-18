@@ -35,9 +35,7 @@ def test_live_server(caplog):
     # Stations and sensors are implemented as cached properties
     # they get computed once when you first access them
     assert "campo_sportivo_bajardo" in cima_api.stations
-    assert (
-        cima_api.stations["campo_sportivo_bajardo"]["name"] == "Campo Sportivo Bajardo"
-    )
+    assert cima_api.stations["campo_sportivo_bajardo"]["name"] == "Campo Sportivo Bajardo"
 
     assert cima_api.sensors["DIREZIONEVENTO"] == {
         "unit": "Degrees",

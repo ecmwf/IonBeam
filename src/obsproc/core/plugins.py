@@ -66,6 +66,4 @@ def find_plugin(search_dir, search_module, category, plugin_name):
         candidates.add(e.name)
 
     candidates = {c.replace("_", "-") for c in candidates}
-    raise NameError(
-        f"Cannot find {category} plugin '{plugin_name}'. Candidates are: {candidates}"
-    )
+    raise NameError(f"Cannot find {category} plugin '{plugin_name}'. Candidates are: {candidates}")

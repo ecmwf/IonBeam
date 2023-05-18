@@ -84,9 +84,7 @@ class CIMA_API:
         self.oauth = OAuth2Session(
             client=LegacyApplicationClient(client_id=credentials.client_id),
             auto_refresh_url=self.endpoints.token_endpoint,
-            auto_refresh_kwargs=dict(
-                client_id=credentials.client_id, client_secret=credentials.client_secret
-            ),
+            auto_refresh_kwargs=dict(client_id=credentials.client_id, client_secret=credentials.client_secret),
             # token_updater=token_saver,
         )
 
@@ -108,9 +106,7 @@ class CIMA_API:
         self.sensor_names = Munch(IT=self.get(self.api_url + "sensors/classes").json())
 
         # Setup a two way translation table so you can also specify the names in English
-        self.sensor_name_translations_IT2EN = {
-            v: k for k, v in self.sensor_name_translations_EN2IT.items()
-        }
+        self.sensor_name_translations_IT2EN = {v: k for k, v in self.sensor_name_translations_EN2IT.items()}
         if set(self.sensor_names.IT) != set(self.sensor_name_translations_IT2EN.keys()):
             self.logger.warning("The translation tables need updating!")
 
@@ -137,9 +133,7 @@ class CIMA_API:
         best_match = max(valid_keys, key=lambda s2: Levenshtein.ratio(s.upper(), s2))
         return best_match
 
-    def list_stations_by_sensor(
-        self, name, stationgroup="ComuneLive%IChange", geowin="6,36,18.6,47.5"
-    ):
+    def list_stations_by_sensor(self, name, stationgroup="ComuneLive%IChange", geowin="6,36,18.6,47.5"):
         """
         For a given sensor name, eg RAIN_GAUGE,
         Return a pandas dataframe of weather stations that report that sensor reading.
@@ -163,9 +157,7 @@ class CIMA_API:
 
     @cached_property
     def stations(self):
-        self.logger.debug(
-            "Retrieving the list of stations and sensors, this takes a while the first time..."
-        )
+        self.logger.debug("Retrieving the list of stations and sensors, this takes a while the first time...")
         all_stations = {}
         all_sensors = {}
         for sensor_name in self.sensor_names.IT:

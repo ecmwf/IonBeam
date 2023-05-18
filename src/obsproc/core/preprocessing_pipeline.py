@@ -27,9 +27,7 @@ class PreprocessingPipeline:
     def matches(self, rawdata: RawData):
         return self.match.match(rawdata.id)
 
-    def annotate(
-        self, parsed_data, extra_metadata
-    ) -> Generator[ParsedData, None, None]:
+    def annotate(self, parsed_data, extra_metadata) -> Generator[ParsedData, None, None]:
         for d in parsed_data:
             d.metadata.update(self.metadata)
             d.metadata.update(extra_metadata)
@@ -52,9 +50,7 @@ class PreprocessingPipelines:
 
     def __init__(self, config: Iterable[Dict], source: Iterable[RawData]):
         print(config)
-        self.pipelines = [
-            PreprocessingPipeline(**pipeline_config) for pipeline_config in config
-        ]
+        self.pipelines = [PreprocessingPipeline(**pipeline_config) for pipeline_config in config]
         self.source = source
 
     def __iter__(self):
