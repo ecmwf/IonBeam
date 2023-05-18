@@ -65,7 +65,7 @@ class CSVParser(Parser):
         super().__init__(**kwargs)
 
     def __str__(self):
-        return f"CSVParser()"
+        return "CSVParser()"
 
     def parse(self, rawdata: RawData) -> Generator[ParsedData, None, None]:
         # Ensure column names match what we would like

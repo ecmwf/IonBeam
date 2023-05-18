@@ -1,4 +1,3 @@
-import logging
 import os
 from queue import Queue
 from typing import Iterable

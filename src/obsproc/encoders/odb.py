@@ -1,6 +1,5 @@
 import io
 
-import pytz
 
 from ..encoders import EncodedData
 from ..parsers import ParsedData
@@ -18,7 +17,7 @@ class ODCEncoder:
         pass
 
     def __str__(self):
-        return f"ODCEncoder()"
+        return "ODCEncoder()"
 
     def encode(self, data: ParsedData):
         fout = io.BytesIO()

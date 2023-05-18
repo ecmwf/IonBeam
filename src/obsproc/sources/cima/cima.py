@@ -1,11 +1,7 @@
-import itertools
-import json
 import logging
-from datetime import datetime, timedelta, timezone
 from functools import cached_property
 
 import Levenshtein
-import pandas as pd
 import requests
 import yaml
 
@@ -17,7 +13,6 @@ from oauthlib.oauth2 import LegacyApplicationClient
 from requests_oauthlib import OAuth2Session
 
 # get a nice progress bar, and autodetect if we're juptyter or CLI
-from tqdm import tqdm
 
 # import geopandas as gpd
 
@@ -99,7 +94,7 @@ class CIMA_API:
         # Usually this step would open a browser window where you would manually log in
         # But for this particular API they're just eneabled straight user/pass authentication
         # hence the use of 'LegacyApplicationClient' above
-        self.logger.info(f"Fetching the token...")
+        self.logger.info("Fetching the token...")
         self.oauth.fetch_token(
             token_url=self.endpoints.token_endpoint,
             username=credentials.username,
@@ -121,7 +116,7 @@ class CIMA_API:
 
     def refresh_token(self):
         "Refresh the OAuth2 token, tokens generally expire after 30 minutes for this API"
-        self.logger.info(f"Refreshing the token...")
+        self.logger.info("Refreshing the token...")
         self.oauth.refresh_token(self.endpoints.token_endpoint)
         self.logger.debug(f"Token: {self.oauth.token}")
 
