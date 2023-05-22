@@ -22,6 +22,8 @@ from datetime import datetime, timezone, timedelta
 
 from obsproc.sources.cima import CIMA_API
 
+from pathlib import Path
+
 
 def do_cima_tests(caplog):
     "This function isn't a test directlt, it's meant to be called with either a real or fake API, see below"
@@ -29,8 +31,11 @@ def do_cima_tests(caplog):
     logger = logging.getLogger()
     caplog.set_level(logging.INFO)
 
+    # check if there is a local secrets.yaml file
+    secrets_file = "secrets.yaml" if Path("secrets.yaml").exists() else "example_secrets.yaml"
+
     # Setup the authentication and requests a token
-    cima_api = CIMA_API("secrets.yaml")
+    cima_api = CIMA_API(secrets_file)
 
     # Check that we can also refresh the token
     old_expiry = cima_api.oauth.token["expires_at"]
