@@ -20,7 +20,7 @@ from time import time
 
 from datetime import datetime, timezone, timedelta
 
-from obsproc.sources.cima import CIMA_API
+from obsproc.sources.cima.cima import CIMA_API, GenericSensor, APISensor
 
 from pathlib import Path
 
@@ -34,7 +34,7 @@ def do_cima_tests(caplog):
     # check if there is a local secrets.yaml file
     secrets_file = "secrets.yaml" if Path("secrets.yaml").exists() else "example_secrets.yaml"
 
-    # Setup the authentication and requests a token
+    # Setup the authentication and request a token
     cima_api = CIMA_API(secrets_file)
 
     # Check that we can also refresh the token
@@ -50,23 +50,20 @@ def do_cima_tests(caplog):
     stations_with_a_rain_sensor_2 = cima_api.list_stations_by_sensor("PLUVIOMETRO")
     assert stations_with_a_rain_sensor == stations_with_a_rain_sensor_2
 
-    known_station = {
-        "id": "-1937156895_2",
-        "name": "Campo Sportivo Bajardo",
-        "lat": 43.900158,
-        "lng": 7.726422,
-        "mu": "mm",
-    }
+    known_station = APISensor(
+        station_name="Campo Sportivo Bajardo", lat=43.900158, lon=7.726422, unit="mm", id="-1937156895_2"
+    )
     assert known_station in stations_with_a_rain_sensor
 
     # Stations and sensors are implemented as cached properties
     # they get computed once when you first access them
-    assert cima_api.stations["Campo Sportivo Bajardo"]["lat"] == known_station["lat"]
+    assert cima_api.stations["Campo Sportivo Bajardo"].lat == known_station.lat
 
-    assert cima_api.sensors["PLUVIOMETRO"] == {
-        "unit": "mm",
-        "translation": "RAIN_GAUGE",
-    }
+    assert cima_api.sensors["PLUVIOMETRO"] == GenericSensor(
+        name="PLUVIOMETRO",
+        unit="mm",
+        translation="RAIN_GAUGE",
+    )
 
     # You can only get 3 days worth of data with a single API request
     start_date = datetime(2019, 10, 3, hour=0, tzinfo=timezone.utc)
