@@ -1,6 +1,6 @@
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v2.3.0
+    rev: v4.4.0
     hooks:
     -   id: check-yaml
     -   id: end-of-file-fixer
@@ -9,7 +9,7 @@ repos:
 # Run ruff to very quickly catch syntax errors and do autofixes
 - repo: https://github.com/charliermarsh/ruff-pre-commit
   # Ruff version.
-  rev: 'v0.0.267'
+  rev: 'v0.0.269'
   hooks:
     - id: ruff
       args: [ --fix, --exit-non-zero-on-fix ]
@@ -23,7 +23,7 @@ repos:
 
 # Run black to enforce a global code style
 -   repo: https://github.com/psf/black
-    rev: 22.10.0
+    rev: 23.3.0
     hooks:
     -   id: black
 
