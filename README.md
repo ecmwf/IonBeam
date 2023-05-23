@@ -17,10 +17,13 @@ Install the package for development
 $ pip install --editable ".[dev]"
 ```
 
-Recommeneded: Install pre-commit hooks that run ruff, black, isort and flake8 on the code before you commit
+Recommeneded: Install pre-commit hooks that run ruff, black, isort, flake8, etc on the code before you commit
 ```sh
 pre-commit install
 ```
+
+## Credentials
+Make sure there is a `secrets.yaml` file containing the access credentials for the various , use `example_secrets.yaml` as a template.
 
 ## Testing
 To run the default battery of smoke tests, just run pytest:
@@ -31,4 +34,10 @@ $ pytest
 To run against live APIs use:
 ```sh
 $ pytest -m network
+```
+
+## Type Checking
+Type checking, currently only CIMA is setup for this.
+```sh
+mypy src/obsproc/sources/cima
 ```
