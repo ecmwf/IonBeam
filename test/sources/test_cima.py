@@ -100,14 +100,6 @@ def test_match_sensor_names():
     assert CIMA_API.match_sensor_names("PLUVIOMETR") == "PLUVIOMETRO"
 
 
-class MockedOAuth2Session:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def fetch_token(self, *args, **kwargs):
-        pass
-
-
 @pytest.fixture()
 def mock_cima_api():
     # Give a fake response when the API initially asks for the endpoint configuration

@@ -14,7 +14,7 @@ import yaml
 
 from munch import Munch
 
-from typing import NewType, Dict, List, NamedTuple, Tuple
+from typing import Dict, List, Tuple
 
 # To deal with the Open-Id/OAuth2 that the API uses
 from oauthlib.oauth2 import LegacyApplicationClient
@@ -25,128 +25,15 @@ from datetime import timedelta, datetime
 import pandas as pd
 import numpy as np
 
-import dataclasses
 
-
-# API Related types and classes
-class CIMA_API_Error(BaseException):
-    pass
-
-
-URL = NewType("URL", str)
-
-
-@dataclasses.dataclass
-class Endpoints:
-    token_endpoint: URL
-
-
-@dataclasses.dataclass
-class Credentials:
-    username: str
-    password: str
-    client_id: str
-    client_secret: str
-
-
-# Types and Classes relating to the data we're using
-SensorNameEN = NewType("SensorNameEN", str)
-SensorNameIT = NewType("SensorNameIT", str)
-SensorName = SensorNameEN | SensorNameIT
-
-StationName = NewType("StationName", str)
-SensorID = NewType("SensorID", str)
-
-
-@dataclasses.dataclass
-class GenericSensor:
-    "A representation of a generic class of sensors"
-    unit: str
-    name: SensorNameIT
-    translation: SensorNameEN
-
-
-@dataclasses.dataclass
-class APISensor:
-    "A sensor as represented by the CIMA API"
-    station_name: StationName
-    lat: float
-    lon: float
-    unit: str
-    id: SensorID  # This an alphanumeric ID provided by the API for all
-    # streams of readings, i.e all unique (station_name, sensor_type) pairs
-
-
-@dataclasses.dataclass
-class UniqueSensor:
-    "We attach sensors to stations so it's unnecessary to store the location here"
-    unit: str
-    id: SensorID
-
-
-@dataclasses.dataclass
-class Station:
-    name: StationName
-    lat: float
-    lon: float
-    sensors: Dict[SensorNameIT, UniqueSensor]
-
-
-# This is a NamedTuple rather than a dataclass because it's annoying to make the latter iterable
-class GeoBBox(NamedTuple):
-    "Represents a rectangle in Lat/Long space"
-    minLat: float
-    minLon: float
-    maxLat: float
-    maxLon: float
+from .types import SensorName, SensorNameIT, sensor_name_translations_EN2IT, sensor_name_translations_IT2EN
+from .types import CIMA_API_Error, Credentials, Endpoints
+from .types import StationName, GenericSensor, APISensor, UniqueSensor, Station, GeoBBox
 
 
 class CIMA_API:
     api_url = "https://webdrops.cimafoundation.org/app/"
     endpoints_url = "https://testauth.cimafoundation.org/auth/realms/webdrops/.well-known/openid-configuration"
-
-    sensor_name_translations_EN2IT: Dict[SensorNameEN, SensorNameIT] = {
-        SensorNameEN("UNKNOWN"): SensorNameIT("UNKNOWN"),
-        SensorNameEN("RAIN_GAUGE"): SensorNameIT("PLUVIOMETRO"),
-        SensorNameEN("HYDROMETER"): SensorNameIT("IDROMETRO"),
-        SensorNameEN("HYDROMETER_FLOW"): SensorNameIT("IDROMETRO_PORTATA"),
-        SensorNameEN("HYDROMETER_SPEED"): SensorNameIT("IDROMETRO_VELOCITA"),
-        SensorNameEN("NIVOMETER"): SensorNameIT("NIVOMETRO"),
-        SensorNameEN("TEMPERATURE"): SensorNameIT("TERMOMETRO"),
-        SensorNameEN("HYGROMETER"): SensorNameIT("IGROMETRO"),
-        SensorNameEN("WIND_DIRECTION"): SensorNameIT("DIREZIONEVENTO"),
-        SensorNameEN("ANEMOMETER"): SensorNameIT("ANEMOMETRO"),
-        SensorNameEN("BAROMETER"): SensorNameIT("BAROMETRO"),
-        SensorNameEN("RADIOMETER"): SensorNameIT("RADIOMETRO"),
-        SensorNameEN("UNKNOWN_TYPE"): SensorNameIT("UNKNOWN_TYPE"),
-        SensorNameEN("INVERSION_HEIGHT"): SensorNameIT("INVASO"),
-        SensorNameEN("TURBINATED"): SensorNameIT("TURBINATA"),
-        SensorNameEN("RAIN GAUGE_OCT"): SensorNameIT("PLUVIOMETRO_OTT"),
-        SensorNameEN("COURSE_SOCKET"): SensorNameIT("PORTATA_PRESA"),
-        SensorNameEN("ESTIMATED_IN_FLOW"): SensorNameIT("PORTATA_ENTRANTE_STIMATA"),
-        SensorNameEN("BATTERY_LEVEL"): SensorNameIT("BATTERIA"),
-        SensorNameEN("OZONE"): SensorNameIT("OZONO"),
-        SensorNameEN("PM10"): SensorNameIT("PM10"),
-        SensorNameEN("SOIL_HYGROMETER"): SensorNameIT("IGROMETRO_SUOLO"),
-        SensorNameEN("SOIL_HYGROMETER_10"): SensorNameIT("IGROMETRO_SUOLO_10"),
-        SensorNameEN("SOIL_HYGROMETER_20"): SensorNameIT("IGROMETRO_SUOLO_20"),
-        SensorNameEN("SOIL_HYGROMETER_40"): SensorNameIT("IGROMETRO_SUOLO_40"),
-        SensorNameEN("CO"): SensorNameIT("CO"),
-        SensorNameEN("NO2"): SensorNameIT("NO2"),
-        SensorNameEN("C6H6"): SensorNameIT("C6H6"),
-        SensorNameEN("INDOOR_THERMOMETER"): SensorNameIT("TERMOMETRO_INTERNA"),
-        SensorNameEN("OZONE_TEMPERATURE"): SensorNameIT("TEMPERATURA_OZONO"),
-        SensorNameEN("DIRECTION_WIND_GUST"): SensorNameIT("DIREZIONEVENTO_RAFFICA"),
-        SensorNameEN("ANEMOMETER_GUST"): SensorNameIT("ANEMOMETRO_RAFFICA"),
-        SensorNameEN("THERMOMETER_MIN"): SensorNameIT("TERMOMETRO_MIN"),
-        SensorNameEN("THERMOMETER_MAX"): SensorNameIT("TERMOMETRO_MAX"),
-        SensorNameEN("FUEL_TEMPERATURE"): SensorNameIT("FUEL_TEMPERATURE"),
-        SensorNameEN("FUEL_MOISTURE"): SensorNameIT("FUEL_MOISTURE"),
-        SensorNameEN("SOIL_TEMPERATURE"): SensorNameIT("SOIL_TEMPERATURE"),
-        SensorNameEN("IONIZING_RADIATION"): SensorNameIT("IONIZING_RADIATION"),
-        SensorNameEN("SIGNAL_STRENGTH"): SensorNameIT("SIGNAL_STRENGTH"),
-        SensorNameEN("NO"): SensorNameIT("NO"),
-    }
 
     def __init__(
         self,
@@ -195,7 +82,7 @@ class CIMA_API:
         self.sensor_names: Munch[str, str] = Munch(IT=self.get(self.api_url + "sensors/classes").json())
 
         # Setup a two way translation table so you can also specify the names in English
-        self.sensor_name_translations_IT2EN = {v: k for k, v in self.sensor_name_translations_EN2IT.items()}
+        self.sensor_name_translations_IT2EN = {v: k for k, v in sensor_name_translations_EN2IT.items()}
         if set(self.sensor_names.IT) != set(self.sensor_name_translations_IT2EN.keys()):
             self.logger.warning("The translation tables need updating!")
 
@@ -217,7 +104,7 @@ class CIMA_API:
     @classmethod
     def match_sensor_names(cls, s: SensorName) -> SensorName:
         "Give a suggestion for what you meant when you typed TURBINATA wrong."
-        translation = cls.sensor_name_translations_EN2IT
+        translation = sensor_name_translations_EN2IT
         valid_keys = set(translation.keys()) | set(translation.values())
         best_match = max(valid_keys, key=lambda s2: Levenshtein.ratio(s.upper(), s2))
         return best_match
@@ -234,7 +121,7 @@ class CIMA_API:
         """
 
         # If the given name is in English and in the translation table, translate it
-        nameIT: SensorNameIT = self.sensor_name_translations_EN2IT.get(name) or name  # type: ignore
+        nameIT: SensorNameIT = sensor_name_translations_EN2IT.get(name) or name  # type: ignore
 
         if nameIT not in self.sensor_names.IT:
             raise ValueError(
@@ -290,7 +177,7 @@ class CIMA_API:
                     GenericSensor(
                         name=sensor_name,
                         unit=sensor_info.unit,
-                        translation=self.sensor_name_translations_IT2EN[sensor_name],
+                        translation=sensor_name_translations_IT2EN[sensor_name],
                     ),
                 )
 
@@ -333,7 +220,7 @@ class CIMA_API:
         return j
 
     def translate_sensor_name(self, name: SensorName) -> SensorNameIT:
-        return self.sensor_name_translations_EN2IT.get(name) or name  # type: ignore
+        return sensor_name_translations_EN2IT.get(name) or name  # type: ignore
 
     def get_data_by_station_and_sensor(
         self,
