@@ -412,7 +412,7 @@ class CIMA_API:
             self.oauth.token = self.oauth.refresh_token(self.endpoints.token_endpoint)
 
             time_points = None
-            for sensor_name, sensor_info in station_info.sensors.items():
+            for sensor_name in station_info.sensors.keys():
                 json_data = self._single_request_station_and_sensor(
                     station_name,
                     sensor_name,
