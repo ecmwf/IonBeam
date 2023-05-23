@@ -1,3 +1,9 @@
+"""
+
+
+TODO: Currently the geowindow and stationgroup used are hardcoded, that might need to be fixed at some point
+"""
+
 import logging
 from functools import cached_property
 import itertools
@@ -8,11 +14,11 @@ import yaml
 
 from munch import Munch
 
-from typing import NewType, Dict, List
+from typing import NewType, Dict, List, NamedTuple, Tuple
 
 # To deal with the Open-Id/OAuth2 that the API uses
 from oauthlib.oauth2 import LegacyApplicationClient
-from requests_oauthlib import OAuth2Session  # type : ignore
+from requests_oauthlib import OAuth2Session  # type: ignore[import]
 
 from datetime import timedelta, datetime
 
@@ -84,6 +90,15 @@ class Station:
     lat: float
     lon: float
     sensors: Dict[SensorNameIT, UniqueSensor]
+
+
+# This is a NamedTuple rather than a dataclass because it's annoying to make the latter iterable
+class GeoBBox(NamedTuple):
+    "Represents a rectangle in Lat/Long space"
+    minLat: float
+    minLon: float
+    maxLat: float
+    maxLon: float
 
 
 class CIMA_API:
@@ -184,13 +199,13 @@ class CIMA_API:
         if set(self.sensor_names.IT) != set(self.sensor_name_translations_IT2EN.keys()):
             self.logger.warning("The translation tables need updating!")
 
-    def refresh_token(self):
+    def refresh_token(self) -> None:
         "Refresh the OAuth2 token, tokens generally expire after 30 minutes for this API"
         self.logger.info("Refreshing the token...")
         self.oauth.refresh_token(self.endpoints.token_endpoint)
         self.logger.debug(f"Token: {self.oauth.token}")
 
-    def get(self, *args, **kwargs):
+    def get(self, *args, **kwargs) -> requests.Response:
         "Wrap the get command of the underlying oauth object"
         r = self.oauth.get(*args, **kwargs)
         if r.headers["Content-Type"] != "application/json":
@@ -200,15 +215,18 @@ class CIMA_API:
         return r
 
     @classmethod
-    def match_sensor_names(self, s: SensorName) -> SensorName:
+    def match_sensor_names(cls, s: SensorName) -> SensorName:
         "Give a suggestion for what you meant when you typed TURBINATA wrong."
-        translation = self.sensor_name_translations_EN2IT
+        translation = cls.sensor_name_translations_EN2IT
         valid_keys = set(translation.keys()) | set(translation.values())
         best_match = max(valid_keys, key=lambda s2: Levenshtein.ratio(s.upper(), s2))
         return best_match
 
     def list_stations_by_sensor(
-        self, name: SensorName, stationgroup="ComuneLive%IChange", geowin="6,36,18.6,47.5"
+        self,
+        name: SensorName,
+        stationgroup="ComuneLive%IChange",
+        geobbox: GeoBBox | Tuple[float, float, float, float] = GeoBBox(6, 36, 18.6, 47.5),
     ) -> List[APISensor]:
         """
         For a given sensor name, eg RAIN_GAUGE,
@@ -226,7 +244,7 @@ class CIMA_API:
 
         r = self.get(
             self.api_url + f"sensors/list/{nameIT}",
-            params=dict(stationgroup=stationgroup, geowin=geowin),
+            params=dict(stationgroup=stationgroup, geowin=",".join(str(s) for s in geobbox)),
         )
 
         return [
@@ -354,7 +372,7 @@ class CIMA_API:
         logging.debug(f"This date range will require {len(dates) - 1} API requests")
 
         # might be better to use a pre-allocated numpy array here
-        columns: Dict[SensorName | str, List] = {
+        columns: Dict[SensorName | str, List[List[float]]] = {
             sensor_name: [],
             "time_index": [],
         }
@@ -373,14 +391,15 @@ class CIMA_API:
             columns["time_index"].append(json_data["timeline"])
 
         # flatten the lists of lists
+        flattened_columns: Dict[SensorName | str, List[float]] = {}
         for key in columns:
-            columns[key] = list(itertools.chain.from_iterable(columns[key]))
+            flattened_columns[key] = list(itertools.chain.from_iterable(columns[key]))
 
         df = pd.DataFrame(
             {
-                f"{sensor_name} [{sensor_unit}]": columns[sensor_name],
+                f"{sensor_name} [{sensor_unit}]": flattened_columns[sensor_name],
             },
-            index=pd.to_datetime(columns["time_index"], format="%Y%m%d%H%M"),
+            index=pd.to_datetime(flattened_columns["time_index"], format="%Y%m%d%H%M"),
         )
         return df
 
@@ -405,7 +424,7 @@ class CIMA_API:
         logging.debug(f"This date range will require {len(dates) - 1} API requests")
 
         # might be better to use a pre-allocated numpy array here
-        columns: Dict[SensorName | str, List] = {sensor_name: [] for sensor_name in station_info.sensors}
+        columns: Dict[SensorName | str, List[List[float]]] = {sensor_name: [] for sensor_name in station_info.sensors}
         columns["time_index"] = []
 
         for s, e in list(zip(dates[:-1], dates[1:])):
@@ -428,18 +447,19 @@ class CIMA_API:
                 else:
                     time_points = json_data["timeline"]
 
-            columns["time_index"].append(time_points)
+            columns["time_index"].append(time_points)  # type: ignore[arg-type]
 
         # flatten the lists of lists
+        flattened_columns = {}
         for key in columns:
-            columns[key] = list(itertools.chain.from_iterable(columns[key]))
+            flattened_columns[key] = list(itertools.chain.from_iterable(columns[key]))
 
         df = pd.DataFrame(
             {
-                f"{sensor_name} [{sensor_info.unit}]": columns[sensor_name]
+                f"{sensor_name} [{sensor_info.unit}]": flattened_columns[sensor_name]
                 for sensor_name, sensor_info in station_info.sensors.items()
             },
-            index=pd.to_datetime(columns["time_index"], format="%Y%m%d%H%M"),
+            index=pd.to_datetime(flattened_columns["time_index"], format="%Y%m%d%H%M"),
         )
         df.replace(to_replace=-9998.0, value=np.nan, inplace=True)
         return df
