@@ -1,2 +1,14 @@
 .idea/*
 venv/*
+__pycache__
+*.egg-info
+.*_cache
+
+secrets.yaml
+.DS_Store
+data/
+.ipynb_checkpoints/
+*.odb
+*.ipynb
+examples/notebooks/
+docs/_build/

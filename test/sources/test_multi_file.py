@@ -1,36 +1,40 @@
 #!/usr/bin/env python3
 
-import os
+from pathlib import Path
+
 from obsproc.sources import load_source
 from obsproc.sources.multi_file import MultiFileSource
+
 # import pytest
 
-examples_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'examples')
+examples_dir = Path(__file__).parents[2] / "examples"
 
 config = {
-    'name': 'multi-file',
-    'basepath': examples_dir,
-    'paths': [
-        os.path.join(examples_dir, 'test_data/file1'),
-        os.path.join(examples_dir, 'test_data/group')
-    ]
+    "name": "multi-file",
+    "basepath": examples_dir,
 }
+
+test_paths = [
+    ("test_data/file1", {"test_data/file1"}),  # a file
+    ("test_data/group", {"test_data/group/file2", "test_data/group/file3"}),  # a directory
+    (
+        "test_data/**/file*",
+        {"test_data/file1", "test_data/group/file2", "test_data/group/file3", "test_data/group/nested_dir/file4"},
+    ),  # a glob pattern
+    ("test_data/*", {"test_data/file1"}),  # a glob pattern that should not include test_data/group/
+]
 
 
 def test_load():
-    s = load_source(**config)
+    for pattern, expectation in test_paths:
+        s = load_source(**config, paths=[pattern])
+        assert isinstance(s, MultiFileSource)
+        ids = {d.id for d in s}
+        assert ids == expectation
+
+
+def test_multi_load():
+    s = load_source(**config, paths=["test_data/file1", "test_data/group"])
     assert isinstance(s, MultiFileSource)
-
     ids = {d.id for d in s}
-    assert ids == {'test_data/file1', 'test_data/group/file2', 'test_data/group/file3'}
-
-
-def test_change_basedir():
-
-    cfg = config.copy()
-    del cfg['name']
-    cfg['basepath'] = os.path.join(cfg['basepath'], 'test_data')
-    s = MultiFileSource(**cfg)
-
-    ids = {d.id for d in s}
-    assert ids == {'file1', 'group/file2', 'group/file3'}
+    assert ids == {"test_data/file1", "test_data/group/file2", "test_data/group/file3"}

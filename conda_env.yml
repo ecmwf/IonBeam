@@ -1,0 +1,21 @@
+# To set up a conda env or update one from this file
+# $ conda env create -f conda_env.yml
+
+name: iot_ingester
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pandas
+  - pyodc
+  - pytest
+  # - odc It's reccommended to install ODC from source https://odc.readthedocs.io/en/latest/content/installation.html
+  - pip
+  - pip
+    - requests
+    - oauthlib
+    - requests-oauthlib
+    - pyyaml
+    - munch
+    - Levenshtein
+    - tqdm
