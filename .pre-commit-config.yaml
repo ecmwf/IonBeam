@@ -9,7 +9,7 @@ repos:
 # Run ruff to very quickly catch syntax errors and do autofixes
 - repo: https://github.com/charliermarsh/ruff-pre-commit
   # Ruff version.
-  rev: 'v0.0.269'
+  rev: 'v0.0.277'
   hooks:
     - id: ruff
       args: [ --fix, --exit-non-zero-on-fix ]
@@ -32,3 +32,13 @@ repos:
 #     rev: 6.0.0
 #     hooks:
 #     -   id: flake8
+
+- repo: https://github.com/Lucas-C/pre-commit-hooks
+  rev: v1.5.1
+  hooks:
+    - id: insert-license
+      name: "Insert license header in python source files"
+      args: [--license-filepath=license_header.txt,
+              '--comment-style=#',
+              --detect-license-in-X-top-lines=16]
+      types_or: [python]
