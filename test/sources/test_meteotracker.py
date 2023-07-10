@@ -16,7 +16,7 @@ from typing import Dict, List, Tuple, Callable
 from datetime import datetime, timezone
 from urllib.parse import urlparse, parse_qs
 
-from obsproc.sources.meteotracker import MT_DataType, MT_WeatherPoint, SessionId, MeteoTracker_API
+from obsproc.sources.meteotracker.meteotracker import MT_DataType, MT_WeatherPoint, SessionId, MeteoTracker_API
 
 
 def test_MT_WeatherPoint():

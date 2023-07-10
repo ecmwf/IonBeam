@@ -7,8 +7,9 @@ __pycache__
 secrets.yaml
 .DS_Store
 data/
+docs/_build/
+build/
+examples/notebooks/
 .ipynb_checkpoints/
 *.odb
 *.ipynb
-examples/notebooks/
-docs/_build/
