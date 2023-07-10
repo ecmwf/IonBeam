@@ -1,5 +1,4 @@
-# IOT Ingester
-
+# IOT Ingester
 
 :warning: This project is ALPHA and will be experimental for the foreseeable future. Interfaces and functionality are likely to change. DO NOT use this software in any project/software that is operational. :warning:
 
@@ -14,11 +13,11 @@ The documentation will be available at on readthedocs.io once this repo is made 
 [Apache License 2.0](LICENSE) In applying this license, ECMWF does not waive the privileges and immunities
 granted to it by virtue of its status as an intergovernmental organisation nor does it submit to any jurisdiction.
 
-## Installation
+## Installation
 
 Install from source
 ```sh
-$ git clone ...
+$ git clone github.com/ecmwf-projects/iot-ingester
 $ cd iot_ingester
 ```
 
@@ -38,8 +37,7 @@ Recommeneded: Install pre-commit hooks that run ruff, black, isort, flake8, etc 
 pre-commit install
 ```
 
-## Credentials
-Make sure there is a `secrets.yaml` file containing the access credentials for the various , use `example_secrets.yaml` as a template.
+Create a `secrets.yaml` file containing the access credentials for the various sources of data, use `example_secrets.yaml` as a template. `secrets.yaml` is in the gitignore to lower the risk that it accidentally gets committed to git.
 
 ## Testing
 To run the default battery of smoke tests, just run pytest:
@@ -52,7 +50,7 @@ To run against live APIs use:
 $ pytest -m network
 ```
 
-## Usage
+## Usage
 Currently the main way to interact with the pipeline is through the command line interface.
 ```bash
 % ./main.py --help
@@ -90,33 +88,32 @@ The three big pieces are the parsers which define how to rename and clean up the
 ## Architecture
 
 ### Source:
-    yields raw tabular data
-    metadata_keys: [`source`]
+yields raw tabular data
+metadata_keys: [`source`]
 
-### Preprocessor:
-    renames columns to canonical names
-    formats dates to aware UTC dates
-    converts units
-    splits data into single variables + metadata columns
-    metadata_keys: [`source`, `observed_variable`]
+### Preprocessor:
+- renames columns to canonical names
+- formats dates to timezone aware UTC dates
+- converts units
+- splits data into single variables + metadata columns
+- metadata_keys: [`source`, `observed_variable`]
 
-### Aggregators:
-    Aggregates data by source, variable and time_slice
-    In future could merge different sources if appropriate.
-    metadata_keys: [`source`, `observed_variable`, `time_slice`]
+### Aggregators:
+- Aggregates data by source, variable and time_slice
+- In future could merge different sources if appropriate.
+- metadata_keys: [`source`, `observed_variable`, `time_slice`]
 
-### Quality Controlers [to implement]:
-    - Filters on [`source`, `observed_variable`, `time_slice`], may take more that one unique tuple?
-    - does some quality control, ML, whatever
-    - yields output data
+### Quality Controlers [to implement]:
+- Filters on [`source`, `observed_variable`, `time_slice`], may take more that one unique tuple?
+- does some quality control, ML, whatever
+- yields output data
 
-### Encoders:
-    - matches on [`source`, `observed_variable`, `time_slice`]
-    - encoders to specified output format, currently CSV, ODB
+### Encoders:
+- matches on [`source`, `observed_variable`, `time_slice`]
+- encoders to specified output format, currently CSV, ODB
 
+## Changelog
 
-
-## Changelog
 - added CIMA and Meteotracker sources
     - Meteotracker caches raw data to disk, CIMA does not currently
 
