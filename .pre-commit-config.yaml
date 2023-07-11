@@ -2,9 +2,19 @@ repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.4.0
     hooks:
-    # -   id: check-yaml
-    -   id: end-of-file-fixer
-    -   id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-json
+      - id: check-yaml # doesn't work with includes
+        args: [--allow-multiple-documents, --unsafe]
+      - id: check-toml
+      - id: check-added-large-files
+      - id: debug-statements
+      - id: mixed-line-ending
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: no-commit-to-branch # protects from committing directly to main
 
 # Run ruff to very quickly catch syntax errors and do autofixes
 - repo: https://github.com/charliermarsh/ruff-pre-commit
@@ -14,24 +24,11 @@ repos:
     - id: ruff
       args: [ --fix, --exit-non-zero-on-fix ]
 
-# Black should, in principle, do everything isort does and more
-# - repo: https://github.com/pycqa/isort
-#   rev: 5.12.0
-#   hooks:
-#     - id: isort
-#       name: isort (python)
-
 # Run black to enforce a global code style
 -   repo: https://github.com/psf/black
     rev: 23.3.0
     hooks:
     -   id: black
-
-# Flake8 rules should all be caught by ruff, which is much much faster to run
-# -   repo: https://github.com/pycqa/flake8
-#     rev: 6.0.0
-#     hooks:
-#     -   id: flake8
 
 - repo: https://github.com/Lucas-C/pre-commit-hooks
   rev: v1.5.1
