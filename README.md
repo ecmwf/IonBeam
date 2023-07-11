@@ -4,6 +4,8 @@
 
 This is a prototype of infrastructure for ingesting IOT observations into the data ECMWF ecosystem.
 
+![A block diagram of different components feeding into one another.](docs/_static/block_diagram.png)
+
 ## Documentation
 
 The documentation will be available at on readthedocs.io once this repo is made public. For now you can build it with sphinx.
