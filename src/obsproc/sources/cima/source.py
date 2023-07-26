@@ -31,6 +31,7 @@ class CIMASource(Source):
     end_date: str
     frequency: str
     static_metadata_columns: List[InputColumn]
+    source: str
     finish_after: int | None = None
 
     def __str__(self):
@@ -81,13 +82,11 @@ class CIMASource(Source):
                     logger.debug(f"Yielding meteotracker CSV file with columns {data.columns}")
 
                 yield FileMessage(
-                    id=filename,
-                    location=path,
                     metadata=MetaData(
                         source="cima",
                         observation_variable=None,  # don't know this yet
                         time_slice=None,  # don't know this yet
-                        raw_data_location=path,
+                        filepath=path,
                     ),
                 )
                 emitted_messages += 1

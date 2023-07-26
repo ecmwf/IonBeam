@@ -166,7 +166,7 @@ class MeteoTracker_API:
         with open(credentials_file, "r") as f:
             parsed_yaml = yaml.safe_load(f)
             secrets_yaml_headers = parsed_yaml["headers"]
-            credentials = Credentials(**parsed_yaml["MeteoTracker_API"])
+            self.credentials = Credentials(**parsed_yaml["MeteoTracker_API"])
 
         # let oauth-requests handle all the Open-ID/OAuth2 authentication stuff
         self.oauth = requests.Session()
@@ -174,10 +174,12 @@ class MeteoTracker_API:
         # OAuth2Session is a subclass of requests.Session so see that documentation for generic usage
         # Update the headers for all our requests so that
         self.oauth.headers.update(secrets_yaml_headers)
+        self.token = None
 
+    def auth(self):
         self.logger.info("Fetching the token...")
         resp = self.oauth.post(
-            self.endpoints.token_endpoint, json=dict(email=credentials.email, password=credentials.password)
+            self.endpoints.token_endpoint, json=dict(email=self.credentials.email, password=self.credentials.password)
         )
 
         self.token = Token(resp.json()["accessToken"], resp.json()["refreshToken"])
@@ -185,6 +187,14 @@ class MeteoTracker_API:
 
     def get(self, *args, **kwargs) -> requests.Response:
         "Wrap the get command of the underlying oauth object"
+        if not self.token:
+            for i in range(3):
+                try:
+                    self.auth()
+                except KeyError:
+                    pass
+            if not self.token:
+                raise ValueError("Could not authenticate MeteoTracker after 3 tries")
         r = self.oauth.get(*args, **kwargs)
         try:
             r.json()

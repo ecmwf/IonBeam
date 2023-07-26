@@ -27,6 +27,7 @@ from ..sources.multi_file import MultiFileSource
 from ..sources.cima import CIMASource
 from ..sources.meteotracker import MeteoTrackerSource, MeteoTrackerOfflineSource
 from ..sources.watch_directory import WatchDirectorySource
+from ..sources.sensor_community import SensorCommunitySource
 
 from ..parsers import CSVParser
 
@@ -45,7 +46,14 @@ from .bases import CanonicalVariable
 # These types have to be defined as unions rather using the fact the all inherit
 # from the same base class because the config parse expects unions of concrete classes
 # Python does have a __subclasses__ attribute so in principle one could make this work
-Source = CIMASource | MultiFileSource | WatchDirectorySource | MeteoTrackerSource | MeteoTrackerOfflineSource
+Source = (
+    CIMASource
+    | MultiFileSource
+    | WatchDirectorySource
+    | MeteoTrackerSource
+    | MeteoTrackerOfflineSource
+    | SensorCommunitySource
+)
 Parser = CSVParser
 Aggregator = TimeAggregator
 Encoder = ODCEncoder | CSVEncoder | DummyEncoder
