@@ -112,4 +112,4 @@ if __name__ == "__main__":
     else:
         from obsproc.core.multiprocess_pipeline import mulitprocess_pipeline
 
-        mulitprocess_pipeline(config, pipeline, parallel_workers=args.parallel_workers)
+        mulitprocess_pipeline(config, pipeline)

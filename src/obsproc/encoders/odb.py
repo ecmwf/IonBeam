@@ -12,7 +12,7 @@ import dataclasses
 from typing import Literal, List, Dict
 from pathlib import Path
 
-from ..core.bases import TabularMessage, FinishMessage, FileMessage
+from ..core.bases import TabularMessage, FinishMessage
 from .bases import Encoder
 
 import pandas as pd
@@ -27,7 +27,6 @@ from dataclasses import field
 #     import pyodc as odc
 
 import pyodc as odc
-from dataclasses import replace
 
 import logging
 
@@ -50,6 +49,8 @@ dtype_lookup = {
 
 def source(msg: TabularMessage) -> pd.Series:
     "populates source@hdr"
+    return pd.Series([msg.metadata.source for _ in range(len(msg.data))])
+
     mapping = {
         "genova": "GENOALL",
         "jerusalem": "TAULL",
@@ -93,7 +94,8 @@ def altitude(msg: TabularMessage) -> pd.Series:
         p = msg.data.air_pressure_near_surface
         return 44330 * (1 - (p / 102300.15) ** (1 / 5.255))
     else:
-        raise ValueError(f"{msg} hsa neither pressure nor altitude data")
+        # raise ValueError(f"{msg} hsa neither pressure nor altitude data")
+        return pd.Series([None for a in range(len(msg.data))])
 
 
 def obsvalue(msg: TabularMessage) -> pd.Series:
@@ -109,7 +111,7 @@ def station_id(msg: TabularMessage) -> pd.Series:
         strings = msg.data["track_id"]
 
     def f(string):
-        return hashlib.sha256(string.encode()).hexdigest()[:8]
+        return hashlib.sha256(str(string).encode()).hexdigest()[:8]
 
     return strings.apply(f)
 
@@ -241,7 +243,7 @@ class ODCEncoder(Encoder):
             additional_metadata.update(msg.metadata.unstructured)
 
         if self.one_file_per_granule:
-            f = "data/outputs/{source}/odb/{observation_variable}/meteotracker_{date}_{time:04d}.odb"
+            f = "data/outputs/{source}/odb/{observation_variable}/{date}_{time:04d}.odb"
             kwargs = dict(
                 observation_variable=msg.metadata.observation_variable,
                 source=msg.metadata.source,
@@ -273,8 +275,8 @@ class ODCEncoder(Encoder):
                 # Check that the target ODC dtype is compatible with the current representation
                 # i.e we don't want to try to coerce strings to DataType.REAL
 
-                codec = select_codec(col.name, data, col.dtype, None)
-                logger.debug(f"Chose codec {codec} for {col.name}, {data.dtype=}, {col.dtype=}")
+                select_codec(col.name, data, col.dtype, None)
+                # logger.debug(f"Chose codec {codec} for {col.name}, {data.dtype=}, {col.dtype=}")
             except AssertionError:
                 raise ValueError(
                     f"""
@@ -293,9 +295,9 @@ class ODCEncoder(Encoder):
                 types={col.name: col.dtype for col in self.MARS_keys if col.dtype is not None},
             )
 
-        yield FileMessage(
-            metadata=replace(msg.metadata, filepath=self.output_file),
-        )
+        # yield FileMessage(
+        #     metadata=replace(msg.metadata, filepath=self.output_file),
+        # )
 
 
 encoder = ODCEncoder
