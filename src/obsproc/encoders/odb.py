@@ -12,7 +12,7 @@ import dataclasses
 from typing import Literal, List, Dict
 from pathlib import Path
 
-from ..core.bases import TabularMessage, FinishMessage
+from ..core.bases import TabularMessage, FinishMessage, FileMessage
 from .bases import Encoder
 
 import pandas as pd
@@ -295,9 +295,9 @@ class ODCEncoder(Encoder):
                 types={col.name: col.dtype for col in self.MARS_keys if col.dtype is not None},
             )
 
-        # yield FileMessage(
-        #     metadata=replace(msg.metadata, filepath=self.output_file),
-        # )
+        yield FileMessage(
+            metadata=dataclasses.replace(msg.metadata, filepath=self.output_file),
+        )
 
 
 encoder = ODCEncoder

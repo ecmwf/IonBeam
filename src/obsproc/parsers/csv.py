@@ -87,11 +87,15 @@ class CSVParser(Parser):
             return
 
         # Ensure column names match what we would like
-        assert rawdata.metadata.filepath is not None
-        df = pd.read_csv(
-            rawdata.metadata.filepath,
-            sep=self.separator,
-        )
+        if isinstance(rawdata, FileMessage):
+            assert rawdata.metadata.filepath
+            df = pd.read_csv(
+                rawdata.metadata.filepath,
+                sep=self.separator,
+            )
+        else:
+            df = rawdata.data
+
         df = self.format_dataframe(df)
 
         # Split the data into data frames for each of the value types

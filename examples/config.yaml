@@ -28,6 +28,7 @@ pipeline:
 
 sources:
   - name: MeteoTrackerOfflineSource #Can use either MeteoTrackerOfflineSource or MeteoTrackerSource
+    source: MeteoTracker
     cache_directory: data/inputs/meteotracker
     secrets_file: secrets.yaml
     start_date: "2022-05-25"
@@ -39,17 +40,18 @@ sources:
       - name: offset_tz
 
 
-  # - name: CIMASource
-  #   cache_directory: data/inputs/cima
-  #   secrets_file: secrets.yaml
-  #   start_date: "2023-05-22"
-  #   end_date: "2023-05-24"
-  #   frequency: 3D # 3 days is the max API request
-  #   static_metadata_columns:
-  #     - name: station_id
-  #       key: id
-  #     - name: lat
-  #     - name: lon
+  - name: CIMASource
+    source: CIMA
+    cache_directory: data/inputs/cima
+    secrets_file: secrets.yaml
+    start_date: "2023-05-22"
+    end_date: "2023-05-24"
+    frequency: 3D # 3 days is the max API request
+    static_metadata_columns:
+      - name: station_id
+        key: id
+      - name: lat
+      - name: lon
 
   - name: MultiFileSource
     source: sensor.community

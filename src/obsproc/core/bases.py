@@ -65,7 +65,7 @@ class TabularMessage(DataMessage):
     data: pandas.DataFrame
 
 
-MessageStream = Iterable[DataMessage]
+MessageStream = Iterable[Message]
 GenerateFunction = Callable[[], Iterable[Message]]
 ProcessFunction = Callable[[Message], Iterable[Message]]
 
