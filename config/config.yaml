@@ -160,7 +160,7 @@ parsers:
         unit: ppm
       - name: PM1.0
         key: m1
-        unit: "μg/m³"
+        unit: "μg/m3"
       - name: mass_concentration_PM1.0
         key: m1
         unit: "μg/m3"
