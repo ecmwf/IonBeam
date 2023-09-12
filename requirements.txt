@@ -1,0 +1,16 @@
+    pandas
+    numexpr
+    pyodc>=1.3
+    requests
+    oauthlib
+    requests-oauthlib
+    pyyaml
+    munch
+    Levenshtein
+    tqdm
+    argparse
+    watchdog
+    shapely
+    pyyaml-include
+    bs4 # For sensor.community
+    lxml
