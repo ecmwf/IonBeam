@@ -27,8 +27,11 @@ pipeline:
   - encoders
 
 sources:
-  - name: MeteoTrackerOfflineSource #Can use either MeteoTrackerOfflineSource or MeteoTrackerSource
-    source: MeteoTracker
+  - class: MeteoTrackerOfflineSource #Can use either MeteoTrackerOfflineSource or MeteoTrackerSource
+    metadata:
+        state: raw
+        source: meteotracker
+    source: meteotracker
     cache_directory: data/inputs/meteotracker
     secrets_file: secrets.yaml
     start_date: "2022-05-25"
@@ -40,32 +43,37 @@ sources:
       - name: offset_tz
 
 
-  - name: CIMASource
-    source: CIMA
-    cache_directory: data/inputs/cima
-    secrets_file: secrets.yaml
-    start_date: "2023-05-22"
-    end_date: "2023-05-24"
-    frequency: 3D # 3 days is the max API request
-    static_metadata_columns:
-      - name: station_id
-        key: id
-      - name: lat
-      - name: lon
+  # - class: CIMASource
+    # metadata:
+    #   - state: raw
+    #   - source: cima
+  #   cache_directory: data/inputs/cima
+  #   secrets_file: secrets.yaml
+  #   start_date: "2023-05-22"
+  #   end_date: "2023-05-24"
+  #   frequency: 3D # 3 days is the max API request
+  #   static_metadata_columns:
+  #     - name: station_id
+  #       key: id
+  #     - name: lat
+  #     - name: lon
 
-  - name: MultiFileSource
-    source: sensor.community
+  - class: MultiFileSource
+    metadata:
+        state: raw
+        source: sensor.community
     paths:
       - "**/*.csv"
     basepath: data/inputs/sensor_community
 
 encoders:
-  - name: ODCEncoder
+  - class: ODCEncoder
     match:
       - source: .*
+        state: "time_aggregated"
     output: data/outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb
     MARS_keys: !include MARS_keys.yaml
-  # - name: CSVEncoder
+  # - class: CSVEncoder
   #   match:
   #   - source: .*
   #   output: data/outputs/{source}/csv/{observation_variable}/{observation_variable}_{time_slice.start_time}.csv
@@ -73,25 +81,29 @@ encoders:
 
 
 aggregators:
-  - name: TimeAggregator
+  - class: TimeAggregator
     match:
     - source: meteotracker
-    granularity: 1H
-  - name: TimeAggregator
+      state: parsed
+    # granularity: 1H
+  - class: TimeAggregator
     match:
     - source: cima
+      state: parsed
     granularity: 1H
-  - name: TimeAggregator
+  - class: TimeAggregator
     match:
     - source: sensor.community
+      state: parsed
     granularity: 1H
     emit_after_hours: 48
 
 
 parsers:
-  - name: CSVParser
+  - class: CSVParser
     match:
-      - source: meteotracker
+      - state: raw
+        source: meteotracker
 
     identifying_columns:
       - name: time
@@ -186,9 +198,10 @@ parsers:
       - name: observation_id
         key: _id
 
-  - name: CSVParser
+  - class: CSVParser
     match:
-    - filepath: CIMA_[^.]+\.csv
+    - state: raw
+      source: cima
 
     identifying_columns:
       - name: time
@@ -246,9 +259,10 @@ parsers:
         key: "SIGNAL_STRENGTH [CSQ]"
         unit: "CSQ"
 
-  - name: CSVParser
+  - class: CSVParser
     match:
-    - source: sensor.community
+      - state: raw
+        source: sensor.community
     separator: ";"
     custom_nans:
       - unknown
