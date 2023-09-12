@@ -12,8 +12,7 @@ import dataclasses
 from typing import Literal, List, Dict
 from pathlib import Path
 
-from ..core.bases import TabularMessage, FinishMessage, FileMessage
-from .bases import Encoder
+from ..core.bases import TabularMessage, FinishMessage, FileMessage, Encoder
 
 import pandas as pd
 
@@ -136,7 +135,9 @@ class MARS_Key:
     dtype: ODC_Dtype
 
     # specify how this column will be filled
-    fill_method: Literal["constant", "from_config", "from_metadata", "from_data", "function"]
+    fill_method: Literal[
+        "constant", "from_config", "from_metadata", "from_data", "function"
+    ]
     value: str | None = None
     key: str | None = None
 
@@ -151,7 +152,9 @@ class MARS_Key:
         elif self.fill_method == "constant":
             assert self.value is not None
         elif self.key is None:
-            raise ValueError(f"{self.name} method: {self.fill_method} must have an associated key")
+            raise ValueError(
+                f"{self.name} method: {self.fill_method} must have an associated key"
+            )
 
         self.dtype = getattr(odc.DataType, self.dtype)
 
@@ -165,7 +168,9 @@ class MARS_Key:
             case "from_config":
                 obsvar = msg.metadata.observation_variable
                 if obsvar not in self.by_observation_variable:
-                    logger.warning(f"{self.name} doesn't have a value for {obsvar}. [{self.by_observation_variable}]")
+                    logger.warning(
+                        f"{self.name} doesn't have a value for {obsvar}. [{self.by_observation_variable}]"
+                    )
                     return -1
                 val = self.by_observation_variable[obsvar]
             case "from_metadata":
@@ -190,7 +195,6 @@ class ODCEncoder(Encoder):
     one_file_per_granule: bool = True
     seconds: bool = True
     minutes: bool = True
-    name: Literal["ODCEncoder"] = "ODCEncoder"
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.match})"
@@ -238,7 +242,9 @@ class ODCEncoder(Encoder):
                     additional_metadata[key] = val
 
             if msg.metadata.time_slice is not None:
-                additional_metadata["timeslice"] = str(msg.metadata.time_slice.start_time.isoformat())
+                additional_metadata["timeslice"] = str(
+                    msg.metadata.time_slice.start_time.isoformat()
+                )
 
             additional_metadata.update(msg.metadata.unstructured)
 
@@ -287,12 +293,18 @@ class ODCEncoder(Encoder):
                 """
                 )
 
-        with open(self.output_file, "wb" if self.one_file_per_granule else "ab") as fout:
+        with open(
+            self.output_file, "wb" if self.one_file_per_granule else "ab"
+        ) as fout:
             odc.encode_odb(
                 output_df,
                 fout,
                 properties=additional_metadata,
-                types={col.name: col.dtype for col in self.MARS_keys if col.dtype is not None},
+                types={
+                    col.name: col.dtype
+                    for col in self.MARS_keys
+                    if col.dtype is not None
+                },
             )
 
         yield FileMessage(

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import dataclasses
 
-from ...core.bases import Source, FileMessage, MetaData, InputColumn
+from ...core.bases import FileMessage, Source, MetaData, InputColumn
 
 from .cima import CIMA_API
 
@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class CIMASource(Source):
-    name: Literal["CIMASource"]
     secrets_file: str
     cache_directory: str
     start_date: str
@@ -39,16 +38,22 @@ class CIMASource(Source):
         return f"{cls}({self.start_date} - {self.end_date})"
 
     def __post_init__(self):
-        logger.debug(f"Initialialised CIMA source with {self.start_date=}, {self.end_date=}, {self.finish_after=}")
+        logger.debug(
+            f"Initialialised CIMA source with {self.start_date=}, {self.end_date=}, {self.finish_after=}"
+        )
 
         # TODO: relative paths in the config should be
         # be handled centrally and consistently, this is a hack
         self.secrets_file = self.resolve_path(self.secrets_file)
-        self.api = CIMA_API(self.secrets_file, cache_file=Path(self.cache_directory) / "cache.pickle")
 
     def generate(self):
         # Do  API requests in chunks larger than the data granularity, upto 3 days
-        dates = pd.date_range(start=self.start_date, end=self.end_date, freq=self.frequency)
+        self.api = CIMA_API(
+            self.secrets_file, cache_file=Path(self.cache_directory) / "cache.pickle"
+        )
+        dates = pd.date_range(
+            start=self.start_date, end=self.end_date, freq=self.frequency
+        )
         if dates[-1] != self.end_date:
             dates = pd.DatetimeIndex(
                 dates.union(
@@ -79,18 +84,20 @@ class CIMASource(Source):
                             data[column.name] = getattr(station, column.key)
 
                     data.to_csv(path, index=True, index_label="time")
-                    logger.debug(f"Yielding meteotracker CSV file with columns {data.columns}")
+                    logger.debug(
+                        f"Yielding meteotracker CSV file with columns {data.columns}"
+                    )
 
                 yield FileMessage(
-                    metadata=MetaData(
-                        source="cima",
-                        observation_variable=None,  # don't know this yet
-                        time_slice=None,  # don't know this yet
+                    metadata=self.generate_metadata(
                         filepath=path,
                     ),
                 )
                 emitted_messages += 1
-                if self.finish_after is not None and emitted_messages >= self.finish_after:
+                if (
+                    self.finish_after is not None
+                    and emitted_messages >= self.finish_after
+                ):
                     return
 
 

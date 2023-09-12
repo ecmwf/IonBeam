@@ -13,11 +13,13 @@ from typing import Iterable, Callable, List
 import re
 import pandas
 from pathlib import Path
+import os
 
 
 @dataclasses.dataclass
 class MetaData:
-    source: str
+    state: str | None = None
+    source: None | str = None
     observation_variable: None | str = None
     time_slice: pandas.Period | None = None
     filepath: Path | None = None
@@ -47,7 +49,11 @@ class DataMessage(Message):
     def __str__(self):
         class_name = self.__class__.__name__
         arg_string = []
-        for name, key in {"src": "source", "obs": "observation_variable", "timeslc": "time_slice"}.items():
+        for name, key in {
+            "src": "source",
+            "obs": "observation_variable",
+            "timeslc": "time_slice",
+        }.items():
             val = getattr(self.metadata, key, None)
             if val is not None:
                 arg_string.append(f"{name} = {val}")
@@ -74,23 +80,45 @@ ProcessFunction = Callable[[Message], Iterable[Message]]
 class Action:
     "The base class for actions, from which Source and Processor inherit"
 
+    # kw_only is necessary so that classes that inherit from this one can have positional fields
+    metadata: MetaData = dataclasses.field(default_factory=MetaData, kw_only=True)
+
     def resolve_path(self, path: str | Path) -> Path:
-        base = Path(__file__).parents[3]
+        base = os.environ.get("IOT_INGESTER_BASE_PATH") or Path(__file__).parents[3]
         path = Path(path)
         if not path.is_absolute():
             path = base / path
         return path
 
+    def generate_metadata(self, message: DataMessage | None = None, **explicit_keys):
+        "Defines the semantics for combining metadata from multiple sources"
+
+        def filter_none(d) -> dict:
+            if dataclasses.is_dataclass(d):
+                d = dataclasses.asdict(d)
+            return {k: v for k, v in d.items() if v is not None}
+
+        message_keys = filter_none(message.metadata) if message else {}
+        action_keys = filter_none(self.metadata)
+
+        # sources to the right override keys from earlier sources
+        keys = message_keys | action_keys | explicit_keys
+        return MetaData(**keys)
+
 
 @dataclasses.dataclass
 class Source(Action):
-    _generator = None
+    "An Action which only outputs messages."
+
+    def __post_init__(self):
+        # Set the dafault value of parsed but let it be overridden
+        self.metadata = dataclasses.replace(self.metadata, state="raw")
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        if self._generator is None:
+        if not hasattr(self, "_generator"):
             self._generator = iter(self.generate())
         assert self._generator is not None
         return next(self._generator)
@@ -107,6 +135,8 @@ class Match:
     Match fields may be strings or regex.
     """
 
+    state: str | None = None
+    "The state of the message"
     filepath: str | None = None
     "The filepath to the data"
     source: str | None = None
@@ -140,6 +170,7 @@ class Match:
 
 @dataclasses.dataclass
 class Processor(Action):
+    "An Action which accepts and returns messages"
     match: List[Match]
 
     def matches(self, message: Message) -> bool:
@@ -152,12 +183,38 @@ class Processor(Action):
         raise NotImplementedError
 
 
+@dataclasses.dataclass
 class Parser(Processor):
-    pass
+    """
+    An action which takes raw input messages and outputs parsed ones.
+    Changes message.metadata.state from raw to parsed.
+
+    """
+
+    def __post_init__(self):
+        # Set the dafault value of parsed but let it be overridden
+        self.metadata = dataclasses.replace(self.metadata, state="parsed")
 
 
 class Aggregator(Processor):
     pass
+
+
+@dataclasses.dataclass
+class EncodedMessage(TabularMessage):
+    format: str
+
+    def __str__(self):
+        return f"EncodedMessage(format={self.format})"
+
+
+@dataclasses.dataclass
+class Encoder(Processor):
+    def encode(self, parsed_data: TabularMessage) -> Iterable[EncodedMessage]:
+        raise NotImplementedError("Implement encode() in derived class")
+
+    def process(self, parsed_data: TabularMessage) -> Iterable[EncodedMessage]:
+        return self.encode(parsed_data)
 
 
 # Config Classes

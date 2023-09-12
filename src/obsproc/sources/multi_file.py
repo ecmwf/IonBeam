@@ -20,11 +20,9 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class MultiFileSource(Source):
-    source: str
     paths: List[str]
     basepath: str = "."
     finish_after: int | None = None
-    name: Literal["MultiFileSource"] = "MultiFileSource"
 
     def __post_init__(self):
         # can't make self.basepath type Path because dataclass wizard doesn't support loading in Path objects (yet)
@@ -36,7 +34,9 @@ class MultiFileSource(Source):
             pattern = Path(pattern)
 
             if pattern.is_absolute():
-                raise ValueError("Absolute paths patterns are not supported, use basepath.")
+                raise ValueError(
+                    "Absolute paths patterns are not supported, use basepath."
+                )
 
             # make the pattern absolute so that we can check if it exists as a file or folder
             pattern = self.basepath / pattern
@@ -54,19 +54,21 @@ class MultiFileSource(Source):
             paths = (p for p in paths if p.is_file() and not p.name.startswith("."))
 
             if not paths:
-                logger.warning(f"Specified path pattern '{pattern}' does not exist. Skipping.")
+                logger.warning(
+                    f"Specified path pattern '{pattern}' does not exist. Skipping."
+                )
 
             for path in paths:
                 yield FileMessage(
-                    metadata=MetaData(
-                        source=self.source,
-                        observation_variable=None,  # don't know this yet
-                        time_slice=None,  # don't know this yet
+                    metadata=self.generate_metadata(
                         filepath=path,
                     ),
                 )
                 emitted_messages += 1
-                if self.finish_after is not None and emitted_messages >= self.finish_after:
+                if (
+                    self.finish_after is not None
+                    and emitted_messages >= self.finish_after
+                ):
                     return
 
 

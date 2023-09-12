@@ -71,7 +71,6 @@ class TimeSliceBucket:
                 source=source,
                 observation_variable=observation,
                 time_slice=self.period,
-                filepath=None,
             ),
         )
         return message
@@ -83,7 +82,9 @@ class BucketContainer:
     source: str
     observation_variable: str
     granularity: str = "1H"
-    buckets: Dict[pd.Period, TimeSliceBucket] = field(default_factory=defaultdict, init=False)
+    buckets: Dict[pd.Period, TimeSliceBucket] = field(
+        default_factory=defaultdict, init=False
+    )
 
     def add_message(self, msg: TabularMessage) -> None:
         "Take an incoming message, split it up into 1H granules and the store it internally"
@@ -100,12 +101,16 @@ class BucketContainer:
                 metadata=msg.metadata,
             )
             if period not in self.buckets:
-                self.buckets[period] = TimeSliceBucket(self.source, self.observation_variable, period)
+                self.buckets[period] = TimeSliceBucket(
+                    self.source, self.observation_variable, period
+                )
 
             self.buckets[period].add_message(message_slice)
 
     def emit(
-        self, age: timedelta = timedelta(hours=10), direction: Literal["oldest", "youngest"] = "oldest"
+        self,
+        age: timedelta = timedelta(hours=10),
+        direction: Literal["oldest", "youngest"] = "oldest",
     ) -> Iterable[TabularMessage]:
         """Look at the current data we have aggreated
         and emit the data that is old/young enough that we don't
@@ -155,15 +160,15 @@ class TimeAggregator(Aggregator):
     direction: Literal["oldest", "youngest"] = "youngest"
     emit_after_hours: int = 10
 
-    name: Literal["TimeAggregator"] = "TimeAggregator"
-
     def __repr__(self):
         return f"{self.__class__.__name__}({self.match}, {self.granularity}, {self.direction})"
 
     def __post_init__(self):
         self.bucket_containers: Dict[tuple, BucketContainer] = {}
 
-    def process(self, message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
+    def process(
+        self, message: TabularMessage | FinishMessage
+    ) -> Iterable[TabularMessage]:
         # A finish message here means there's nothing else coming down the line,
         # so just return everything we have
         if isinstance(message, FinishMessage):
@@ -191,7 +196,9 @@ class TimeAggregator(Aggregator):
         # the container handles splitting the message up
         if key not in self.bucket_containers:
             self.bucket_containers[key] = BucketContainer(
-                message.metadata.source, message.metadata.observation_variable, self.granularity
+                message.metadata.source,
+                message.metadata.observation_variable,
+                self.granularity,
             )
 
         bucket_container = self.bucket_containers[key]
@@ -200,5 +207,8 @@ class TimeAggregator(Aggregator):
         # tell the bucket to go through what it has and emit all data older/younger
         # than the current data by a certain amount.
         # Direction depends on the order in which we're ingesting data
-        for msg in bucket_container.emit(age=timedelta(hours=self.emit_after_hours), direction=self.direction):
+        for msg in bucket_container.emit(
+            age=timedelta(hours=self.emit_after_hours), direction=self.direction
+        ):
+            msg = dataclasses.replace(msg, metadata=self.generate_metadata(msg))
             yield msg

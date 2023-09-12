@@ -43,10 +43,11 @@ class SensorCommunitySource(Source):
     finish_after: int | None = None
     source: str = "Sensor.Community"
     base_url: str = "https://archive.sensor.community/"
-    name: Literal["SensorCommunitySource"] = "SensorCommunitySource"
 
     def __post_init__(self):
-        logger.debug(f"Initialialised SensorCommunity source with {self.start_date=}, {self.end_date=}")
+        logger.debug(
+            f"Initialialised SensorCommunity source with {self.start_date=}, {self.end_date=}"
+        )
         self.cache_file = self.resolve_path(self.cache_file)
         self.cache_directory = self.resolve_path(self.cache_directory)
 
@@ -77,7 +78,10 @@ class SensorCommunitySource(Source):
                         pickle.dump((url, html_cache[url]), f)
                     return html_cache[url]
                 except RequestException:
-                    print(f"Connection failure {i}, backing off for {2**i} seconds", end="\r")
+                    print(
+                        f"Connection failure {i}, backing off for {2**i} seconds",
+                        end="\r",
+                    )
                     time.sleep(2**i)
         return html_cache[url]
 
@@ -85,7 +89,10 @@ class SensorCommunitySource(Source):
         "Given a url for a particular year, get all the month folders"
         soup = BeautifulSoup(self.cached_get_text(url), "lxml")
         links = soup.find_all("a", dict(href=re.compile(r"^\d\d\d\d-\d\d-\d\d/$")))
-        return [month_page(url=url + m["href"], dt=date.fromisoformat(m["href"][:-1])) for m in links]
+        return [
+            month_page(url=url + m["href"], dt=date.fromisoformat(m["href"][:-1]))
+            for m in links
+        ]
 
     def get_months(self):
         "Get the data and url for every month for which sensor.community data exists"
@@ -117,8 +124,15 @@ class SensorCommunitySource(Source):
                 url = (
                     month.url + link["href"]
                 )  # e.g: https://archive.sensor.community/2023-06-19/2023-06-19_bme280_sensor_113.csv
-                url_path = Path(urlparse(url).path)  # "/2023-06-19/2023-06-19_bme280_sensor_113.csv"
-                filepath = Path(self.cache_directory) / f"{month.dt.year:04}" / month.dt.isoformat() / url_path.name
+                url_path = Path(
+                    urlparse(url).path
+                )  # "/2023-06-19/2023-06-19_bme280_sensor_113.csv"
+                filepath = (
+                    Path(self.cache_directory)
+                    / f"{month.dt.year:04}"
+                    / month.dt.isoformat()
+                    / url_path.name
+                )
 
                 if not filepath.exists():
                     logger.debug(f"Sensor.Community: Downloading {filepath}")
@@ -129,13 +143,13 @@ class SensorCommunitySource(Source):
                     time.sleep(0.1)
 
                 yield FileMessage(
-                    metadata=MetaData(
-                        source=self.source,
-                        observation_variable=None,  # don't know this yet
-                        time_slice=None,  # don't know this yet
+                    metadata=self.generate_metadata(
                         filepath=filepath,
                     ),
                 )
                 emitted_messages += 1
-                if self.finish_after is not None and emitted_messages >= self.finish_after:
+                if (
+                    self.finish_after is not None
+                    and emitted_messages >= self.finish_after
+                ):
                     return

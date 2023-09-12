@@ -32,7 +32,6 @@ class WatchDirectorySource(PatternMatchingEventHandler, Source):
     """
 
     paths: List[str]
-    name: Literal["WatchDirectorySource"] = "WatchDirectorySource"
     patterns: str | List[str] | None = None
     include_dirname: bool = False
     ignore_patterns: List[str] | None = None

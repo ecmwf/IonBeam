@@ -14,7 +14,14 @@ import pandas as pd
 
 import dataclasses
 
-from ..core.bases import FileMessage, TabularMessage, MetaData, FinishMessage, Parser, InputColumn
+from ..core.bases import (
+    Parser,
+    FileMessage,
+    TabularMessage,
+    MetaData,
+    FinishMessage,
+    InputColumn,
+)
 
 from ..core.converters import unit_conversions
 
@@ -34,21 +41,24 @@ class CSVParser(Parser):
     separator: str = ","
     custom_nans: List[str] | None = None
 
-    name: Literal["CSVParser"] = "CSVParser"
-
     def __str__(self):
         return f"{self.__class__.__name__}({self.match})"
 
     def __post_init__(self):
-        self.all_columns = self.value_columns + self.metadata_columns + self.identifying_columns
+        self.all_columns = (
+            self.value_columns + self.metadata_columns + self.identifying_columns
+        )
         self.fixed_columns = self.identifying_columns + self.metadata_columns
         self.columns_mapping = {c.key: c.name for c in self.all_columns}
+        super().__post_init__()
 
     def format_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         extra_keys = {k for k in df.columns if k not in self.columns_mapping}
         if extra_keys:
-            logger.warning(f"Data keys [{','.join(extra_keys)}] do not exist in the config!")
+            logger.warning(
+                f"Data keys [{','.join(extra_keys)}] do not exist in the config!"
+            )
 
         df.rename(columns=self.columns_mapping, inplace=True)
 
@@ -57,19 +67,28 @@ class CSVParser(Parser):
         for col in self.all_columns:
             if col.name in df and col.canonical_variable.dtype is not None:
                 # convert any custom nan values to the string "NaN"
-                if self.custom_nans is not None and col.canonical_variable.dtype.startswith("float"):
+                if (
+                    self.custom_nans is not None
+                    and col.canonical_variable.dtype.startswith("float")
+                ):
                     for nan in self.custom_nans:
                         df[col.name].replace(nan, "NaN", inplace=True)
 
                 try:
-                    df[col.name] = df[col.name].astype(col.canonical_variable.dtype, copy=False)
+                    df[col.name] = df[col.name].astype(
+                        col.canonical_variable.dtype, copy=False
+                    )
                 except ValueError as e:
-                    raise ValueError(f"{col.name} conversion to {col.canonical_variable.dtype} failed with error {e}")
+                    raise ValueError(
+                        f"{col.name} conversion to {col.canonical_variable.dtype} failed with error {e}"
+                    )
 
         # Do unit conversions
         for col in self.all_columns:
             if col.name in df and col.unit != col.canonical_variable.unit:
-                converter = unit_conversions[f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}"]
+                converter = unit_conversions[
+                    f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}"
+                ]
                 df[col.name] = df[col.name].apply(converter)
 
         return df
@@ -101,14 +120,15 @@ class CSVParser(Parser):
         # Split the data into data frames for each of the value types
         for variable_name, df in self.split_columns(df):
             assert isinstance(variable_name, str)
+
+            metadata = self.generate_metadata(
+                message=rawdata,
+                observation_variable=variable_name,
+            )
+
             yield TabularMessage(
                 data=df,
-                metadata=MetaData(
-                    source=rawdata.metadata.source,
-                    observation_variable=variable_name,
-                    time_slice=None,  # don't know this yet
-                    filepath=rawdata.metadata.filepath,
-                ),
+                metadata=metadata,
             )
 
 

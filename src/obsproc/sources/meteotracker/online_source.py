@@ -16,7 +16,7 @@ from pathlib import Path
 
 import dataclasses
 
-from ...core.bases import Source, FileMessage, MetaData, InputColumn
+from ...core.bases import FileMessage, Source, MetaData, InputColumn
 
 from .meteotracker import MeteoTracker_API, MeteoTracker_API_Error
 
@@ -38,7 +38,6 @@ meteoname_map = {
 
 @dataclasses.dataclass
 class MeteoTrackerSource(Source):
-    name: Literal["MeteoTrackerSource"]
     secrets_file: str
     cache_directory: str
     start_date: str
@@ -49,10 +48,12 @@ class MeteoTrackerSource(Source):
     bbox: List[float] | None = northern_italy
 
     def __post_init__(self):
-        logger.debug(f"Initialialised MeteoTracker source with {self.start_date=}, {self.end_date=}")
+        logger.debug(
+            f"Initialialised MeteoTracker source with {self.start_date=}, {self.end_date=}"
+        )
         self.secrets_file = self.resolve_path(self.secrets_file)
         self.cache_directory = self.resolve_path(self.cache_directory)
-        self.api = MeteoTracker_API(self.secrets_file)
+        super().__post_init__()
 
     def __str__(self):
         cls = self.__class__.__name__
@@ -67,6 +68,7 @@ class MeteoTrackerSource(Source):
 
     def generate(self) -> Iterable[FileMessage]:
         # Do  API requests in chunks larger than the data granularity, upto 3 days
+        self.api = MeteoTracker_API(self.secrets_file)
         dates = pd.date_range(start=self.start_date, end=self.end_date, freq="1D")
         date_ranges = list(zip(dates[:-1], dates[1:]))
         emitted_messages = 0
@@ -78,7 +80,9 @@ class MeteoTrackerSource(Source):
                 logger.warning(f"Query_sessions failed for timespan {timespan}\n{e}")
                 continue
 
-            logger.debug(f"Retrieved {len(sessions)} sessions for date {timespan[0].isoformat()}")
+            logger.debug(
+                f"Retrieved {len(sessions)} sessions for date {timespan[0].isoformat()}"
+            )
 
             for session in sessions:
                 filename = f"MeteoTracker_{session.id}.csv"
@@ -88,7 +92,9 @@ class MeteoTrackerSource(Source):
                     try:
                         data = self.api.get_session_data(session)
                     except MeteoTracker_API_Error as e:
-                        logger.warning(f"get_session_data failed for session {session.id}\n{e}")
+                        logger.warning(
+                            f"get_session_data failed for session {session.id}\n{e}"
+                        )
                         continue
 
                     for column in self.static_metadata_columns:
@@ -103,18 +109,20 @@ class MeteoTrackerSource(Source):
                 if not self.in_bounds(data):
                     continue
 
-                logger.debug(f"Yielding meteotracker CSV file with columns {data.columns}")
+                logger.debug(
+                    f"Yielding meteotracker CSV file with columns {data.columns}"
+                )
                 yield FileMessage(
-                    metadata=MetaData(
-                        source=self.source,
-                        observation_variable=None,  # don't know this yet
-                        time_slice=None,  # don't know this yet
+                    metadata=self.generate_metadata(
                         filepath=path,
                     ),
                 )
                 emitted_messages += 1
 
-                if self.finish_after is not None and emitted_messages >= self.finish_after:
+                if (
+                    self.finish_after is not None
+                    and emitted_messages >= self.finish_after
+                ):
                     return
 
 

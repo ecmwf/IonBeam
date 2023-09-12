@@ -11,14 +11,12 @@
 import dataclasses
 from typing import Literal
 
-from ..core.bases import Message
-from .bases import Encoder
+from ..core.bases import Message, Encoder
 
 
 @dataclasses.dataclass
 class DummyEncoder(Encoder):
     match: str = "all"
-    name: Literal["DummyEncoder"] = "DummyEncoder"
 
     def matches(self, message: Message) -> bool:
         return True

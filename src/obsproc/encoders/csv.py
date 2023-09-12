@@ -12,8 +12,7 @@ import dataclasses
 from typing import Literal, Iterable
 from dataclasses import asdict
 
-from ..core.bases import TabularMessage, FileMessage, FinishMessage
-from .bases import Encoder
+from ..core.bases import TabularMessage, FileMessage, FinishMessage, Encoder
 
 from pathlib import Path
 
@@ -24,8 +23,6 @@ class CSVEncoder(Encoder):
     seconds: bool = False
     minutes: bool = False
     one_file_per_granule: bool = True
-
-    name: Literal["CSVEncoder"] = "CSVEncoder"
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.match})"

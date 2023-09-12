@@ -55,7 +55,7 @@ def pipeline_connection(
         for dest in destinations:
             if isinstance(input_message, FinishMessage) or dest.matches(input_message):
                 atleast_one_match = True
-                logger.debug(f"Giving {input_message} to {dest.name}")
+                logger.debug(f"Giving {input_message} to {dest}")
                 for output_message in dest.process(input_message):
                     yield output_message
 
@@ -72,7 +72,9 @@ def connect_up(names: Iterable[str], pipeline):
 
     # Connect each step of the pipeline
     for dest_name, connection in zip(names[1:], pipeline[1:]):
-        incoming_datastream = pipeline_connection(dest_name, incoming_datastream, connection)
+        incoming_datastream = pipeline_connection(
+            dest_name, incoming_datastream, connection
+        )
 
     return incoming_datastream
 
