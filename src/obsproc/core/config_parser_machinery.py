@@ -112,6 +112,16 @@ def is_list(t):
 
 def determine_matching_dataclass(context, key, datacls, input_dict):
     "Check if we actaully want to use a subclass of datacls"
+    if not isinstance(input_dict, dict):
+        raise ConfigLineError(
+            context,
+            key,
+            datacls,
+            {},
+            f"Config yaml entry for section '{datacls.__name__}' invalid"
+            f"got {input_dict} but was expecting a dictionary entry",
+        )
+
     if TYPE_KEY in input_dict:
         subclasses = context.subclasses.get(datacls)
         cls_name = input_dict[TYPE_KEY]
@@ -119,13 +129,8 @@ def determine_matching_dataclass(context, key, datacls, input_dict):
         try:
             return subclasses[cls_name]
         except KeyError:
-            # Temporary hack to just fall back to base class
-            # print(f"Warning: Config yaml entry for section '{datacls.__name__}' invalid"
-            #     f" name: '{cls_name}' could not be found as a subclass of {datacls.__name__}"
-            #     f" known subclasses: {subclasses}")
-            return datacls
-
             raise ConfigLineError(
+                context,
                 key,
                 datacls,
                 input_dict,
