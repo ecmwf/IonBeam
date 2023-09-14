@@ -93,42 +93,49 @@ class CSVParser(Parser):
 
         return df
 
-    def split_columns(self, df: pd.DataFrame) -> Iterable[pd.DataFrame]:
+    def split_columns(self, df: pd.DataFrame):
         for value_col in self.value_columns:
             if value_col.name in df.columns and value_col.canonical_variable.output:
                 output_cols = self.fixed_columns + [
                     value_col,
                 ]
-                yield value_col.name, df[[c.name for c in output_cols]]
+                yield value_col, df[[c.name for c in output_cols]]
 
     def process(self, rawdata: FileMessage | FinishMessage) -> Iterable[TabularMessage]:
         if isinstance(rawdata, FinishMessage):
             return
 
         # Ensure column names match what we would like
-        if isinstance(rawdata, FileMessage):
+        if rawdata.metadata.filepath is not None:
             assert rawdata.metadata.filepath
             df = pd.read_csv(
                 rawdata.metadata.filepath,
                 sep=self.separator,
             )
-        else:
+        elif hasattr(rawdata, "data"):
             df = rawdata.data
+        else:
+            raise ValueError(
+                f"Inappropriate message type passed to CSVParser: {rawdata}"
+                " This can also happen if you hot reload the code in a notebook, try restarting the kernel."
+            )
 
         df = self.format_dataframe(df)
 
         # Split the data into data frames for each of the value types
-        for variable_name, df in self.split_columns(df):
-            assert isinstance(variable_name, str)
-
+        for variable_column, df in self.split_columns(df):
             metadata = self.generate_metadata(
                 message=rawdata,
-                observation_variable=variable_name,
+                observation_variable=variable_column.name,
+                filepath=None,
             )
 
             yield TabularMessage(
-                data=df,
                 metadata=metadata,
+                columns=[
+                    c.canonical_variable for c in self.fixed_columns + [variable_column]
+                ],
+                data=df,
             )
 
 

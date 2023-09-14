@@ -14,25 +14,31 @@ import re
 import pandas
 from pathlib import Path
 import os
+from .html_formatters import dataclass_to_html, message_to_html
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(unsafe_hash=True)
 class MetaData:
     state: str | None = None
     source: None | str = None
     observation_variable: None | str = None
     time_slice: pandas.Period | None = None
     filepath: Path | None = None
-    unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
+    # unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
 
     def __str__(self):
         return f"{self.__class__.__name__}(source = {self.source}, variable = {self.observation_variable})"
+
+    def _repr_html_(self):
+        return dataclass_to_html(self)
 
 
 @dataclasses.dataclass
 class Message:
     "Base Message Class from which FinishMessage and DataMessage inherit"
-    pass
+
+    def _repr_html_(self):
+        return message_to_html(self)
 
 
 @dataclasses.dataclass
@@ -50,6 +56,7 @@ class DataMessage(Message):
         class_name = self.__class__.__name__
         arg_string = []
         for name, key in {
+            "state": "state",
             "src": "source",
             "obs": "observation_variable",
             "timeslc": "time_slice",
@@ -69,6 +76,7 @@ class FileMessage(DataMessage):
 @dataclasses.dataclass
 class TabularMessage(DataMessage):
     data: pandas.DataFrame
+    columns: list = dataclasses.field(default_factory=list, kw_only=True)
 
 
 MessageStream = Iterable[Message]
@@ -85,6 +93,13 @@ class Action:
 
     def resolve_path(self, path: str | Path) -> Path:
         base = os.environ.get("IOT_INGESTER_BASE_PATH") or Path(__file__).parents[3]
+        path = Path(path)
+        if not path.is_absolute():
+            path = base / path
+        return path
+
+    def resolve_data_path(self, path: str | Path) -> Path:
+        base = os.environ.get("IOT_INGESTER_DATA_PATH") or Path(__file__).parents[3]
         path = Path(path)
         if not path.is_absolute():
             path = base / path
@@ -176,7 +191,8 @@ class Processor(Action):
     def matches(self, message: Message) -> bool:
         if isinstance(message, FinishMessage):
             return True
-        assert isinstance(message, DataMessage)
+        if not isinstance(message, DataMessage):
+            raise ValueError(f"Message has type {type(message)}!")
         return any(matcher.matches(message) for matcher in self.match)
 
     def process(self, msg: Message) -> Iterable[Message]:
@@ -216,6 +232,9 @@ class Encoder(Processor):
     def process(self, parsed_data: TabularMessage) -> Iterable[EncodedMessage]:
         return self.encode(parsed_data)
 
+    def __post_init__(self):
+        self.metadata = dataclasses.replace(self.metadata, state="encoded")
+
 
 # Config Classes
 @dataclasses.dataclass
@@ -238,6 +257,7 @@ class CanonicalVariable:
     name: str
     desc: str | None = None
     unit: str | None = None
+    CRS: str | None = None
     WMO: bool = False
     dtype: str | None = "float64"
     output: bool = False
