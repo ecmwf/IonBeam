@@ -205,6 +205,8 @@ class ODCEncoder(Encoder):
             self.output_file.parent.mkdir(exist_ok=True, parents=True)
             self.output_file.unlink(missing_ok=True)
 
+        super().__post_init__()
+
     def create_output_df(self, msg: TabularMessage) -> pd.DataFrame:
         output_data = {}
         for col in self.MARS_keys:
@@ -245,8 +247,6 @@ class ODCEncoder(Encoder):
                 additional_metadata["timeslice"] = str(
                     msg.metadata.time_slice.start_time.isoformat()
                 )
-
-            additional_metadata.update(msg.metadata.unstructured)
 
         if self.one_file_per_granule:
             f = "data/outputs/{source}/odb/{observation_variable}/{date}_{time:04d}.odb"
@@ -308,7 +308,7 @@ class ODCEncoder(Encoder):
             )
 
         yield FileMessage(
-            metadata=dataclasses.replace(msg.metadata, filepath=self.output_file),
+            metadata=self.generate_metadata(msg, filepath=self.output_file),
         )
 
 

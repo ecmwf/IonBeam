@@ -38,8 +38,8 @@ meteoname_map = {
 
 @dataclasses.dataclass
 class MeteoTrackerSource(Source):
-    secrets_file: str
-    cache_directory: str
+    secrets_file: Path
+    cache_directory: Path
     start_date: str
     end_date: str
     static_metadata_columns: List[InputColumn]
@@ -52,7 +52,7 @@ class MeteoTrackerSource(Source):
             f"Initialialised MeteoTracker source with {self.start_date=}, {self.end_date=}"
         )
         self.secrets_file = self.resolve_path(self.secrets_file)
-        self.cache_directory = self.resolve_path(self.cache_directory)
+        self.cache_directory = self.resolve_data_path(self.cache_directory)
         super().__post_init__()
 
     def __str__(self):

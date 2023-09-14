@@ -24,13 +24,12 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class CIMASource(Source):
-    secrets_file: str
-    cache_directory: str
+    secrets_file: Path
+    cache_directory: Path
     start_date: str
     end_date: str
     frequency: str
     static_metadata_columns: List[InputColumn]
-    source: str
     finish_after: int | None = None
 
     def __str__(self):
@@ -41,10 +40,8 @@ class CIMASource(Source):
         logger.debug(
             f"Initialialised CIMA source with {self.start_date=}, {self.end_date=}, {self.finish_after=}"
         )
-
-        # TODO: relative paths in the config should be
-        # be handled centrally and consistently, this is a hack
         self.secrets_file = self.resolve_path(self.secrets_file)
+        self.cache_directory = self.resolve_data_path(self.cache_directory)
 
     def generate(self):
         # Do  API requests in chunks larger than the data granularity, upto 3 days

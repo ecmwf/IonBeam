@@ -165,6 +165,8 @@ class TimeAggregator(Aggregator):
 
     def __post_init__(self):
         self.bucket_containers: Dict[tuple, BucketContainer] = {}
+        # Set the dafault value of parsed but let it be overridden
+        self.metadata = dataclasses.replace(self.metadata, state="time_aggregated")
 
     def process(
         self, message: TabularMessage | FinishMessage
@@ -174,6 +176,7 @@ class TimeAggregator(Aggregator):
         if isinstance(message, FinishMessage):
             for bucket_container in self.bucket_containers.values():
                 for msg in bucket_container.emit_all():
+                    msg = dataclasses.replace(msg, metadata=self.generate_metadata(msg))
                     yield msg
             return
 

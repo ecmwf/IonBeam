@@ -30,7 +30,8 @@ class MeteoTrackerOfflineSource(MeteoTrackerSource):
         logger.debug(
             f"Initialialised MeteoTrackerOfflineSource source with {self.start_date=}, {self.end_date=}"
         )
-        self.cache_directory = self.resolve_path(self.cache_directory)
+        self.cache_directory = self.resolve_data_path(self.cache_directory)
+        self.data_path = self.resolve_data_path(self.cache_directory)
         Source.__post_init__(self)
 
     def generate(self) -> Iterable[FileMessage]:
@@ -39,14 +40,7 @@ class MeteoTrackerOfflineSource(MeteoTrackerSource):
         list(zip(dates[:-1], dates[1:]))
         emitted_messages = 0
 
-        base = (
-            os.environ.get("IOT_INGESTER_DATA_PATH")
-            or (Path(__file__) / "../../../../../data").resolve()
-        )
-        data = Path(base) / "inputs/meteotracker/"
-
-        for path in data.iterdir():
-            print(path)
+        for path in self.data_path.iterdir():
             data = pd.read_csv(path)
             if self.in_bounds(data):
                 continue

@@ -21,12 +21,16 @@ logger = logging.getLogger(__name__)
 @dataclasses.dataclass
 class MultiFileSource(Source):
     paths: List[str]
-    basepath: str = "."
+    basepath: Path = Path(".")
     finish_after: int | None = None
 
     def __post_init__(self):
-        # can't make self.basepath type Path because dataclass wizard doesn't support loading in Path objects (yet)
-        self.basepath = self.resolve_path(self.basepath)
+        self.basepath = self.resolve_data_path(self.basepath)
+        logger.debug(f"{self.__class__.__name__}: resolved basepath to {self.basepath}")
+
+    def __str__(self):
+        cls = self.__class__.__name__
+        return f"{cls}({self.paths}, source = '{self.metadata.source}')"
 
     def generate(self):
         emitted_messages = 0
