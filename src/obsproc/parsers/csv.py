@@ -105,15 +105,15 @@ class CSVParser(Parser):
         if isinstance(rawdata, FinishMessage):
             return
 
-        # Ensure column names match what we would like
-        if rawdata.metadata.filepath is not None:
+        if hasattr(rawdata, "data"):
+            df = rawdata.data
+
+        elif rawdata.metadata.filepath is not None:
             assert rawdata.metadata.filepath
             df = pd.read_csv(
                 rawdata.metadata.filepath,
                 sep=self.separator,
             )
-        elif hasattr(rawdata, "data"):
-            df = rawdata.data
         else:
             raise ValueError(
                 f"Inappropriate message type passed to CSVParser: {rawdata}"
@@ -130,13 +130,15 @@ class CSVParser(Parser):
                 filepath=None,
             )
 
-            yield TabularMessage(
+            output_msg = TabularMessage(
                 metadata=metadata,
                 columns=[
                     c.canonical_variable for c in self.fixed_columns + [variable_column]
                 ],
                 data=df,
             )
+
+            yield self.tag_message(output_msg, rawdata)
 
 
 parser = CSVParser

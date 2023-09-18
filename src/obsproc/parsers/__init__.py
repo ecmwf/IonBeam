@@ -7,7 +7,6 @@
 # # granted to it by virtue of its status as an intergovernmental organisation nor
 # # does it submit to any jurisdiction.
 # #
-
 from pathlib import Path
 
 
@@ -15,6 +14,7 @@ from ..core.plugins import find_plugin
 from ..core.bases import Parser
 
 from .csv import CSVParser
+from .csv_file_chunker import CSVChunker
 
 __all__ = [
     "CSVParser",

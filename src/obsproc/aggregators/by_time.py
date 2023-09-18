@@ -9,7 +9,7 @@
 # #
 
 import dataclasses
-from typing import Literal, Iterable, List, Dict
+from typing import Literal, Iterable, List, Dict, Generator
 import logging
 from collections import defaultdict
 from dataclasses import field
@@ -20,6 +20,7 @@ import pandas as pd
 from datetime import timezone, timedelta
 
 from ..core.bases import Aggregator, MetaData, TabularMessage, FinishMessage
+from ..core.history import MessageInfo
 
 logger = logging.getLogger()
 
@@ -168,6 +169,20 @@ class TimeAggregator(Aggregator):
         # Set the dafault value of parsed but let it be overridden
         self.metadata = dataclasses.replace(self.metadata, state="time_aggregated")
 
+    def emit_message(self, msg, bucket):
+        msg = dataclasses.replace(msg, metadata=self.generate_metadata(msg))
+        msg = self.tag_message(
+            msg,
+            MessageInfo(
+                name="Multiple Messages",
+                metadata=MetaData(
+                    source=bucket.source,
+                    observation_variable=bucket.observation_variable,
+                ),
+            ),
+        )
+        return msg
+
     def process(
         self, message: TabularMessage | FinishMessage
     ) -> Iterable[TabularMessage]:
@@ -176,8 +191,8 @@ class TimeAggregator(Aggregator):
         if isinstance(message, FinishMessage):
             for bucket_container in self.bucket_containers.values():
                 for msg in bucket_container.emit_all():
-                    msg = dataclasses.replace(msg, metadata=self.generate_metadata(msg))
-                    yield msg
+                    yield self.emit_message(msg, bucket_container)
+
             return
 
         assert message.metadata.observation_variable is not None
@@ -213,5 +228,4 @@ class TimeAggregator(Aggregator):
         for msg in bucket_container.emit(
             age=timedelta(hours=self.emit_after_hours), direction=self.direction
         ):
-            msg = dataclasses.replace(msg, metadata=self.generate_metadata(msg))
-            yield msg
+            yield self.emit_message(msg, bucket_container)

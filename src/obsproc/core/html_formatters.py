@@ -1,5 +1,10 @@
 from dataclasses import fields
 import pandas as pd
+import string, random
+
+
+def random_id(n):
+    return "".join(random.choices(string.hexdigits, k=n))
 
 
 def dataclass_to_html(dc):
@@ -14,12 +19,13 @@ def dataclass_to_html(dc):
             if getattr(dc, field.name, None)
         ],
     )
-    html = df.to_html(
-        index=False,
-        header=False,
-        notebook=True,
-        render_links=True,
-    )
+    with pd.option_context("display.max_colwidth", 100):
+        html = df.to_html(
+            index=False,
+            header=False,
+            notebook=True,
+            render_links=True,
+        )
 
     return html
 
@@ -54,6 +60,39 @@ def column_metadata_to_html(columns):
         )
 
 
+def summarise_metadata(m):
+    return ", ".join(
+        str(v)
+        for k in ["source", "observation_variable", "time_slice", "encoded_format"]
+        if (v := getattr(m, k))
+    )
+
+
+def previous_action_info_to_html(action_info):
+    msg_name = action_info.message.name
+    msg_details = summarise_metadata(action_info.message.metadata)
+    return f"""
+        <li>
+            <details>
+            <summary>{msg_name}({msg_details}) → {action_info.action.name}</summary>
+                Previous Message
+                {dataclass_to_html(action_info.message)}
+                Action
+                {dataclass_to_html(action_info.action)}
+              
+            </details>
+        </li>
+    """
+
+
+def human_readable_bytes(n):
+    for x in ["Bytes", "KB", "MB", "GB", "TB"]:
+        if n < 1024.0:
+            break
+        n /= 1024.0
+    return f"{n:.0f} {x}"
+
+
 def make_section(title, contents, open=False):
     return f"""
             <details {'open' if open else ''}>
@@ -63,6 +102,11 @@ def make_section(title, contents, open=False):
 
 
 def message_to_html(message):
+    # Link the CSS and HTML using random ids so that if multiple
+    # elements are emitted on the same page they don't interfere with one another.
+    container_id = f"container-{random_id(15)}"
+    inner_container_id = f"inner-container-{random_id(15)}"
+
     sections = []
     if hasattr(message, "reason"):
         sections.append(make_section("Reason", message.reason, open=True))
@@ -80,28 +124,52 @@ def message_to_html(message):
             )
         )
 
+    if getattr(message, "history", []):
+        sections.append(
+            make_section(
+                "History",
+                "<ol>"
+                + "\n".join(previous_action_info_to_html(h) for h in message.history)
+                + "</ol>",
+                open=False,
+            )
+        )
+
     if hasattr(message, "data"):
         rows, columns = message.data.shape
-        title = f"Tabular Data ({rows} rows x {columns} columns)"
+        size = human_readable_bytes(message.data.memory_usage().sum())
+        title = f"Tabular Data ({rows} rows x {columns} columns) ({size})"
         sections.append(make_section(title, data_to_html(message.data)))
 
-    if getattr(message.metadata, "filepath", None) is not None:
+    if (
+        hasattr(message, "metadata")
+        and getattr(message.metadata, "filepath", None) is not None
+    ):
         try:
             with open(message.metadata.filepath, "r") as f:
                 data = f.read(500)
             if len(data) == 500:
                 data += "..."
-            sections.append(make_section("File Data", data))
+            size = human_readable_bytes(message.metadata.filepath.stat().st_size)
+            sections.append(make_section(f"File Data ({size})", data))
         except:
             pass
 
     newline = "\n"
+    details = (
+        f"({summarise_metadata(message.metadata)})"
+        if hasattr(message, "metadata")
+        else ""
+    )
     return f"""
         <style>
-        .message-container td {{
+        #{container_id} summary:hover {{
+                background: var(--jp-rendermime-table-row-hover-background);
+            }}
+        #{container_id} td {{
                 text-align: left !important;
             }}
-        div.message-container h4 {{
+        #{container_id} h4 {{
             text-align: center;
             background-color: black;
             color: white;
@@ -109,7 +177,7 @@ def message_to_html(message):
             margin: 0px !important;
         }}
 
-        div.message-container {{
+        #{container_id} {{
             display: inline-flex;
             flex-direction: column;
             border: solid black 1px;
@@ -119,7 +187,7 @@ def message_to_html(message):
             margin-bottom: 1em;
         }}
 
-        div.message-contents-container {{
+        #{inner_container_id} {{
             width: 100%;
             padding: 10px;
             display: flex;
@@ -128,9 +196,9 @@ def message_to_html(message):
         }}
         </style>
 
-        <div class="message-container">
-        <h4>{message.__class__.__name__}</h4>
-        <div class="message-contents-container">
+        <div id="{container_id}">
+        <h4>{message.__class__.__name__}{details}</h4>
+        <div id="{inner_container_id}">
             {newline.join(sections)}
             </div>
         </div>

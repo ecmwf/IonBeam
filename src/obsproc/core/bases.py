@@ -9,12 +9,19 @@
 # #
 
 import dataclasses
-from typing import Iterable, Callable, List
+from typing import Iterable, Callable, List, Literal, TypeVar
 import re
 import pandas
 from pathlib import Path
 import os
 from .html_formatters import dataclass_to_html, message_to_html
+from .history import (
+    PreviousActionInfo,
+    ActionInfo,
+    MessageInfo,
+    CodeSourceInfo,
+    describe_code_source,
+)
 
 
 @dataclasses.dataclass(unsafe_hash=True)
@@ -23,6 +30,7 @@ class MetaData:
     source: None | str = None
     observation_variable: None | str = None
     time_slice: pandas.Period | None = None
+    encoded_format: str | None = None
     filepath: Path | None = None
     # unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
 
@@ -51,6 +59,7 @@ class FinishMessage(Message):
 class DataMessage(Message):
     "A message that represents some data. It may have an attached dataframe, a reference to a file or somethihg else."
     metadata: MetaData
+    history: list = dataclasses.field(default_factory=list, kw_only=True)
 
     def __str__(self):
         class_name = self.__class__.__name__
@@ -83,6 +92,9 @@ MessageStream = Iterable[Message]
 GenerateFunction = Callable[[], Iterable[Message]]
 ProcessFunction = Callable[[Message], Iterable[Message]]
 
+# used to indicate that a function accepts a subclass of DataMessage and returns that same subclass
+DataMessageVar = TypeVar("DataMessageVar", bound=DataMessage)
+
 
 @dataclasses.dataclass
 class Action:
@@ -90,6 +102,7 @@ class Action:
 
     # kw_only is necessary so that classes that inherit from this one can have positional fields
     metadata: MetaData = dataclasses.field(default_factory=MetaData, kw_only=True)
+    code_source: CodeSourceInfo | None = dataclasses.field(default=None, kw_only=True)
 
     def resolve_path(self, path: str | Path) -> Path:
         base = os.environ.get("IOT_INGESTER_BASE_PATH") or Path(__file__).parents[3]
@@ -119,6 +132,36 @@ class Action:
         # sources to the right override keys from earlier sources
         keys = message_keys | action_keys | explicit_keys
         return MetaData(**keys)
+
+    def tag_message(
+        self, msg: DataMessageVar, previous_msg: DataMessage | MessageInfo | None
+    ) -> DataMessageVar:
+        """
+        Update the message history, using the current message and the previous message
+        If there is no logical previous message, such as when doing TimeAggregation,
+        you can directly pass a MessageInfo object in place of previous_message.
+        """
+        if isinstance(previous_msg, DataMessage):
+            message = MessageInfo(
+                name=previous_msg.__class__.__name__, metadata=previous_msg.metadata
+            )
+        elif isinstance(previous_msg, MessageInfo):
+            message = previous_msg
+        else:
+            raise ValueError(
+                f"previous_msg was of type {type(previous_msg)} not DataMessage or MessageInfo"
+            )
+
+        msg.history = (
+            previous_msg.history.copy() if isinstance(previous_msg, DataMessage) else []
+        )
+        msg.history.append(
+            PreviousActionInfo(
+                action=ActionInfo(name=self.__class__.__name__, code=self.code_source),
+                message=message,
+            )
+        )
+        return msg
 
 
 @dataclasses.dataclass
@@ -191,8 +234,6 @@ class Processor(Action):
     def matches(self, message: Message) -> bool:
         if isinstance(message, FinishMessage):
             return True
-        if not isinstance(message, DataMessage):
-            raise ValueError(f"Message has type {type(message)}!")
         return any(matcher.matches(message) for matcher in self.match)
 
     def process(self, msg: Message) -> Iterable[Message]:

@@ -14,3 +14,4 @@
     pyyaml-include
     bs4 # For sensor.community
     lxml
+    dataclass_wizard # TODO: excise this

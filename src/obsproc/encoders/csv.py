@@ -34,6 +34,7 @@ class CSVEncoder(Encoder):
     def encode(self, msg: TabularMessage | FinishMessage) -> Iterable[FileMessage]:
         if isinstance(msg, FinishMessage):
             return
+
         if self.one_file_per_granule:
             f = self.output.format(**asdict(msg.metadata)).replace(" ", "_")
             self.output_file = Path(f).resolve()
@@ -41,9 +42,12 @@ class CSVEncoder(Encoder):
 
         msg.data.to_csv(self.output_file, index=False)
 
-        yield FileMessage(
-            metadata=dataclasses.replace(msg.metadata, filepath=self.output_file),
+        metadata = self.generate_metadata(
+            msg, filepath=self.output_file, encoded_format="csv"
         )
+        output_message = FileMessage(metadata=metadata)
+        output_message = self.tag_message(output_message, msg)
+        yield output_message
 
 
 encoder = CSVEncoder

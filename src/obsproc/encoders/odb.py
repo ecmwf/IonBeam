@@ -307,9 +307,12 @@ class ODCEncoder(Encoder):
                 },
             )
 
-        yield FileMessage(
-            metadata=self.generate_metadata(msg, filepath=self.output_file),
+        output_msg = FileMessage(
+            metadata=self.generate_metadata(
+                msg, filepath=self.output_file, encoded_format="odb"
+            ),
         )
+        yield self.tag_message(output_msg, msg)
 
 
 encoder = ODCEncoder

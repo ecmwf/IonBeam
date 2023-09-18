@@ -21,7 +21,8 @@ from yamlinclude import YamlIncludeConstructor
 
 from .converters import unit_conversions
 from ..encoders.odb import ODCEncoder
-from .bases import Source, Parser, Aggregator, Encoder, CanonicalVariable
+from .bases import Source, Processor, Parser, Aggregator, Encoder, CanonicalVariable
+from .history import describe_code_source
 from .config_parser_machinery import parse_config_from_dict, ConfigError
 
 # This line is necessary to automatically find all the subclasses of things like "Encoder"
@@ -48,6 +49,7 @@ class Config:
     parsers: List[Parser] = field(default_factory=list)
     aggregators: List[Aggregator] = field(default_factory=list)
     encoders: List[Encoder] = field(default_factory=list)
+    other_processors: List[Processor] = field(default_factory=list)
 
 
 def parse_config(yaml_file: Path):
@@ -62,6 +64,12 @@ def parse_config(yaml_file: Path):
 
     # Parse the yaml file using python dataclasses as a template
     config = parse_config_from_dict(Config, config_dict, filepath=yaml_file)
+
+    # Figure out the git status clean/dirty and the current git hash
+    code_source = describe_code_source()
+    for stage in config.pipeline:
+        for action in getattr(config, stage):
+            action.code_source = code_source
 
     # Do post load work that links data from one place to another
     # This is mostly giving information about the canonical variables to other

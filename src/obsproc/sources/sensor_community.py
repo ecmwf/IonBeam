@@ -36,22 +36,25 @@ class month_page:
 
 @dataclasses.dataclass
 class SensorCommunitySource(Source):
-    cache_file: str
-    cache_directory: str
+    cache_file: Path
+    cache_directory: Path
     start_date: str
     end_date: str
     finish_after: int | None = None
-    source: str = "Sensor.Community"
     base_url: str = "https://archive.sensor.community/"
 
     def __post_init__(self):
         logger.debug(
             f"Initialialised SensorCommunity source with {self.start_date=}, {self.end_date=}"
         )
-        self.cache_file = self.resolve_path(self.cache_file)
-        self.cache_directory = self.resolve_path(self.cache_directory)
+        self.cache_file = self.resolve_data_path(self.cache_file)
+        self.cache_directory = self.resolve_data_path(self.cache_directory)
 
     def load_cache_from_file(self):
+        if not self.cache_file.exists():
+            logger.info(f"Cache file doesn't exist, creating {self.cache_file}")
+            self.cache_file.touch()
+
         with open(self.cache_file, "rb") as f:
             html_cache = {}
             try:
@@ -110,6 +113,10 @@ class SensorCommunitySource(Source):
         logger.debug(f"Sensor.Community: Found {len(months)} months")
         return sorted(months, key=lambda x: x.dt, reverse=True)
 
+    def get_links_for_month(self, month):
+        page = BeautifulSoup(self.cached_get_text(month.url), "lxml")
+        return page.find_all("a", dict(href=re.compile(r"\.(csv)|(txt)$")))
+
     def generate(self) -> Iterable[Message]:
         emitted_messages = 0
         self.load_cache_from_file()
@@ -117,8 +124,7 @@ class SensorCommunitySource(Source):
         months = self.get_months()
 
         for month in tqdm(months[::1], desc="months", position=0):
-            page = BeautifulSoup(self.cached_get_text(month.url), "lxml")
-            links = page.find_all("a", dict(href=re.compile(r"\.(csv)|(txt)$")))
+            links = self.get_links_for_month(month)
 
             for link in links:
                 url = (
