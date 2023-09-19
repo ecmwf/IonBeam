@@ -221,6 +221,10 @@ def message_to_html(message):
         #{container_id} summary:hover {{
                 background: var(--jp-rendermime-table-row-hover-background);
             }}
+
+        #{container_id} summary {{
+            display: list-item;
+        }}
         #{container_id} td {{
                 text-align: left !important;
             }}
