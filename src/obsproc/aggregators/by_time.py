@@ -197,35 +197,40 @@ class TimeAggregator(Aggregator):
 
         assert message.metadata.observation_variable is not None
 
-        start_time = message.data.time.iloc[0]
+        for period, data_chunk in message.data.resample(
+            self.granularity, on="time", kind="period"
+        ):
+            chunked_message = dataclasses.replace(message, data=data_chunk)
 
-        if not start_time.tzinfo == timezone.utc:
-            logger.warning(f"{message}: Time is not in UTC!")
+            start_time = chunked_message.data.time.iloc[0]
 
-        period = pd.Period(start_time, freq=self.granularity)
+            if not start_time.tzinfo == timezone.utc:
+                logger.warning(f"{message}: Time is not in UTC!")
 
-        # if period.freq != pd.Period("2000/01/01", "1H").freq:
-        #     logger.warning(f"granularity != 1H has not been tested! got: {period.freq}")
-
-        # We aggregate anything that maps to this key
-        key = (message.metadata.source, message.metadata.observation_variable, period)
-
-        # Find the bucket container that manages this key and give the message to it
-        # the container handles splitting the message up
-        if key not in self.bucket_containers:
-            self.bucket_containers[key] = BucketContainer(
+            # We aggregate anything that maps to this key
+            key = (
                 message.metadata.source,
                 message.metadata.observation_variable,
-                self.granularity,
+                period,
             )
 
-        bucket_container = self.bucket_containers[key]
-        bucket_container.add_message(message)
+            # Find the bucket container that manages this key and give the message to it
+            # the container handles splitting the message up
+            if key not in self.bucket_containers:
+                logger.debug(f"{key} starts a new bucket")
+                self.bucket_containers[key] = BucketContainer(
+                    message.metadata.source,
+                    message.metadata.observation_variable,
+                    self.granularity,
+                )
 
-        # tell the bucket to go through what it has and emit all data older/younger
-        # than the current data by a certain amount.
-        # Direction depends on the order in which we're ingesting data
-        for msg in bucket_container.emit(
-            age=timedelta(hours=self.emit_after_hours), direction=self.direction
-        ):
-            yield self.emit_message(msg, bucket_container)
+            bucket_container = self.bucket_containers[key]
+            bucket_container.add_message(chunked_message)
+
+            # tell the bucket to go through what it has and emit all data older/younger
+            # than the current data by a certain amount.
+            # Direction depends on the order in which we're ingesting data
+            for msg in bucket_container.emit(
+                age=timedelta(hours=self.emit_after_hours), direction=self.direction
+            ):
+                yield self.emit_message(msg, bucket_container)

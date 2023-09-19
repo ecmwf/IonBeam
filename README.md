@@ -25,12 +25,9 @@ $ cd iot_ingester
 
 Create a conda environemnt, vevnv or similar
 ```sh
-$ conda env create -f conda_env.yml
-$ conda activate iot_ingester
-```
-
-Install the package for development
-```sh
+$ conda env create --name iot-ingester ipykernel
+$ conda activate iot-ingester 
+$ pip install -r requirements.txt #Not strictly necessary because requirements.txt and setup.cfg both contain dependenciess but doesn't hurt
 $ pip install --editable ".[dev]"
 ```
 
@@ -51,6 +48,24 @@ To run against live APIs use:
 ```sh
 $ pytest -m network
 ```
+
+## Running the Jupyter notebooks
+Setting up a jupyer lab server from scratch using conda or mamba:
+
+```sh
+# Make an environment for iot-ingester
+# Do this at the root of the repository pwd=something/iot-ingester/
+conda env create --name iot-ingester ipykernel
+conda activate iot-ingester 
+pip install -r requirements.txt #Not strictly necessary because requirements.txt and setup.cfg both contain dependenciess but doesn't hurt
+pip install --editable ".[dev]"
+
+# Make an environment to run jupyter from, using separate ones is best practice
+conda env create --name jupyter jupyter nb_conda_kernels 
+conda activate jupyter
+jupyter lab
+```
+
 
 ## Usage
 Currently the main way to interact with the pipeline is through the command line interface.

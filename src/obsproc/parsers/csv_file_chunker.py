@@ -18,7 +18,7 @@ class CSVChunker(Processor):
     def process(
         self, input_message: FileMessage | FinishMessage
     ) -> Iterable[TabularMessage]:
-        logger.info(f"CSV Chunker got {input_message}")
+        logger.debug(f"CSV Chunker got {input_message}")
         if isinstance(input_message, FinishMessage):
             return
         assert input_message.metadata.filepath is not None

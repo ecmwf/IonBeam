@@ -1,6 +1,8 @@
 from dataclasses import fields
 import pandas as pd
 import string, random
+import pyodc as odc
+from pathlib import Path
 
 
 def random_id(n):
@@ -101,6 +103,65 @@ def make_section(title, contents, open=False):
             </details>"""
 
 
+def odb_summary(filepath):
+    df = odc.read_odb(filepath, single=True)
+
+    r = odc.Reader(filepath)
+    codecs = r.frames[0]._column_codecs
+
+    properties = (
+        pd.DataFrame(r.frames[0].properties, index=[0])
+        .transpose()
+        .to_html(header=False, notebook=True)
+    )
+
+    summary = pd.DataFrame(
+        zip(
+            df.dtypes,
+            df.iloc[0],
+            [df[c].nunique() for c in df],
+            [c.name for c in codecs],
+        ),
+        columns=["dtype", "First Entry", "Unique Entries", "ODB codec"],
+        index=df.columns,
+    ).to_html(notebook=True)
+
+    full_file = df.to_html(notebook=True, max_rows=20)
+
+    return f"""
+
+    <details open>
+    <summary>Properties</summary>
+        {properties}
+    </details>
+    
+    <details>
+    <summary>Summary</summary>
+        {summary}
+    </details>
+
+    <details>
+    <summary>Full Contents</summary>
+        {full_file}
+    </details>
+    """
+
+
+def summarise_file(filepath: Path):
+    if not filepath.exists():
+        return None
+    size = human_readable_bytes(filepath.stat().st_size)
+    if filepath.suffix == ".odb":
+        return make_section(f"ODB File Data ({size})", odb_summary(filepath))
+    else:
+        with open(filepath, "rb") as f:
+            data = f.read(500).decode(errors="replace")
+        if len(data) == 500:
+            data += "..."
+            size = human_readable_bytes(filepath.stat().st_size)
+        return make_section(f"File Data ({size})", data)
+
+
 def message_to_html(message):
     # Link the CSS and HTML using random ids so that if multiple
     # elements are emitted on the same page they don't interfere with one another.
@@ -116,7 +177,7 @@ def message_to_html(message):
             make_section("Metadata", dataclass_to_html(message.metadata), open=True)
         )
 
-    if hasattr(message, "columns"):
+    if hasattr(message, "columns") and message.columns:
         sections.append(
             make_section(
                 "Column Metadata",
@@ -145,15 +206,9 @@ def message_to_html(message):
         hasattr(message, "metadata")
         and getattr(message.metadata, "filepath", None) is not None
     ):
-        try:
-            with open(message.metadata.filepath, "r") as f:
-                data = f.read(500)
-            if len(data) == 500:
-                data += "..."
-            size = human_readable_bytes(message.metadata.filepath.stat().st_size)
-            sections.append(make_section(f"File Data ({size})", data))
-        except:
-            pass
+        file_section = summarise_file(message.metadata.filepath)
+        if file_section:
+            sections.append(file_section)
 
     newline = "\n"
     details = (
@@ -193,6 +248,10 @@ def message_to_html(message):
             display: flex;
             flex-direction: column;
             justify-content: center;
+        }}
+
+        details {{
+        margin-left: 1em;
         }}
         </style>
 

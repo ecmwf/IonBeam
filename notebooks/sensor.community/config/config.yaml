@@ -1,0 +1,127 @@
+---
+# Structure of this config file
+#
+# At a high level it defines a pipeline that looks like this:
+#
+# Sources -> Prepocessors -> Aggregators -> Encoders
+#
+# NB: Currently only one encoder is allowed but this will be fixed soon.
+# Sources - Either operate over data files or by pulling time delineated chunks from APIs
+# Preprocessors - Mainly their job is to rename the data columns and do some cleanup here and there
+# Aggregators - Group observations by some criteria,
+#        i.e all MeteoTracks that start in a in a one hour time window get grouped
+# Encoders - Write out the data to some output, currently CSV or ODB to disk
+
+# The structure of this config file is controlled my the structure of python dataclasses
+# To see for example, which encoders exist, go to src/obsproc/core/config_parser.py
+# From there we see an encoder is either ODCEncoder or CSVEncoder
+# Finding ODCEncoder in the codebase we can see what fields it expects in the config
+# With some docstrings and autodoc magic one should be able to use this to generate a
+# nice documentation page for this yaml config.
+canonical_variables: !include canonical_variables.yaml
+
+pipeline:
+  - sources
+  - other_processors
+  - parsers
+  - aggregators
+  - encoders
+  
+
+sources:
+  - class: MultiFileSource
+    metadata:
+        state: big_file
+        source: sensor.community
+    paths:
+      - "**/*.csv"
+    basepath: inputs/sensor_community
+
+# This is needed because the sensor.community monthly files are so big
+# They need to be processes in chunks to avoid running out of memory
+other_processors:
+  - class: CSVChunker
+    match:
+      - state: big_file
+        source: sensor.community
+    metadata:
+       state: raw
+
+encoders:
+  - class: CSVEncoder
+    match:
+    - source: sensor.community
+      state: "time_aggregated"
+    output: data/outputs/{source}/csv/{observation_variable}/{observation_variable}_{time_slice.start_time}.csv
+    metadata:
+      state: encoded
+
+  - class: ODCEncoder
+    match:
+      - source: sensor.community
+        state: "time_aggregated"
+    output: data/outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb
+    MARS_keys: !include MARS_keys.yaml
+    
+
+
+
+
+aggregators:
+  - class: TimeAggregator
+    match:
+    - source: sensor_community
+      state: parsed
+    granularity: 1min # min, H, D, M see https://pandas.pydata.org/docs/user_guide/timeseries.html#timeseries-period-aliases
+    emit_after_hours: 48
+
+parsers:
+  - class: CSVParser
+    match:
+      - state: raw
+        source: sensor.community
+    separator: ";"
+    custom_nans:
+      - unknown
+      - unavailable
+
+
+    identifying_columns:
+      - name: time
+        key: timestamp
+        type: datetime
+
+
+    metadata_columns:
+      - name: station_id
+        key: sensor_id
+      - name: sensor_type
+      - name: location
+      - name: lat
+        unit: "°"
+      - name: lon
+        unit: "°"
+      # - name: air_pressure_near_surface
+      #   key: pressure
+      #   unit: Pa
+      # - name: altitude
+      #   unit: m
+
+
+    value_columns:
+      - name: air_temperature_near_surface
+        key: temperature
+        unit: "°C"
+      - name: relative_humidity_near_surface
+        key: humidity
+        unit: "%"
+      - name: pressure_sealevel
+        unit: Pa
+
+      - name: P1
+      - name: durP1
+      - name: ratioP1
+
+      - name: P2
+      - name: durP2
+      - name: ratioP2
