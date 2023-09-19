@@ -223,7 +223,7 @@ def message_to_html(message):
             }}
 
         #{container_id} summary {{
-            display: list-item;
+            display: list-item !important;
         }}
         #{container_id} td {{
                 text-align: left !important;
