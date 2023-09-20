@@ -1,0 +1,32 @@
+---
+
+pipeline:
+  - sources
+  - encoders
+
+encoders:
+  - name: DummyEncoder
+
+sources:
+  - name: MeteoTrackerSource
+    cache_directory: data/inputs/meteotracker
+    secrets_file: secrets.yaml
+    start_date: "2023-05-20"
+    end_date: "2023-05-24"
+    static_metadata_columns:
+      - name: track_id
+        key: id
+      - name: start_time
+        type: datetime
+
+  - name: CIMASource
+    cache_directory: data/inputs/cima
+    secrets_file: secrets.yaml
+    start_date: "2023-05-20"
+    end_date: "2023-05-24"
+    frequency: 3D # 3 days is the max API request size
+    static_metadata_columns:
+      - name: station_id
+        key: id
+      - name: lat
+      - name: lon

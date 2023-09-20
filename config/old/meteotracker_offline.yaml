@@ -1,0 +1,40 @@
+---
+encoder:
+  name: CSVEncoder
+  output: output_data/meteotracker_output.csv
+
+sources:
+  - name: MultiFileSource
+    paths:
+      - input_data/meteotracker/**/*.csv
+
+preprocessors:
+  - match: input_data/meteotracker/[^.]+\.csv
+    metadata:
+      class: sample # Do we want there to be an option to add arbitrary static columns in the yaml file?
+      origin: MeteoTracker
+    parser:
+      name: CSVParser
+      header: true
+
+      identifying_columns:
+        - name: time
+          key: Time
+          type: datetime
+
+      metadata_columns:
+        - name: lat
+          key: Lat
+          unit: "°"
+        - name: lon
+          key: Lon
+          unit: "°"
+
+      value_columns:
+
+        - name: temperature
+          key: Temp[°C]
+          unit:
+        - name: pressure
+          key: Press[mbar]
+          unit: mbar

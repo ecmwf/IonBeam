@@ -1,0 +1,3101 @@
+# These have all been scraped from https://space.oscar.wmo.int/variables
+# there is an API too but for some reason it doesn't include all 340 variables accessible through the website.
+# Scraped on 2023-06-02T15:42:47.999999
+- id: air_pressure_near_surface
+  name: Air pressure (near surface)
+  numeric_id: 10
+  type: Basic atmospheric
+  html_unit: hPa
+  unicode_unit: hPa
+  link: https://space.oscar.wmo.int//variables/view/air_pressure_near_surface
+  description: Air pressure at a known height above the surface with the height specified
+    in the metadata
+- id: air_specific_humidity_near_surface
+  name: Air specific humidity (near surface)
+  numeric_id: 11
+  type: Basic atmospheric
+  html_unit: g/kg
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/air_specific_humidity_near_surface
+  description: Air specific humidity  at a known height  above surface, with the height
+    specified in the metadata. Specific  humidity is the ratio of the mass of water
+    vapour and the mass of moist air.
+- id: air_temperature_near_surface
+  name: Air temperature (near surface)
+  numeric_id: 12
+  type: Basic atmospheric
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/air_temperature_near_surface
+  description: Air temperature at a known height above the surface with the height
+    specified in the metadata
+- id: background_luminance_surface
+  name: Background Luminance (surface)
+  numeric_id: 210
+  type: Aerosols and radiation
+  html_unit: 'cd . m –2 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/background_luminance_surface
+  description: 'Luminous flux received from the background, per unit solid angle and
+    per unit area where the Luminous flux is a quantity derived from radiant flux
+    by evaluating the radiation according to its action upon the International Commission
+    on Illumination standard photometric observer. (symbol: L; unit: lm. m<sup>–2<sub>.</sub></sup> sr<sup>–1</sup>
+    = cd . m<sup>–2</sup> ) '
+- id: co_mole_fraction_near_surface
+  name: CO mole fraction (near surface)
+  numeric_id: 367
+  type: Atmospheric chemistry
+  html_unit: ppb
+  unicode_unit: ppb
+  link: https://space.oscar.wmo.int//variables/view/co_mole_fraction_near_surface
+  description: 2D field of amount of CO (Carbon monoxide, expressed in moles) divided
+    by the total amount of all constituents in dry air (also expressed in moles) at
+    a known height above surface, with the height specified in the metadata
+- id: downward_long_wave_irradiance_at_earth_surface
+  name: Downward long-wave irradiance at Earth surface
+  numeric_id: 52
+  type: Aerosols and radiation
+  html_unit: 'W.m-2 '
+  unicode_unit: W.m<sup>-2</sup>
+  link: https://space.oscar.wmo.int//variables/view/downward_long_wave_irradiance_at_earth_surface
+  description: Flux density of radiation emitted by the gases, aerosols and clouds
+    of the atmosphere to the Earth's surface
+- id: downward_short_wave_irradiance_at_earth_surface
+  name: Downward short-wave irradiance at Earth surface
+  numeric_id: 50
+  type: Aerosols and radiation
+  html_unit: 'W.m-2 '
+  unicode_unit: W.m<sup>-2 </sup>
+  link: https://space.oscar.wmo.int//variables/view/downward_short_wave_irradiance_at_earth_surface
+  description: 'Flux density of the solar radiation at the Earth surface '
+- id: earth_surface_albedo
+  name: Earth surface albedo
+  numeric_id: 54
+  type: Aerosols and radiation
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/earth_surface_albedo
+  description: 'Hemispherically integrated reflectance of the Earth surface in the
+    range 0.4-0.7 '
+- id: earth_surface_short_wave_bidirectional_reflectance
+  name: Earth surface short-wave bidirectional reflectance
+  numeric_id: 55
+  type: Aerosols and radiation
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/earth_surface_short_wave_bidirectional_reflectance
+  description: Reflectance of the Earth surface as a function of the viewing angle
+    and the illumination angle in the range 0.4-0.7 . The distribution of this variable
+    is represented by the Bidirectional Reflectance Distribution Function (BRDF)
+- id: lake_surface_temperature
+  name: Lake Surface Temperature
+  numeric_id: 94
+  type: Land surface
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/lake_surface_temperature
+  description: 'Temperature of the lake surface - Physical unit: [ K ] - Accuracy
+    unit: [ K ].'
+- id: land_surface_temperature
+  name: Land surface temperature
+  numeric_id: 96
+  type: Land surface
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/land_surface_temperature
+  description: 'Temperature of the apparent surface of land (bare soil or vegetation)
+    - Physical unit: [ K ] - Accuracy unit: [ K ].'
+- id: land_surface_topography
+  name: Land surface topography
+  numeric_id: 97
+  type: Land surface
+  html_unit: m
+  unicode_unit: m
+  link: https://space.oscar.wmo.int//variables/view/land_surface_topography
+  description: 'Map of land surface heights - Physical unit: [ m ] - Accuracy unit:
+    [ m ].'
+- id: long_wave_earth_surface_emissivity
+  name: Long-wave Earth surface emissivity
+  numeric_id: 100
+  type: Aerosols and radiation
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/long_wave_earth_surface_emissivity
+  description: 'Emissivity of the Earth surface in the thermal IR, function of the
+    wavelength '
+- id: meteorological_optical_range_mor_surface
+  name: Meteorological Optical Range (MOR) (surface)
+  numeric_id: 209
+  type: Aerosols and radiation
+  html_unit: m
+  unicode_unit: m
+  link: https://space.oscar.wmo.int//variables/view/meteorological_optical_range_mor_surface
+  description: "Length of path in the atmosphere required to reduce the luminous flux\
+    \ in a collimated beam from an incandescent lamp, at a colour temperature of 2\
+    \ 700 K, to 5 per cent of its original value, the luminous flux being evaluated\
+    \ by means of the photometric luminosity function of the International Commission\
+    \ on Illumination.  For aeronautical purposes, the surface MOR is measured at\
+    \ a height of 2.5 m above the surface. \n(Unit: m )\n"
+- id: no2_mole_fraction_near_surface
+  name: NO2 mole fraction (near surface)
+  numeric_id: 366
+  type: Atmospheric chemistry
+  html_unit: ppb
+  unicode_unit: ppb
+  link: https://space.oscar.wmo.int//variables/view/no2_mole_fraction_near_surface
+  description: 2D field of amount of NO2 (Nitrogen Dioxide, expressed in moles) divided
+    by the total amount of all constituents in dry air (also expressed in moles) at
+    a known height above surface, with the height specified in the metadata
+- id: ocean_subsurface_dissolved_oxygen_concentration
+  name: Ocean subsurface dissolved oxygen concentration
+  numeric_id: 114
+  type: Ocean
+  html_unit: '10 -6 Mol. Kg^-1 '
+  unicode_unit: '10 <sup>-6</sup> Mol. Kg^-1    '
+  link: https://space.oscar.wmo.int//variables/view/ocean_subsurface_dissolved_oxygen_concentration
+  description: Concentration of dissolved oxygen
+- id: ocean_subsurface_tracers
+  name: Ocean subsurface tracers
+  numeric_id: 115
+  type: Ocean
+  html_unit: 'Mol. Kg^-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/ocean_subsurface_tracers
+  description: 'Concentration of trace molecules such as tritium and CFCs '
+- id: ocean_surface_currents_vector
+  name: Ocean surface currents (vector)
+  numeric_id: 116
+  type: Ocean
+  html_unit: cm/s
+  unicode_unit: cm/s
+  link: https://space.oscar.wmo.int//variables/view/ocean_surface_currents_vector
+  description: 'Water flow on ocean surface - Physical unit: [ cm/s ] - Accuracy unit:
+    [ cm/s ] intended as vector error, i.e. the module of the vector difference between
+    the observed vector and the true vector.'
+- id: precipitation_intensity_at_surface_liquid_or_solid
+  name: Precipitation intensity at surface (liquid or solid)
+  numeric_id: 128
+  type: Clouds and precipitations
+  html_unit: mm/h
+  unicode_unit: mm/h
+  link: https://space.oscar.wmo.int//variables/view/precipitation_intensity_at_surface_liquid_or_solid
+  description: 'Intensity of precipitation reaching the ground - Physical unit: [
+    mm/h ] (if solid, mm/h of liquid water after melting) - Accuracy unit: [ mm/h
+    ]. Since accuracy changes with intensity, it is necessary to specify a reference
+    intensity. Assumed rate: 5 mm/h.'
+- id: precipitation_intensity_at_surface_solid
+  name: Precipitation intensity at surface (solid)
+  numeric_id: 129
+  type: Clouds and precipitations
+  html_unit: mm/h
+  unicode_unit: mm/h
+  link: https://space.oscar.wmo.int//variables/view/precipitation_intensity_at_surface_solid
+  description: 'Intensity of solid precipitation reaching the ground - Physical unit:
+    [ mm/h ] (mm of liquid water after melting)  '
+- id: precipitation_type_at_the_surface
+  name: Precipitation type at the surface
+  numeric_id: 207
+  type: Clouds and precipitations
+  html_unit: local
+  unicode_unit: ''
+  link: https://space.oscar.wmo.int//variables/view/precipitation_type_at_the_surface
+  description: The type of precipitation reaching the surface, including snow, rain,
+    hail, dew, rime, hoar frost and fog precipitation.
+- id: relative_humidity_near_surface
+  name: Relative Humidity (near surface)
+  numeric_id: 353
+  type: Basic atmospheric
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/relative_humidity_near_surface
+  description: 'Relative  humidity  at a known height  above surface, with the height
+    specified in the metadata.Relative humidity is the ratio of the amount of atmospheric
+    moisture present relative to the amount that would be present if the air were
+    saturated with respect to water or ice to be specified in the metadata '
+- id: sea_surface_heat_flux
+  name: Sea surface heat flux
+  numeric_id: 192
+  type: Ocean
+  html_unit: 'W/m2 '
+  unicode_unit: W/m<sup>2 </sup>
+  link: https://space.oscar.wmo.int//variables/view/sea_surface_heat_flux
+  description: Sea Surface Heat Flux
+- id: sea_surface_height_anomaly
+  name: Sea surface height anomaly
+  numeric_id: 193
+  type: Ocean
+  html_unit: m
+  unicode_unit: m
+  link: https://space.oscar.wmo.int//variables/view/sea_surface_height_anomaly
+  description: Sea surface height anomaly
+- id: sea_surface_mass_flux
+  name: Sea Surface Mass Flux
+  numeric_id: 194
+  type: Ocean
+  html_unit: mm/h
+  unicode_unit: mm/h
+  link: https://space.oscar.wmo.int//variables/view/sea_surface_mass_flux
+  description: Sea Surface Mass Flux
+- id: sea_surface_salinity
+  name: Sea surface salinity
+  numeric_id: 133
+  type: Ocean
+  html_unit: psu
+  unicode_unit: psu
+  link: https://space.oscar.wmo.int//variables/view/sea_surface_salinity
+  description: Salinity of sea water in the surface layer (upper ~ 1 m if observed
+    in MW).  In the open ocean the correct term should be  “halinity” with reference
+    of the diversity of salts involved.
+- id: sea_surface_temperature
+  name: Sea surface temperature
+  numeric_id: 134
+  type: Ocean
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/sea_surface_temperature
+  description: 'Temperature of the sea water at surface.   The “bulk” temperature
+    refers to the depth of typically 2 m, the “skin” temperature refers to within
+    the upper 1 mm. '
+- id: sea_ice_surface_characteristics
+  name: Sea-ice surface characteristics
+  numeric_id: 200
+  type: Sea Ice
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/sea_ice_surface_characteristics
+  description: Sea-ice surface characteristics (albedo, meltpond, dust, snow properties,
+    temperature)
+- id: sea_ice_surface_temperature
+  name: Sea-ice surface temperature
+  numeric_id: 137
+  type: Sea Ice
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/sea_ice_surface_temperature
+  description: Temperature of the surface of sea-ice.
+- id: so2_mole_fraction_near_surface
+  name: SO2 mole fraction (near surface)
+  numeric_id: 368
+  type: Atmospheric chemistry
+  html_unit: ppt
+  unicode_unit: ppt
+  link: https://space.oscar.wmo.int//variables/view/so2_mole_fraction_near_surface
+  description: 2D field of amount of SO<sub>2</sub> (Sulfur dioxide, expressed in
+    moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles) at a known height above surface, with the height specified in the metadata
+- id: soil_moisture_at_surface
+  name: Soil moisture at surface
+  numeric_id: 149
+  type: Land surface
+  html_unit: m3 /m3
+  unicode_unit: m<sup>3</sup> /m<sup>3</sup>
+  link: https://space.oscar.wmo.int//variables/view/soil_moisture_at_surface
+  description: Fractional content of water in a volume of wet soil. Surface layer
+    (upper few centimetres)
+- id: upward_long_wave_irradiance_at_earth_surface
+  name: Upward long-wave irradiance at Earth surface
+  numeric_id: 170
+  type: Aerosols and radiation
+  html_unit: 'W/m2 '
+  unicode_unit: W/m<sup>2</sup>
+  link: https://space.oscar.wmo.int//variables/view/upward_long_wave_irradiance_at_earth_surface
+  description: 'Flux density of terrestrial radiation emitted by the Earth surface '
+- id: wind_direction_near_surface
+  name: Wind direction (near surface)
+  numeric_id: 358
+  type: Basic atmospheric
+  html_unit: degree true
+  unicode_unit: degrees
+  link: https://space.oscar.wmo.int//variables/view/wind_direction_near_surface
+  description: Direction from which wind is blowing at a known height above the surface
+    which is to be specified in the metadata
+- id: wind_speed_near_surface
+  name: Wind speed (near surface)
+  numeric_id: 181
+  type: Basic atmospheric
+  html_unit: m/s
+  unicode_unit: m/s
+  link: https://space.oscar.wmo.int//variables/view/wind_speed_near_surface
+  description: Speed of air at a known height above the surface which is to be specified
+    in the metadata
+- id: wind_vector_near_surface
+  name: Wind vector (near surface)
+  numeric_id: 183
+  type: Basic atmospheric
+  html_unit: m/s
+  unicode_unit: m/s
+  link: https://space.oscar.wmo.int//variables/view/wind_vector_near_surface
+  description: Horizontal wind vector, at a known height above the surface which is
+    to be sprcified in the metadata
+- id: 13_ch4_delta
+  name: (13)CH4 delta
+  numeric_id: 318
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/13_ch4_delta
+  description: ' 3D field of Delta C-13 in CH4 (Methane) (isotopic signature). Isotopic
+    ratio, expressed as deviations from an agreed-upon international reference measurement
+    standard (which defines the corresponding isotope scales) using the delta notation:
+    δ = (R<sub>sample</sub>/R<sub>reference</sub> – 1), with R = [rare isotope]/[abundant
+    isotope]. '
+- id: 13_co_delta
+  name: (13)CO Delta
+  numeric_id: 321
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/13_co_delta
+  description: ' 3D field of Delta C-13 in CO (Carbon monoxide) (isotopic signature)'
+- id: 13_co2_delta
+  name: (13)CO2 Delta
+  numeric_id: 332
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/13_co2_delta
+  description: ' 3D field of Delta C-13 in CO2 (Carbon dioxide) (isotopic signature)'
+- id: 14_ch4_delta
+  name: (14)CH4 Delta
+  numeric_id: 319
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/14_ch4_delta
+  description: ' 3D field of Delta C-14 in CH4 (Methane) (isotopic signature)'
+- id: 14_co_number_concentration
+  name: (14)CO Number Concentration
+  numeric_id: 322
+  type: Atmospheric chemistry
+  html_unit: ' mol.m-3'
+  unicode_unit: ' molec.cm-3'
+  link: https://space.oscar.wmo.int//variables/view/14_co_number_concentration
+  description: ' 3D field of amount of CO (Carbon monoxide) with C-14 isotope (mol)
+    per air volume (m3)'
+- id: 14_co2_delta
+  name: (14)CO2 Delta
+  numeric_id: 316
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/14_co2_delta
+  description: 3D field of Delta C-14 in CO2 (Carbon dioxide) (isotopic signature)
+- id: accumulated_precipitation_over_24_h
+  name: Accumulated precipitation (over 24 h)
+  numeric_id: 1
+  type: Clouds and precipitations
+  html_unit: mm
+  unicode_unit: mm
+  link: https://space.oscar.wmo.int//variables/view/accumulated_precipitation_over_24_h
+  description: 'Integration of precipitation rate reaching the ground over several
+    time intervals. The reference requirement refers to integration over 24 h '
+- id: aerosol_absorption_optical_depth
+  name: Aerosol Absorption Optical Depth
+  numeric_id: 213
+  type: Aerosols and radiation
+  html_unit: Dimensionless
+  unicode_unit: Dimensionless
+  link: https://space.oscar.wmo.int//variables/view/aerosol_absorption_optical_depth
+  description: 'Vertical column integral of spectral aerosol absorption coefficient:
+    AAOD = exp(-K. Δz) where K is the absorption coefficient [km<sup>-1</sup>] and
+    Δz the vertical path [km] '
+- id: aerosol_column_burden
+  name: Aerosol column burden
+  numeric_id: 2
+  type: Aerosols and radiation
+  html_unit: 'g/m^2  '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/aerosol_column_burden
+  description: '2D field of the column burden of condensed particles in the atmosphere '
+- id: aerosol_dust_concentration
+  name: Aerosol dust concentration
+  numeric_id: 208
+  type: Aerosols and radiation
+  html_unit: g.kg-1
+  unicode_unit: g.kg<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/aerosol_dust_concentration
+  description: 3-D field of concentration of dust or sand in the atmosphere
+- id: aerosol_effective_radius
+  name: Aerosol effective radius
+  numeric_id: 3
+  type: Aerosols and radiation
+  html_unit: µm
+  unicode_unit: µm
+  link: https://space.oscar.wmo.int//variables/view/aerosol_effective_radius
+  description: '3D field of mean aerosol particle size, defined as the ratio of the
+    third and second moments of the number size distribution of aerosol particles.  Requested
+    in the troposphere (assumed height: 12 km) and as columnar average.'
+- id: aerosol_extinction_coefficient
+  name: Aerosol Extinction Coefficient
+  numeric_id: 4
+  type: Aerosols and radiation
+  html_unit: m-1
+  unicode_unit: m<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/aerosol_extinction_coefficient
+  description: '3D field of spectral volumetric extinction cross-section of aerosol
+    particles. '
+- id: aerosol_layer_height
+  name: Aerosol Layer Height
+  numeric_id: 357
+  type: Aerosols and radiation
+  html_unit: km
+  unicode_unit: km
+  link: https://space.oscar.wmo.int//variables/view/aerosol_layer_height
+  description: 'Height of vertically localized aerosol layer in the free troposphere
+    above sea level '
+- id: aerosol_mass_mixing_ratio
+  name: Aerosol mass mixing ratio
+  numeric_id: 5
+  type: Aerosols and radiation
+  html_unit: g/Kg
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/aerosol_mass_mixing_ratio
+  description: 3D field of the mass mixing ratio of condensed particles in the atmosphere
+- id: aerosol_optical_depth
+  name: Aerosol Optical Depth
+  numeric_id: 6
+  type: Aerosols and radiation
+  html_unit: Dimensionless
+  unicode_unit: Dimensionless
+  link: https://space.oscar.wmo.int//variables/view/aerosol_optical_depth
+  description: 'The AOD is the effective depth of the aerosol column from the viewpoint
+    of radiation propagation: Vertical column integral of spectral aerosol extinction
+    coefficient AOD = exp(-K. Δz) where K is the extinction coefficient [km<sup>-1</sup>
+    ] and Δz the vertical path [km] '
+- id: aerosol_optical_depth_550nm_str
+  name: Aerosol Optical Depth [550nm, str.]
+  numeric_id: 372
+  type: Atmospheric chemistry
+  html_unit: unitless
+  unicode_unit: ''
+  link: https://space.oscar.wmo.int//variables/view/aerosol_optical_depth_550nm_str
+  description: The integral over the geometrical path lenght across the stratosphere
+    of the aerosol light extinction coefficient at 550nm.The measure of the extinction
+    of the solar beam by aerosol particles in the stratospheric vertical column.
+- id: aerosol_optical_depth_550nm
+  name: Aerosol Optical Depth [550nm]
+  numeric_id: 371
+  type: Atmospheric chemistry
+  html_unit: unitless
+  unicode_unit: unitless
+  link: https://space.oscar.wmo.int//variables/view/aerosol_optical_depth_550nm
+  description: 'The integral over the geometrical path lenght of the aerosol light
+    extinction coefficient at 550nm.In "Guide to Meteorological Instruments and Methods
+    of Observation"2014 edition, WMO-No8:The integral over the vertical column of
+    the aerosol light extinction coefficient." Proposed change: "The integral over
+    the vertical column of the aerosol light extinction coefficient at 550nm"'
+- id: aerosol_optical_depth_cm_anthr
+  name: Aerosol Optical Depth [CM, anthr.]
+  numeric_id: 378
+  type: Atmospheric chemistry
+  html_unit: ''
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/aerosol_optical_depth_cm_anthr
+  description: The integral over the geometrical path length of coarse-mode anthropogenic
+    aerosol light extinction coefficient.
+- id: aerosol_optical_depth_fm_anthr
+  name: Aerosol Optical Depth [FM, anthr.]
+  numeric_id: 377
+  type: Atmospheric chemistry
+  html_unit: ''
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/aerosol_optical_depth_fm_anthr
+  description: The integral over the geometrical path length of fine-mode antropogenic
+    aerosol light extinction coefficient.
+- id: aerosol_particle_light_extinction_coefficient_355nm
+  name: Aerosol particle light extinction coefficient [355nm]
+  numeric_id: 380
+  type: Atmospheric chemistry
+  html_unit: km-1
+  unicode_unit: km<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/aerosol_particle_light_extinction_coefficient_355nm
+  description: The aerosol particle light extinction coefficient is a measure of the
+    rate of dimunition of transmitted light via scattering and absorption processes. A
+    measure of light attenuation due to scattering and absorption by aerosol particles
+    expressed as the Beer-Lambert Law exponent at unit path distance (WMO Codes).
+- id: aerosol_particle_light_extinction_coefficient_532nm
+  name: Aerosol particle light extinction coefficient [532nm]
+  numeric_id: 379
+  type: Atmospheric chemistry
+  html_unit: 'km-1 '
+  unicode_unit: km<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/aerosol_particle_light_extinction_coefficient_532nm
+  description: The aerosol particle extinction coefficient is a measure of the rate
+    of diminution of transmitted light via scattering and absorption processes. A
+    measure of light attenuation due to scattering and absorption by aerosol particles
+    expressed as the Beer-Lambert Law exponent at unit path distance (WMO codes).
+- id: aerosol_single_scattering_albedo
+  name: Aerosol single-scattering albedo
+  numeric_id: 356
+  type: Aerosols and radiation
+  html_unit: dimensionless
+  unicode_unit: dimensionless
+  link: https://space.oscar.wmo.int//variables/view/aerosol_single_scattering_albedo
+  description: ' The spectrally dependent ratio of the aerosol scattering to the aerosol
+    extinction '
+- id: aerosol_species_mole_fraction
+  name: Aerosol species mole fraction
+  numeric_id: 7
+  type: Aerosols and radiation
+  html_unit: 'moles/mole  of dry air '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/aerosol_species_mole_fraction
+  description: 3D field of the mole fraction of condensed-phase chemical species (e.g.,
+    sulfate, nitrate, ammonium, elemental carbon, organic carbon),  in the atmosphere
+- id: aerosol_species_total_column_burden
+  name: Aerosol species total column burden
+  numeric_id: 8
+  type: Aerosols and radiation
+  html_unit: moles.m-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/aerosol_species_total_column_burden
+  description: '2D field integrated over the total column burden of concentration
+    of condensed-phase chemical species (e.g., sulfate, nitrate, ammonium, elemental
+    carbon, organic carbon), in the atmosphere '
+- id: aerosol_type
+  name: Aerosol type
+  numeric_id: 9
+  type: Aerosols and radiation
+  html_unit: Classes
+  unicode_unit: Probab.
+  link: https://space.oscar.wmo.int//variables/view/aerosol_type
+  description: 'Selection, out of a pre-defined set of aerosol classes, that best
+    fits an input data set (observed or modeled). The pre-defined set of aerosol classes
+    includes specification of the particle composition, mixing state, complex refractive
+    index, and shape as a function of particle size. The definition of aerosol type
+    includes specification of all the classes as well as the algorithm used to choose
+    the best fit to the input data. '
+- id: aerosol_volcanic_ash
+  name: Aerosol volcanic ash
+  numeric_id: 173
+  type: Aerosols and radiation
+  html_unit: 'g/kg '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/aerosol_volcanic_ash
+  description: '3D field of mass mixing ratio of volcanic ash '
+- id: aerosol_volcanic_ash_total_column
+  name: Aerosol volcanic ash  Total Column
+  numeric_id: 174
+  type: Aerosols and radiation
+  html_unit: g.m-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/aerosol_volcanic_ash_total_column
+  description: 2D Field of mass of volcanic ash, integrated over the total column.
+- id: alpha_particles_differential_directional_flux
+  name: Alpha particles differential directional flux
+  numeric_id: 299
+  type: 'Energetic particles and solar wind '
+  html_unit: Particles·(cm2 s sr MeV)-1
+  unicode_unit: ''
+  link: https://space.oscar.wmo.int//variables/view/alpha_particles_differential_directional_flux
+  description: ''
+- id: alpha_particles_integral_directional_flux
+  name: Alpha particles integral directional flux
+  numeric_id: 300
+  type: 'Energetic particles and solar wind '
+  html_unit: particles·(cm2 s sr)-1
+  unicode_unit: ''
+  link: https://space.oscar.wmo.int//variables/view/alpha_particles_integral_directional_flux
+  description: An alpha particle has positive charge and consists of two protons and
+    two neutrons (the nucleus of a helium atom). Flux is the rate of flow through
+    a reference surface, measured in particles per unit area.The directional flux
+    is the flux limited to a certain solid angle as a function of the direction (pitch
+    angle).
+- id: atmospheric_density
+  name: Atmospheric density
+  numeric_id: 216
+  type: Basic atmospheric
+  html_unit: kg.m-3
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/atmospheric_density
+  description: 3D field of density of the atmosphere
+- id: atmospheric_temperature
+  name: Atmospheric temperature
+  numeric_id: 13
+  type: Basic atmospheric
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/atmospheric_temperature
+  description: '3D field of the atmospheric temperature '
+- id: aurora
+  name: Aurora
+  numeric_id: 214
+  type: Ionospheric disturbances
+  html_unit: ''
+  unicode_unit: ''
+  link: https://space.oscar.wmo.int//variables/view/aurora
+  description: Occurence of fluorescence of the upper atmosphere through ionization
+    by energetic charged particles accelerated by the Earth's magnetic field.
+- id: bathymetry
+  name: Bathymetry
+  numeric_id: 14
+  type: Ocean
+  html_unit: ''
+  unicode_unit: m
+  link: https://space.oscar.wmo.int//variables/view/bathymetry
+  description: ''
+- id: biomass
+  name: Biomass
+  numeric_id: 15
+  type: Land surface
+  html_unit: t/ha
+  unicode_unit: t/ha
+  link: https://space.oscar.wmo.int//variables/view/biomass
+  description: 'Total amount of vegetation in a reference area - Physical unit: [
+    t/ha (tons/hectare) ] - Accuracy unit: [ t/ha ]'
+- id: bro
+  name: BrO
+  numeric_id: 16
+  type: Atmospheric chemistry
+  html_unit: Dimensionless (mol/mol)
+  unicode_unit: Dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/bro
+  description: '3D field of amount of BrO (Bromine monoxide, expressed in moles)  
+    divided by the total amount of all constituents in dry air (also expressed in
+    moles) '
+- id: c_17_oo_delta
+  name: C(17)OO Delta
+  numeric_id: 326
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/c_17_oo_delta
+  description: ' 3D field of Delta O-17 in CO2 (Carbon dioxide) (isotopic signature)'
+- id: c_18_o_delta
+  name: C(18)O Delta
+  numeric_id: 323
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/c_18_o_delta
+  description: ' 3D field of Delta O-18 in CO (Carbon monoxide) (isotopic signature)'
+- id: c_18_oo_delta
+  name: C(18)OO Delta
+  numeric_id: 317
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/c_18_oo_delta
+  description: ' 3D field of Delta O-18 in CO2 (Carbon dioxide) (isotopic signature)'
+- id: c10h16_3_carene_mole_fraction
+  name: C10H16 (3-Carene) Mole Fraction
+  numeric_id: 290
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c10h16_3_carene_mole_fraction
+  description: '3D field of amount  of C<sub>10</sub>H<sub>16</sub> (3-Carene, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles) '
+- id: c10h16_alfapinene_mole_fraction
+  name: C10H16 (alfapinene) Mole Fraction
+  numeric_id: 288
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c10h16_alfapinene_mole_fraction
+  description: 3D field of amount  of C<sub>10</sub>H<sub>16</sub> (alfapinene,expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles).  
+- id: c10h16_betapinene_mole_fraction
+  name: C10H16 (betapinene) Mole Fraction
+  numeric_id: 289
+  type: Atmospheric chemistry
+  html_unit: dimsnionless (mol/mol)
+  unicode_unit: dimsnionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c10h16_betapinene_mole_fraction
+  description: '3D field of amount of C<sub>10</sub>H<sub>16</sub> (betapinene, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles) '
+- id: c10h16_limonene_mole_fraction
+  name: C10H16 (Limonene) Mole Fraction
+  numeric_id: 291
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c10h16_limonene_mole_fraction
+  description: 3D field of dry air mole fraction of C<sub>10</sub>H<sub>16</sub> (Limonene,
+    expressed in moles) divided by the total amount of all constituents in dry air
+    (also expressed in moles).
+- id: c2h2
+  name: C2H2
+  numeric_id: 17
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c2h2
+  description: 3D field of amount of C<sub>2</sub>H<sub>2</sub> (Acetylene. expressed
+    in moles) divided by the total amount of all constituents in air (also expressed
+    in moles)
+- id: c2h5oh_mole_fraction
+  name: C2H5OH Mole Fraction
+  numeric_id: 294
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c2h5oh_mole_fraction
+  description: 3D field of amount of C<sub>2</sub>H<sub>5</sub>OH (Ethanol, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles).
+- id: c2h6
+  name: C2H6
+  numeric_id: 18
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c2h6
+  description: '3D field of amount of C<sub>2</sub>H<sub>6</sub> (Ethane, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles) '
+- id: c2h6s_mole_fraction
+  name: C2H6S Mole Fraction
+  numeric_id: 296
+  type: Atmospheric chemistry
+  html_unit: dimensionles (mol/mol)
+  unicode_unit: dimensionles (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c2h6s_mole_fraction
+  description: 3D field of amount of C<sub>2</sub>H<sub>6</sub>S (Dimethyl sulphide,
+    DMS, expressed in moles) divided by the total amount of all constituents in dry
+    air (also expressed in moles) .
+- id: c3h6o_mole_fraction
+  name: C3H6O Mole Fraction
+  numeric_id: 295
+  type: Atmospheric chemistry
+  html_unit: dimensionles (mol/mol)
+  unicode_unit: dimensionles (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c3h6o_mole_fraction
+  description: 3D field of amount  of C<sub>3</sub>H<sub>6</sub>O (Acetone, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles).
+- id: c3h8
+  name: C3H8
+  numeric_id: 280
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c3h8
+  description: 3D field of amount  of C<sub>3</sub>H<sub>8</sub> (Propane, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles).
+- id: c4h10
+  name: C4H10
+  numeric_id: 281
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c4h10
+  description: 3D field of dry air mole fraction of C<sub>4</sub>H<sub>10</sub> (Methylpropane,
+    expressed in moles) divided by the total amount of all constituents in dry air
+    (also expressed in moles)
+- id: c4h10_n_butane
+  name: C4H10 (n-butane)
+  numeric_id: 282
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c4h10_n_butane
+  description: 3D field of amount dry of C<sub>4</sub>H<sub>10</sub> (n-butane, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles).
+- id: c5h12_2_methylbutane
+  name: C5H12 (2-Methylbutane)
+  numeric_id: 283
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c5h12_2_methylbutane
+  description: 3D field of dry air mole fraction of C<sub>5</sub>H<sub>12</sub> (2-Methylbutane,
+    expressed in moles) divided by the total amount of all constituents in dry air
+    (also expressed in moles)
+- id: c5h12_n_pentane
+  name: C5H12 (n-Pentane)
+  numeric_id: 284
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c5h12_n_pentane
+  description: 3D field of amount of C<sub>5</sub>H<sub>12</sub> (n-Pentane, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles).
+- id: c5h8
+  name: C5H8
+  numeric_id: 285
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c5h8
+  description: 3D field of amountof C<sub>5</sub>H<sub>8</sub> (Isoprene,expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles).
+- id: c6h6
+  name: C6H6
+  numeric_id: 286
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c6h6
+  description: 3D field of amount of C<sub>6</sub>H<sub>6</sub> (Benzene, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles).
+- id: c7h8_mole_fraction
+  name: C7H8 Mole Fraction
+  numeric_id: 287
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/c7h8_mole_fraction
+  description: '3D field of dry air mole fraction of C<sub>7</sub>H<sub>8</sub> (Toluene,expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles). '
+- id: cfc_11
+  name: CFC-11
+  numeric_id: 19
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/cfc_11
+  description: '3D field of amount of CFC-11 (Trichlorofluoromethane = Freon-11,expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles). '
+- id: cfc_12
+  name: CFC-12
+  numeric_id: 20
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/cfc_12
+  description: '3D field of amount of CFC-12 (Dichlorodifluoromethane = Freon-12,
+    expressed in moles) divided by the total amount of all constituents in dry air
+    (also expressed in moles) . '
+- id: ch3br
+  name: CH3Br
+  numeric_id: 309
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/ch3br
+  description: '3D field of amount of CH<sub>3</sub>Br (methil bromide, or bromomethane,
+    expressed in moles) divided by the total amount of all constituents in dry air
+    (also expressed in moles). '
+- id: ch3cn_mole_fraction
+  name: CH3CN Mole Fraction
+  numeric_id: 297
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/ch3cn_mole_fraction
+  description: '3D field of amount of CH<sub>3</sub>CN (Acetonitrile, expressed in
+    moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles). '
+- id: ch3d_delta
+  name: CH3D Delta
+  numeric_id: 320
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/ch3d_delta
+  description: ' 3D field of Delta Deuterium (H-2) in CH4 (Methane) (isotopic signature)'
+- id: ch3oh_mole_fraction
+  name: CH3OH Mole Fraction
+  numeric_id: 293
+  type: Atmospheric chemistry
+  html_unit: ' dimensionless (mol/mol) '
+  unicode_unit: ' dimensionless (mol/mol) '
+  link: https://space.oscar.wmo.int//variables/view/ch3oh_mole_fraction
+  description: '3D field of amount of CH<sub>3</sub>OH (Methanol, expressed in moles)
+    divided by the total amount of all constituents in dry air (also expressed in
+    moles). '
+- id: ch4
+  name: CH4
+  numeric_id: 23
+  type: Atmospheric chemistry
+  html_unit: ppb
+  unicode_unit: ppb
+  link: https://space.oscar.wmo.int//variables/view/ch4
+  description: 3D field of amount of CH4 (Methane, expressed in moles) divided by
+    the total amount of all constituents in dry air (also expressed in moles)
+- id: ch4_column_average_dry_air_mixing_ratio
+  name: 'CH4 column average dry air mixing ratio '
+  numeric_id: 315
+  type: Atmospheric chemistry
+  html_unit: nmol/mol
+  unicode_unit: nmol/mol
+  link: https://space.oscar.wmo.int//variables/view/ch4_column_average_dry_air_mixing_ratio
+  description: 2D Column integrated number of molecules of the target gas (CH4, methane)
+    divided by that of dry air expressed in mole fraction
+- id: ch4_mole_fraction_bg
+  name: CH4 Mole fraction (BG)
+  numeric_id: 346
+  type: Atmospheric chemistry
+  html_unit: ppb
+  unicode_unit: ppb
+  link: https://space.oscar.wmo.int//variables/view/ch4_mole_fraction_bg
+  description: ' 3D field of amount of  background (BG) CH4 (Methane, expressed in
+    moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles)'
+- id: ch4_mole_fraction_sr
+  name: CH4 Mole fraction (SR)
+  numeric_id: 347
+  type: Atmospheric chemistry
+  html_unit: ppb
+  unicode_unit: ppb
+  link: https://space.oscar.wmo.int//variables/view/ch4_mole_fraction_sr
+  description: ' 3D field of amount of  source region (SR) CH4 (Methane, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles)'
+- id: ch4_tropospheric_column
+  name: CH4 Tropospheric column
+  numeric_id: 340
+  type: Atmospheric chemistry
+  html_unit: molecules.cm-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/ch4_tropospheric_column
+  description: ' 2D field of total amount of CH4 molecules per unit area in an atmospheric
+    column extending from the Earth’s surface to the tropopause. '
+- id: clo
+  name: ClO
+  numeric_id: 24
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/clo
+  description: '3D field of amount  of ClO (Chlorine monoxide = Hypochlorite, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles) '
+- id: clono2
+  name: ClONO2
+  numeric_id: 25
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/clono2
+  description: 3D field of amount of ClONO<sub>2</sub> (Chlorine nitrate, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles)  
+- id: cloud_base_height
+  name: Cloud base height
+  numeric_id: 26
+  type: Clouds and precipitations
+  html_unit: km
+  unicode_unit: km
+  link: https://space.oscar.wmo.int//variables/view/cloud_base_height
+  description: 'Height of the bottom surface of the cloud '
+- id: cloud_cover
+  name: Cloud cover
+  numeric_id: 27
+  type: Clouds and precipitations
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/cloud_cover
+  description: '3D field of fraction of sky filled by clouds.  '
+- id: cloud_drop_effective_radius
+  name: Cloud drop effective radius
+  numeric_id: 28
+  type: Clouds and precipitations
+  html_unit: μm
+  unicode_unit: μm
+  link: https://space.oscar.wmo.int//variables/view/cloud_drop_effective_radius
+  description: Size distribution of liquid water drops, assimilated to spheres of
+    the same volume. Considered as both a 3D field throughout the troposphere and
+    a 2D field at the top of cloud surface.
+- id: cloud_ice
+  name: Cloud ice
+  numeric_id: 29
+  type: Clouds and precipitations
+  html_unit: 'g/kg '
+  unicode_unit: '% '
+  link: https://space.oscar.wmo.int//variables/view/cloud_ice
+  description: '3D field of atmospheric water in the solid phase (precipitating or
+    not).  '
+- id: cloud_ice_effective_radius
+  name: Cloud ice effective radius
+  numeric_id: 31
+  type: Clouds and precipitations
+  html_unit: ''
+  unicode_unit: ''
+  link: https://space.oscar.wmo.int//variables/view/cloud_ice_effective_radius
+  description: Size distribution of ice particles, assimilated to spheres of the same
+    volume.  Considered as both a 3D field throughout the troposphere and a 2D field
+    at the top of cloud surface
+- id: cloud_ice_total_column
+  name: Cloud ice Total Column
+  numeric_id: 30
+  type: Clouds and precipitations
+  html_unit: 'g.m-2 '
+  unicode_unit: g.m<sup>-2 </sup>
+  link: https://space.oscar.wmo.int//variables/view/cloud_ice_total_column
+  description: 2D Field of atmospheric water in the solid phase (precipitating or
+    not), integrated over the total column.
+- id: cloud_liquid_water_clw
+  name: Cloud liquid water (CLW)
+  numeric_id: 32
+  type: Clouds and precipitations
+  html_unit: g/kg
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/cloud_liquid_water_clw
+  description: 3D field of atmospheric water in the liquid phase (precipitating or
+    not).
+- id: cloud_liquid_water_clw_total_column
+  name: Cloud liquid water (CLW) total column
+  numeric_id: 33
+  type: Clouds and precipitations
+  html_unit: 'g.m-2 '
+  unicode_unit: g.m<sup>-2 </sup>
+  link: https://space.oscar.wmo.int//variables/view/cloud_liquid_water_clw_total_column
+  description: 2D Field of atmospheric water in the liquid phase (precipitating or
+    not), integrated over the total column.
+- id: cloud_optical_depth
+  name: Cloud optical depth
+  numeric_id: 34
+  type: Clouds and precipitations
+  html_unit: dimensionless
+  unicode_unit: dimless
+  link: https://space.oscar.wmo.int//variables/view/cloud_optical_depth
+  description: 'Effective depth of a cloud from the viewpoint of radiation extinction.
+    OD = exp(-K.Δz) where K is the extinction coefficient [km-1 ], Δz the vertical
+    path [km] between the base and the top of the cloud and the reference wavelength
+    to be specified in the metadata. '
+- id: cloud_to_ground_lightning_density
+  name: Cloud to Ground lightning density
+  numeric_id: 303
+  type: Clouds and precipitations
+  html_unit: Dimensionless
+  unicode_unit: Dimensionless
+  link: https://space.oscar.wmo.int//variables/view/cloud_to_ground_lightning_density
+  description: Number of detected cloud-to-ground flashes in the corresponding time
+    interval and the space unit. The space unit (grid box) should be equal to the
+    horizontal resolution and the accumulation time to the observing cycle
+- id: cloud_top_height
+  name: Cloud top height
+  numeric_id: 35
+  type: Clouds and precipitations
+  html_unit: km
+  unicode_unit: km
+  link: https://space.oscar.wmo.int//variables/view/cloud_top_height
+  description: 'Height of the top of the cloud (highest cloud in case of multi-layer
+    clouds) '
+- id: cloud_top_pressure
+  name: Cloud top pressure
+  numeric_id: 361
+  type: Clouds and precipitations
+  html_unit: hPa
+  unicode_unit: hPa
+  link: https://space.oscar.wmo.int//variables/view/cloud_top_pressure
+  description: Pressure at the top of the cloud
+- id: cloud_top_temperature
+  name: Cloud top temperature
+  numeric_id: 36
+  type: Clouds and precipitations
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/cloud_top_temperature
+  description: 'Temperature of the top of the cloud (highest cloud in case of multi-layer
+    clouds) '
+- id: cloud_type
+  name: Cloud type
+  numeric_id: 37
+  type: Clouds and precipitations
+  html_unit: Classes
+  unicode_unit: Classes <sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/cloud_type
+  description: Result of cloud type classification - Accuracy expressed as inverse
+    of number of classes, so that smaller figures correspond to better performance.
+- id: co
+  name: CO
+  numeric_id: 38
+  type: Atmospheric chemistry
+  html_unit: ppb
+  unicode_unit: ppb
+  link: https://space.oscar.wmo.int//variables/view/co
+  description: ' 3D field of amount of CO (Carbon monoxide, expressed in moles) divided
+    by the total amount of all constituents in dry air (also expressed in moles)'
+- id: co_total_column
+  name: CO Total Column
+  numeric_id: 329
+  type: Atmospheric chemistry
+  html_unit:  molecules.cm-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/co_total_column
+  description: ' 2D field of total number of CO modelcues (Carbon Monixide) per unit
+    area in an atmospheric column extending from the Earth''s  surface to the upper
+    edge of the atmosphere.'
+- id: co_tropospheric_column
+  name: CO Tropospheric column
+  numeric_id: 343
+  type: Atmospheric chemistry
+  html_unit: molecules.cm-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/co_tropospheric_column
+  description: ' 2D field of total amount of CO molecules per unit area in an atmospheric
+    column extending from the Earth’s surface to the tropopause.  '
+- id: co2
+  name: CO2
+  numeric_id: 39
+  type: Atmospheric chemistry
+  html_unit: ppm
+  unicode_unit: ppm
+  link: https://space.oscar.wmo.int//variables/view/co2
+  description: 3D field of amount of CO2 (Carbon dioxide, expressed in moles) divided
+    by the total amount of all constituents in dry air (also expressed in moles)
+- id: co2_column_average_dry_air_mixing_ratio
+  name: CO2 column average dry air mixing ratio
+  numeric_id: 314
+  type: Atmospheric chemistry
+  html_unit: μmol/mol
+  unicode_unit: μmol/mol
+  link: https://space.oscar.wmo.int//variables/view/co2_column_average_dry_air_mixing_ratio
+  description: 2D Column integrated number of molecules of the target gas (CO2, Carbon
+    dioxide) divided by that of dry air expressed in mole fraction
+- id: co2_flux
+  name: CO2 flux
+  numeric_id: 185
+  type: Land surface
+  html_unit: nmol* m-2 *s-1
+  unicode_unit: nmol* m<sup>-2</sup> *s<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/co2_flux
+  description: Flux of carbon dioxide from the surface to the atmosphere
+- id: co2_mole_fraction_bg
+  name: CO2 Mole fraction (BG)
+  numeric_id: 339
+  type: Atmospheric chemistry
+  html_unit: ppm
+  unicode_unit: ppm
+  link: https://space.oscar.wmo.int//variables/view/co2_mole_fraction_bg
+  description: ' 3D field of amount of  background (BG) CO2 (Carbon Dioxide, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles)'
+- id: co2_mole_fraction_sr
+  name: CO2 Mole fraction (SR)
+  numeric_id: 338
+  type: Atmospheric chemistry
+  html_unit: ppm
+  unicode_unit: ppm
+  link: https://space.oscar.wmo.int//variables/view/co2_mole_fraction_sr
+  description: ' 3D field of amount of  source region (SR) CO2 (Carbon Dioxide, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles)'
+- id: co2_tropospheric_column
+  name: CO2 Tropospheric Column
+  numeric_id: 337
+  type: Atmospheric chemistry
+  html_unit: molecules.cm-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/co2_tropospheric_column
+  description: '2D field of total amount of CO2 molecules per unit area in an atmospheric
+    column extending from the Earth’s surface to the tropopause. '
+- id: coastal_sea_level_tide
+  name: Coastal sea level (tide)
+  numeric_id: 40
+  type: Ocean
+  html_unit: cm
+  unicode_unit: cm
+  link: https://space.oscar.wmo.int//variables/view/coastal_sea_level_tide
+  description: Deviation of sea level from local references in coastal zones, caused
+    by local currents and tides (astronomical and wind-induced).
+- id: coastlines
+  name: Coastlines
+  numeric_id: 41
+  type: Land surface
+  html_unit: deg
+  unicode_unit: deg
+  link: https://space.oscar.wmo.int//variables/view/coastlines
+  description: Location of coastlines  (Lat/Long)
+- id: colour_dissolved_organic_matter_cdom
+  name: Colour Dissolved Organic Matter (CDOM)
+  numeric_id: 42
+  type: Ocean
+  html_unit: m-1
+  unicode_unit: m<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/colour_dissolved_organic_matter_cdom
+  description: 'Optically measurable component of the dissolved organic matter in
+    water. '
+- id: cos
+  name: COS
+  numeric_id: 43
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/cos
+  description: '3-D field of amount  of COS (Carbonyl sulfide, expressed in moles)
+    divided by the total amount of all constituents in dry air (also expressed in
+    moles) '
+- id: cosmic_ray_neutron_flux
+  name: Cosmic ray neutron flux
+  numeric_id: 44
+  type: 'Energetic particles and solar wind '
+  html_unit: ' neutrons·h-1'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/cosmic_ray_neutron_flux
+  description: Flux of neutrons near the surface of Earth due to collisions in the
+    atmosphere of cosmic rays impacting Earth atmosphere from the Sun and outer space.
+- id: cosmic_ray_neutron_flux_spectrum
+  name: Cosmic ray neutron flux spectrum
+  numeric_id: 221
+  type: 'Energetic particles and solar wind '
+  html_unit: neutrons·(cm2 s sr MeV)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/cosmic_ray_neutron_flux_spectrum
+  description: Flux density energy spectrum of neutrons from the Sun or as component
+    of the cosmic radiation.
+- id: crustal_motion_horizontal_and_vertical
+  name: Crustal motion (horizontal and vertical)
+  numeric_id: 45
+  type: Solid Earth and magnetic field
+  html_unit: mm/y
+  unicode_unit: mm/y
+  link: https://space.oscar.wmo.int//variables/view/crustal_motion_horizontal_and_vertical
+  description: 'Changes in time of the position and height of the Earth plates.  Indicative
+    of the lithosphere dynamics, thus useful for earthquake prediction  - Physical
+    unit: [ mm/y ] - Accuracy unit: [ mm/y ].'
+- id: crustal_plates_positioning
+  name: Crustal plates positioning
+  numeric_id: 46
+  type: Solid Earth and magnetic field
+  html_unit: cm
+  unicode_unit: cm
+  link: https://space.oscar.wmo.int//variables/view/crustal_plates_positioning
+  description: 'Basis for monitoring the evolution of the lithosphere dynamics - Physical
+    unit: [ cm ] - Accuracy unit: [ cm ].'
+- id: dew_point_temperature
+  name: Dew Point Temperature
+  numeric_id: 354
+  type: Basic atmospheric
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/dew_point_temperature
+  description: Temperature to which air must be cooled to become saturated with water
+    vapor  at a known height  above surface, with the height specified in the metadata 
+- id: dissolved_inorganic_carbon_dic
+  name: Dissolved inorganic carbon  (DIC)
+  numeric_id: 47
+  type: Ocean
+  html_unit: 'Mol. Kg-1 '
+  unicode_unit: Mol. Kg<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/dissolved_inorganic_carbon_dic
+  description: The cumulated concentration of inorganic carbon species (dissolved
+    carbon dioxide, carbonic acid, bicarbonate and carbonate) in solution.
+- id: dms_mole_fraction
+  name: DMS Mole Fraction
+  numeric_id: 335
+  type: Atmospheric chemistry
+  html_unit: ' Dimentionless (mol/mol)'
+  unicode_unit: Dimentionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/dms_mole_fraction
+  description: ' 3D field of amount of DMS (Dimethyl sulfide, expressed in moles)
+    divided by the total amount of all constituents in dry air (also expressed in
+    moles)'
+- id: dominant_wave_direction
+  name: Dominant wave direction
+  numeric_id: 48
+  type: Ocean
+  html_unit: degrees
+  unicode_unit: deg.
+  link: https://space.oscar.wmo.int//variables/view/dominant_wave_direction
+  description: 'One feature of the ocean wave spectrum. It is the direction of the
+    most energetic wave in the spectrum - Physical unit: [ degrees ] - Accuracy unit:
+    [ degrees ].'
+- id: dominant_wave_period
+  name: Dominant wave period
+  numeric_id: 49
+  type: Ocean
+  html_unit: s
+  unicode_unit: s
+  link: https://space.oscar.wmo.int//variables/view/dominant_wave_period
+  description: The period of the most energetic wave in the ocean wave spectrum.
+- id: downward_short_wave_irradiance_at_toa
+  name: Downward short-wave irradiance at TOA
+  numeric_id: 51
+  type: Aerosols and radiation
+  html_unit: 'W.m-2 '
+  unicode_unit: W.m<sup>-2</sup>
+  link: https://space.oscar.wmo.int//variables/view/downward_short_wave_irradiance_at_toa
+  description: 'Flux density of the solar radiation at the top of the atmosphere '
+- id: earth_rotation
+  name: Earth Rotation
+  numeric_id: 53
+  type: Solid Earth and magnetic field
+  html_unit: Rad/s
+  unicode_unit: Arcsec/century
+  link: https://space.oscar.wmo.int//variables/view/earth_rotation
+  description: 'Rotation velocity of the Earth, determining the length of the day
+    - Physical unit: [Rad/s] - Accuracy unit: [Arcsec/century].'
+- id: electric_field
+  name: Electric Field
+  numeric_id: 212
+  type: Ionospheric disturbances
+  html_unit: 'mV·m-1 '
+  unicode_unit: mVm<sup>-1 </sup>
+  link: https://space.oscar.wmo.int//variables/view/electric_field
+  description: 'Magnitude and direction of the Earth’s electric field '
+- id: electron_density
+  name: Electron Density
+  numeric_id: 56
+  type: Ionospheric disturbances
+  html_unit: 'electrons·m-3 '
+  unicode_unit: electrons·m<sup>-</sup><sup>3</sup>
+  link: https://space.oscar.wmo.int//variables/view/electron_density
+  description: 3-D field of the electron density in the ionosphere
+- id: electron_differential_directional_flux
+  name: Electron differential directional flux
+  numeric_id: 217
+  type: 'Energetic particles and solar wind '
+  html_unit: electrons·(cm2 s sr eV)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/electron_differential_directional_flux
+  description: ' Flux density energy spectrum of low-, medium-, and high-energy electrons
+    from the magnetosphere, the radiation belts or the interplanetary medium, per
+    unit solid angle'
+- id: electron_flux_density
+  name: Electron flux density
+  numeric_id: 218
+  type: 'Energetic particles and solar wind '
+  html_unit: electrons·(cm2 s)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/electron_flux_density
+  description: Flux density of low-, medium-, and high-energy electrons from the magnetosphere,
+    the radiation belts or the interplanetary medium.
+- id: electron_flux_energy_spectrum
+  name: Electron flux energy spectrum
+  numeric_id: 57
+  type: 'Energetic particles and solar wind '
+  html_unit: 'electrons·(cm2 . s. eV)-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/electron_flux_energy_spectrum
+  description: Flux density energy spectrum of low-, medium-, and high-energy electrons
+    from the magnetosphere, the radiation belts or the interplanetary medium.
+- id: electron_integral_directional_flux
+  name: Electron integral directional flux
+  numeric_id: 219
+  type: 'Energetic particles and solar wind '
+  html_unit: electrons·(cm2 s sr )-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/electron_integral_directional_flux
+  description: Flux density of low-, medium-, and high-energy electrons from the magnetosphere,
+    the radiation belts or the interplanetary medium, per unit solid angle.
+- id: electrostatic_charge
+  name: Electrostatic charge
+  numeric_id: 264
+  type: 'Energetic particles and solar wind '
+  html_unit: pA·cm-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/electrostatic_charge
+  description: ' Measurement of the electrostatic charge of a satellite accumulated
+    because of the environmental situation. '
+- id: energetic_neutral_atom_ena
+  name: Energetic Neutral Atom (ENA)
+  numeric_id: 305
+  type: 'Energetic particles and solar wind '
+  html_unit: Particles·(cm2 s sr MeV)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/energetic_neutral_atom_ena
+  description: Neutral atoms resulting from the capture of free electrons by positively
+    ionized nuclei of the solar wind.  Once neutralised, the particles are no longer
+    deviated by the interplanetary magnetic field, and still move very fast, travelling
+    in an exact straight line.
+- id: euv_flux
+  name: EUV flux
+  numeric_id: 247
+  type: Solar monitoring
+  html_unit: W·m-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/euv_flux
+  description: 'Radiative flux integrated over the EUV band. '
+- id: euv_flux_spectrum
+  name: EUV flux spectrum
+  numeric_id: 262
+  type: Solar monitoring
+  html_unit: ' watt·m-2·nm-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/euv_flux_spectrum
+  description: ' Energy spectrum of the radiative flux measured in the EUV band. '
+- id: euv_sky_image
+  name: EUV sky image
+  numeric_id: 298
+  type: Solar monitoring
+  html_unit: erg·(cm2 arcsec s)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/euv_sky_image
+  description: EUV image of the sky
+- id: evapotranspiration
+  name: Evapotranspiration
+  numeric_id: 187
+  type: Land surface
+  html_unit: mm/day
+  unicode_unit: mm/day
+  link: https://space.oscar.wmo.int//variables/view/evapotranspiration
+  description: 'Quantity of water evaporated from
+
+    the soil and plants when the ground is at its natural moisture content.'
+- id: fire_fractional_cover
+  name: Fire fractional cover
+  numeric_id: 60
+  type: Land surface
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/fire_fractional_cover
+  description: Fraction of a land area where fire is occurring
+- id: fire_radiative_power
+  name: Fire radiative power
+  numeric_id: 61
+  type: Land surface
+  html_unit: 'kW*m-2 '
+  unicode_unit: kW*m<sup>-2 </sup>
+  link: https://space.oscar.wmo.int//variables/view/fire_radiative_power
+  description: Power radiated by the fire occurring within an area
+- id: fire_temperature
+  name: Fire temperature
+  numeric_id: 62
+  type: Land surface
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/fire_temperature
+  description: 'Temperature of the fire occurring within an area  '
+- id: foes
+  name: foEs
+  numeric_id: 63
+  type: Ionospheric disturbances
+  html_unit: MHz
+  unicode_unit: MHz
+  link: https://space.oscar.wmo.int//variables/view/foes
+  description: 'The highest ordinary-wave frequency reflected back from a sporadic
+    E layer and observed by an ionosonde. '
+- id: fof2
+  name: foF2
+  numeric_id: 64
+  type: Ionospheric disturbances
+  html_unit: MHz
+  unicode_unit: MHz
+  link: https://space.oscar.wmo.int//variables/view/fof2
+  description: 'Critical frequency of the F2 layer of the ionosphere. This critical
+    frequency (f, in MHz) is associated with the electron density (Ne, in cm<sup>-3</sup>):
+    f=9*10<sup>-3</sup>*sqrt(Ne). '
+- id: fraction_of_absorbed_par_fapar
+  name: Fraction of Absorbed PAR (FAPAR)
+  numeric_id: 65
+  type: Aerosols and radiation
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/fraction_of_absorbed_par_fapar
+  description: Fraction of PAR absorbed by vegetation (land or marine) for photosynthesis
+    processes (generally around the 'red' )
+- id: fraction_of_vegetated_land
+  name: Fraction of vegetated land
+  numeric_id: 66
+  type: Land surface
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/fraction_of_vegetated_land
+  description: Fraction of a land area where vegetation is present
+- id: freezing_level_height_in_clouds
+  name: Freezing level height in clouds
+  numeric_id: 67
+  type: Clouds and precipitations
+  html_unit: km
+  unicode_unit: km
+  link: https://space.oscar.wmo.int//variables/view/freezing_level_height_in_clouds
+  description: Height of the atmospheric layer in cloud where liquid-solid states
+    transform into each other
+- id: gamma_ray_flux
+  name: Gamma-ray flux
+  numeric_id: 255
+  type: Solar monitoring
+  html_unit: ' W·m-2 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/gamma_ray_flux
+  description: 'Radiative flux integrated over the gamma-ray domain. '
+- id: gamma_ray_flux_spectrum
+  name: Gamma-ray flux spectrum
+  numeric_id: 254
+  type: Solar monitoring
+  html_unit: ' W·m-2 ·Å-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/gamma_ray_flux_spectrum
+  description: ' Energy spectrum of the radiative flux measured in the gamma-ray domain. '
+- id: geoid
+  name: Geoid
+  numeric_id: 68
+  type: Solid Earth and magnetic field
+  html_unit: cm
+  unicode_unit: cm
+  link: https://space.oscar.wmo.int//variables/view/geoid
+  description: 'Equipotential surface which would coincide exactly with the mean ocean
+    surface of the Earth, if the oceans were in equilibrium, at rest, and extended
+    through the continents (such as with very narrow channels) - Physical unit: [
+    cm ] - Accuracy unit: [ cm ].'
+- id: geomagnetic_field
+  name: Geomagnetic field
+  numeric_id: 171
+  type: Solid Earth and magnetic field
+  html_unit: nanoTesla (nT)
+  unicode_unit: nanoTesla (nT)
+  link: https://space.oscar.wmo.int//variables/view/geomagnetic_field
+  description: Magnitude and direction of the 3D magnetic field on the surface of
+    Earth and within the magnetosphere (i.e., in low-Earth orbit and in geosynchronous
+    orbit).
+- id: glacier_cover
+  name: Glacier cover
+  numeric_id: 69
+  type: Land surface
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/glacier_cover
+  description: 'Fraction of a land area covered by permanent ice '
+- id: glacier_motion
+  name: Glacier motion
+  numeric_id: 70
+  type: Land surface
+  html_unit: m/y
+  unicode_unit: m/y
+  link: https://space.oscar.wmo.int//variables/view/glacier_motion
+  description: 'Velocity of the ice measured at the surface of a glacier '
+- id: glacier_topography
+  name: Glacier topography
+  numeric_id: 71
+  type: Land surface
+  html_unit: cm
+  unicode_unit: cm
+  link: https://space.oscar.wmo.int//variables/view/glacier_topography
+  description: Map of the height of the glacier surface.
+- id: glyoxal_mole_fraction
+  name: Glyoxal Mole Fraction
+  numeric_id: 331
+  type: Atmospheric chemistry
+  html_unit: ' Dimentionless (mol/mol)'
+  unicode_unit: Dimentionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/glyoxal_mole_fraction
+  description: ' 3D field of amount of OCHCHO (Glyoxal, expressed in moles) divided
+    by the total amount of all constituents in dry air (also expressed in moles)'
+- id: glyoxal_tropospheric_column
+  name: Glyoxal Tropospheric column
+  numeric_id: 345
+  type: Atmospheric chemistry
+  html_unit: molecules.cm-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/glyoxal_tropospheric_column
+  description: ' 2D field of tropospheric column averaged of amount of Glyoxal (expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles)'
+- id: gravity_field
+  name: Gravity field
+  numeric_id: 72
+  type: Solid Earth and magnetic field
+  html_unit: mGal
+  unicode_unit: mGal
+  link: https://space.oscar.wmo.int//variables/view/gravity_field
+  description: 'Indicative of the statics and dynamics of the lithosphere and the
+    mantle - Physical unit: [ mGal ] where : 1 Gal = 0.01 m.s<sup>-2</sup>'
+- id: gravity_gradients
+  name: Gravity gradients
+  numeric_id: 73
+  type: Solid Earth and magnetic field
+  html_unit: E (Eötvös)
+  unicode_unit: E (Eötvös)
+  link: https://space.oscar.wmo.int//variables/view/gravity_gradients
+  description: 'Gradient of the Earth’s gravity field measured at the satellite orbital
+    height - Physical unit: [ E ] , Eötvös (1 E = 1 mGal / 10 km) - Accuracy unit:
+    [ E ].'
+- id: ground_water
+  name: Ground water
+  numeric_id: 74
+  type: Land surface
+  html_unit: m
+  unicode_unit: m
+  link: https://space.oscar.wmo.int//variables/view/ground_water
+  description: Amount of water present beneath the ground surface per unit area
+- id: h_f
+  name: h'F
+  numeric_id: 75
+  type: Ionospheric disturbances
+  html_unit: km
+  unicode_unit: km
+  link: https://space.oscar.wmo.int//variables/view/h_f
+  description: Virtual height of the bottom of the ionospheric F-layer.
+- id: h2_mole_fraction
+  name: H2 Mole Fraction
+  numeric_id: 327
+  type: Atmospheric chemistry
+  html_unit: ' Dimentionless (mol/mol)'
+  unicode_unit: Dimentionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/h2_mole_fraction
+  description: '  3D field of amount of H2 ( expressed in moles) divided by the total
+    amount of all constituents in dry air (also expressed in moles) '
+- id: h2o
+  name: H2O
+  numeric_id: 76
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/h2o
+  description: '3D field of amount of H<sub>2</sub>O (Water vapour intended as a chemical
+    species relevant for atmospheric chemistry. expressed in moles) divided by the
+    total amount of all constituents in dry air (also expressed in moles) '
+- id: hcfc_22
+  name: HCFC-22
+  numeric_id: 310
+  type: Atmospheric chemistry
+  html_unit: ' dimensionless (mol/mol) '
+  unicode_unit: ' dimensionless (mol/mol) '
+  link: https://space.oscar.wmo.int//variables/view/hcfc_22
+  description: 3D field of amount of HCFC-22 (hydrochlorofluorocarbon-22, or R-22expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles).
+- id: hcho
+  name: HCHO
+  numeric_id: 21
+  type: Atmospheric chemistry
+  html_unit: ppt
+  unicode_unit: ppt
+  link: https://space.oscar.wmo.int//variables/view/hcho
+  description: 2D field of amount of HCHO (Formaldehyde, expressed in moles) divided
+    by the total amount of all constituents in dry air (also expressed in moles) at
+    a known height above surface, with the height specified in the metadata
+- id: hcho_total_column
+  name: HCHO Total Column
+  numeric_id: 22
+  type: Atmospheric chemistry
+  html_unit:  molecules/cm2
+  unicode_unit:  molecules/cm<sup>2</sup>
+  link: https://space.oscar.wmo.int//variables/view/hcho_total_column
+  description: ' 2D field of total amount of HCHO molecules (Formaldehyde)  per unit
+    area in an atmospheric column extending from the Earth’s surface to the upper
+    edge of the atmosphere.'
+- id: hcho_tropospheric_column
+  name: HCHO Tropospheric column
+  numeric_id: 344
+  type: Atmospheric chemistry
+  html_unit: molecules/cm2
+  unicode_unit: molecules/cm<sup>2</sup>
+  link: https://space.oscar.wmo.int//variables/view/hcho_tropospheric_column
+  description: '2D field of total amount of HCHO molecules (Formaldehyde)  per unit
+    area in an atmospheric column extending from the Earth’s surface to the tropopause. '
+- id: hcl
+  name: HCl
+  numeric_id: 77
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/hcl
+  description: '3D field of amount of HCl (Hydrogen chloride, expressed in moles)
+    divided by the total amount of all constituents in dry air (also expressed in
+    moles) '
+- id: hd_delta
+  name: HD Delta
+  numeric_id: 341
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/hd_delta
+  description: ' 3D field of Delta Deuterium (H-2) in HD (molecular Hydrogen) (isotopic
+    signature)'
+- id: hdo
+  name: HDO
+  numeric_id: 78
+  type: Atmospheric chemistry
+  html_unit: dimensionless(mol/mol)
+  unicode_unit: dimensionless(mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/hdo
+  description: '3D field of amount  of HDO (Water vapour (with one hydrogen nucleus
+    replaced by its deuterium isotope) , expressed in moles) divided by the total
+    amount of all constituents in dry air (also expressed in moles) '
+- id: heavy_ion_angular_flux_energy_and_mass_spectrum
+  name: Heavy ion angular flux energy and mass spectrum
+  numeric_id: 225
+  type: 'Energetic particles and solar wind '
+  html_unit: ions·(cm2 s sr MeV/nuc)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/heavy_ion_angular_flux_energy_and_mass_spectrum
+  description: Flux density energy and mass spectrum of heavy ions ranging from Helium
+    to Iron, per unit solid angle
+- id: heavy_ion_differential_directional_flux
+  name: Heavy ion differential directional flux
+  numeric_id: 271
+  type: 'Energetic particles and solar wind '
+  html_unit: ' ions·(cm2 s sr MeV)-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/heavy_ion_differential_directional_flux
+  description: Flux density of heavy ions (eavier than Helium) per unit solid angle
+- id: heavy_ion_flux_energy_and_mass_spectrum
+  name: Heavy ion flux energy and mass spectrum
+  numeric_id: 79
+  type: 'Energetic particles and solar wind '
+  html_unit: ions·(cm2 s MeV/nuc)-1
+  unicode_unit: '% '
+  link: https://space.oscar.wmo.int//variables/view/heavy_ion_flux_energy_and_mass_spectrum
+  description: Flux density energy and mass spectrum of heavy ions ranging from Helium
+    to Iron.
+- id: heavy_ion_integral_directional_flux
+  name: Heavy ion integral directional flux
+  numeric_id: 226
+  type: 'Energetic particles and solar wind '
+  html_unit: ' ions·(cm2 s sr)-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/heavy_ion_integral_directional_flux
+  description: Flux density of heavy ions ranging from Helium to Iron.
+- id: height_of_the_top_of_pbl
+  name: Height of the top of PBL
+  numeric_id: 80
+  type: Basic atmospheric
+  html_unit: km
+  unicode_unit: km
+  link: https://space.oscar.wmo.int//variables/view/height_of_the_top_of_pbl
+  description: 'Height of the surface separating the PBL from the free atmosphere '
+- id: height_of_the_tropopause
+  name: Height of the tropopause
+  numeric_id: 81
+  type: Basic atmospheric
+  html_unit: km
+  unicode_unit: km
+  link: https://space.oscar.wmo.int//variables/view/height_of_the_tropopause
+  description: 'Height of the surface separating the troposphere from the stratosphere '
+- id: heliospheric_image
+  name: Heliospheric image
+  numeric_id: 82
+  type: Solar monitoring
+  html_unit: erg·(cm2 arcsec s)-1
+  unicode_unit: erg·(cm<sup>2</sup> arcsec s)<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/heliospheric_image
+  description: Image of the interplanetary space between the Sun and Earth
+- id: hmf2
+  name: hmF2
+  numeric_id: 83
+  type: Ionospheric disturbances
+  html_unit: km
+  unicode_unit: km
+  link: https://space.oscar.wmo.int//variables/view/hmf2
+  description: 'Altitude of the peak density in the ionospheric F2 layer. '
+- id: hno3
+  name: HNO3
+  numeric_id: 84
+  type: Atmospheric chemistry
+  html_unit: Dimentionless (mol/mol)
+  unicode_unit: Dimentionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/hno3
+  description: ' 3D field of amount of HNO<sub>3</sub> (Nitric acid, expressed in
+    moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles) '
+- id: hydrometeor_type
+  name: Hydrometeor type
+  numeric_id: 211
+  type: Clouds and precipitations
+  html_unit: ''
+  unicode_unit: ''
+  link: https://space.oscar.wmo.int//variables/view/hydrometeor_type
+  description: 3D field of the predominant form of condensed water in a volume of
+    free atmosphere, including liquid cloud, rain, ice crystals, snow, graupel and
+    hail. (This variable replaces "precipitation type").
+- id: ice_sheet_topography
+  name: Ice sheet topography
+  numeric_id: 85
+  type: Land surface
+  html_unit: cm
+  unicode_unit: cm
+  link: https://space.oscar.wmo.int//variables/view/ice_sheet_topography
+  description: Map of ice sheet height over land .
+- id: icing_potential
+  name: Icing potential
+  numeric_id: 86
+  type: Clouds and precipitations
+  html_unit: ''
+  unicode_unit: ''
+  link: https://space.oscar.wmo.int//variables/view/icing_potential
+  description: '3D field of super-cooled liquid water, enabling the formation of ice
+    coating on an object. '
+- id: integrated_water_vapour_iwv
+  name: Integrated Water Vapour (IWV)
+  numeric_id: 162
+  type: Basic atmospheric
+  html_unit: 'kg.m-2 '
+  unicode_unit: kg.m<sup>-2 </sup>
+  link: https://space.oscar.wmo.int//variables/view/integrated_water_vapour_iwv
+  description: Total amount of water vapour present in a vertical atmospheric column.
+- id: interplanetary_magnetic_field
+  name: Interplanetary magnetic field
+  numeric_id: 87
+  type: 'Energetic particles and solar wind '
+  html_unit: nanoTesla (nT)
+  unicode_unit: nanoTesla (nT)
+  link: https://space.oscar.wmo.int//variables/view/interplanetary_magnetic_field
+  description: Vector magnetic field (3D) in the solar wind. The reference frame is
+    Cartesian or Cylindrical with many different axis orientations. Important in Space
+    Weather to monitor magnetic disturbances of the near earth environment.
+- id: ionospheric_plasma_density
+  name: Ionospheric plasma density
+  numeric_id: 279
+  type: Ionospheric disturbances
+  html_unit: particles·m-3
+  unicode_unit: particles·m<sup>-3</sup>
+  link: https://space.oscar.wmo.int//variables/view/ionospheric_plasma_density
+  description: Total number of ionized particles in a volume unit of ionospheric plasma
+- id: ionospheric_plasma_velocity
+  name: Ionospheric plasma velocity
+  numeric_id: 88
+  type: Ionospheric disturbances
+  html_unit: 'km·s-1 '
+  unicode_unit: km·s<sup>-1 </sup>
+  link: https://space.oscar.wmo.int//variables/view/ionospheric_plasma_velocity
+  description: Velocity of bulk plasma or electrons (depending on measurement technique)
+    as a function of altitude in the ionosphere.
+- id: ionospheric_radio_absorption
+  name: Ionospheric Radio Absorption
+  numeric_id: 89
+  type: Ionospheric disturbances
+  html_unit: dB
+  unicode_unit: dB
+  link: https://space.oscar.wmo.int//variables/view/ionospheric_radio_absorption
+  description: 'Attenuation of a radio wave passing through the lower ionosphere. '
+- id: ionospheric_scintillation
+  name: Ionospheric Scintillation
+  numeric_id: 90
+  type: Ionospheric disturbances
+  html_unit: dimensionless
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/ionospheric_scintillation
+  description: Random fluctuations of radio waves resulting of small scale variations
+    of the ionospheric electron density in space and time.
+- id: ionospheric_vertical_total_electron_content_vtec
+  name: Ionospheric Vertical Total Electron Content (VTEC)
+  numeric_id: 91
+  type: Ionospheric disturbances
+  html_unit: TECU = 1016 electrons·m-2
+  unicode_unit: TECU
+  link: https://space.oscar.wmo.int//variables/view/ionospheric_vertical_total_electron_content_vtec
+  description: Number of electrons between two points. 
+- id: lake_area
+  name: Lake area
+  numeric_id: 92
+  type: Land surface
+  html_unit: m2
+  unicode_unit: m<sup>2</sup>
+  link: https://space.oscar.wmo.int//variables/view/lake_area
+  description: Aera extent of the surface of a lake
+- id: lake_level
+  name: Lake level
+  numeric_id: 93
+  type: Land surface
+  html_unit: cm
+  unicode_unit: cm
+  link: https://space.oscar.wmo.int//variables/view/lake_level
+  description: Map of the height of the lake surface.
+- id: land_cover
+  name: Land cover
+  numeric_id: 95
+  type: Land surface
+  html_unit: Classes
+  unicode_unit: Classes<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/land_cover
+  description: Processed from land surface imagery by assigning identified cluster(s)
+    within a given area to specific classes of objects - Accuracy expressed as number
+    of classes. Actually [ classes-1 ] is used, so that smaller figure corresponds
+    to better performance, as usual.
+- id: leaf_area_index_lai
+  name: Leaf Area Index (LAI)
+  numeric_id: 98
+  type: Land surface
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/leaf_area_index_lai
+  description: 'LAI is the total one-sided area of photosynthetic tissue per unit
+    ground surface area '
+- id: light_backscattering_coefficient_tsp_1064nm
+  name: Light backscattering coefficient [TSP, 1064nm]
+  numeric_id: 383
+  type: Atmospheric chemistry
+  html_unit: m-1sr-1
+  unicode_unit: m<sup>-1</sup>sr<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/light_backscattering_coefficient_tsp_1064nm
+  description: Backscattering is scattering in a specific direction (180 degrees with
+    respect to the light source), measured here at a wavelength of 1064nm and for
+    total suspended particles.
+- id: light_backscattering_coefficient_tsp_355nm
+  name: Light backscattering coefficient [TSP, 355nm]
+  numeric_id: 382
+  type: Atmospheric chemistry
+  html_unit: m-1sr-1
+  unicode_unit: m<sup>-1</sup>sr<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/light_backscattering_coefficient_tsp_355nm
+  description: Backscattering is scattering in a specific direction (180 degrees with
+    respect to the light source), measured here at a wavelength of 355nm and for total
+    suspended particles.
+- id: light_backscattering_coefficient_tsp_532nm
+  name: Light backscattering coefficient [TSP, 532nm]
+  numeric_id: 381
+  type: Atmospheric chemistry
+  html_unit: m-1sr-1
+  unicode_unit: m<sup>-1</sup>sr<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/light_backscattering_coefficient_tsp_532nm
+  description: Backscattering is scattering in a specific direction (180 degrees with
+    respect to the light source), measured here at a wavelength of 532nm and for total
+    suspended particles.
+- id: melting_layer_depth_in_clouds
+  name: Melting layer depth in clouds
+  numeric_id: 101
+  type: Clouds and precipitations
+  html_unit: km
+  unicode_unit: km
+  link: https://space.oscar.wmo.int//variables/view/melting_layer_depth_in_clouds
+  description: Depth of the atmospheric layer in cloud where liquid-solid states transform
+    into each other
+- id: n_15_no_delta
+  name: N(15)NO Delta
+  numeric_id: 324
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/n_15_no_delta
+  description: ' 3D field of Delta N-15 in N2O (Nitrous oxide) (isotopic signature)'
+- id: n_15_no_alpha_delta
+  name: N(15)NO-Alpha Delta
+  numeric_id: 333
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/n_15_no_alpha_delta
+  description: ' 3D field of Delta N-15 in Alpha-N2O (Nitrous oxide where the outer
+    Nitrogen atom is N-15)  (isotopic signature)'
+- id: n_15_no_beta_delta
+  name: N(15)NO-Beta Delta
+  numeric_id: 334
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/n_15_no_beta_delta
+  description: ' 3D field of Delta N-15 in Beta-N2O (Nitrous oxide where the middle
+    Nitrogen atom is N-15) (isotopic signature)'
+- id: n2_18_o_delta
+  name: N2(18)O Delta
+  numeric_id: 325
+  type: Atmospheric chemistry
+  html_unit: ‰
+  unicode_unit: ‰
+  link: https://space.oscar.wmo.int//variables/view/n2_18_o_delta
+  description: ' 3D field of Delta O-18 in N2O (Nitrous oxide) (isotopic signature)'
+- id: n2o
+  name: N2O
+  numeric_id: 102
+  type: Atmospheric chemistry
+  html_unit: ppb
+  unicode_unit: ppb
+  link: https://space.oscar.wmo.int//variables/view/n2o
+  description: '3D field of amount  of N<sub>2</sub>O (Nitrous oxide, expressed in
+    moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles) '
+- id: n2o_mole_fraction_bg
+  name: N2O mole fraction (BG)
+  numeric_id: 362
+  type: Atmospheric chemistry
+  html_unit: ppb
+  unicode_unit: ppb
+  link: https://space.oscar.wmo.int//variables/view/n2o_mole_fraction_bg
+  description: 3D field of amount of  background (BG) N2O (Nitrous Oxide, expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles)
+- id: n2o_mole_fraction_sr
+  name: N2O mole fraction (SR)
+  numeric_id: 363
+  type: Atmospheric chemistry
+  html_unit: ppb
+  unicode_unit: ppb
+  link: https://space.oscar.wmo.int//variables/view/n2o_mole_fraction_sr
+  description: 3D field of amount of  source region (SR) N2O (Nitrous Oxide,  expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles)
+- id: n2o5
+  name: N2O5
+  numeric_id: 351
+  type: Atmospheric chemistry
+  html_unit: dimentionless (mol/mol)
+  unicode_unit: Dimentionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/n2o5
+  description: ' 3D field of amount of N2O5 (expressed in moles) divided by the total
+    amount of all constituents in dry air (also expressed in moles)'
+- id: nh3_mole_fraction
+  name: NH3 Mole Fraction
+  numeric_id: 328
+  type: Atmospheric chemistry
+  html_unit: ' Dimentionless (mol/mol)'
+  unicode_unit: Dimentionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/nh3_mole_fraction
+  description: ' 3D field of amount of  NH3 (Ammonia, expressed in moles) divided
+    by the total amount of all constituents in dry air (also expressed in moles) '
+- id: nh3_total_column
+  name: NH3 Total Column
+  numeric_id: 330
+  type: Atmospheric chemistry
+  html_unit:   molecules.cm-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/nh3_total_column
+  description: ' 2D field of total amount of NH3 molecules (Ammonia) per unit area
+    in an atmospheric column extending from the Earth’s surface to the upper edge
+    of the atmosphere.'
+- id: nir_swir_flux
+  name: NIR/SWIR flux
+  numeric_id: 311
+  type: Solar monitoring
+  html_unit: watt·m-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/nir_swir_flux
+  description: Integrated NIR/SWIR flux
+- id: nir_swir_flux_spectrum
+  name: NIR/SWIR flux spectrum
+  numeric_id: 312
+  type: Solar monitoring
+  html_unit: watt.m-2.nm-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/nir_swir_flux_spectrum
+  description: Energy spectrum of diffuse NIR/SWIR flux measured in space
+- id: nir_swir_sky_image
+  name: NIR/SWIR sky image
+  numeric_id: 313
+  type: Solar monitoring
+  html_unit: erg·(cm2 arcsec s)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/nir_swir_sky_image
+  description: NIR/SWIR image of the sky
+- id: 'no'
+  name: 'NO'
+  numeric_id: 104
+  type: Atmospheric chemistry
+  html_unit: Dimentionless (mol/mol)
+  unicode_unit: Dimentionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/no
+  description: ' 3D field of amount of NO expressed in moles divided by the total
+    amount of all constituents in dry air (also expressed in moles) '
+- id: no2
+  name: NO2
+  numeric_id: 105
+  type: Atmospheric chemistry
+  html_unit: ppb
+  unicode_unit: ppb
+  link: https://space.oscar.wmo.int//variables/view/no2
+  description: ' 3D field of amount of NO<sub>2</sub> (Nitrogen dioxide,  expressed
+    in moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles). '
+- id: no2_total_column
+  name: NO2  Total Column
+  numeric_id: 106
+  type: Atmospheric chemistry
+  html_unit: molecules/cm-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/no2_total_column
+  description: '2D field of total amount of NO2 molecules per unit area in an atmospheric
+    column extending from the Earth’s surface to the upper edge of the atmosphere. '
+- id: no2_mole_fraction_sr
+  name: NO2 Mole  fraction (SR)
+  numeric_id: 349
+  type: Atmospheric chemistry
+  html_unit: ' Dimentionless (mol/mol)'
+  unicode_unit: Dimentionless (nmol/mol)
+  link: https://space.oscar.wmo.int//variables/view/no2_mole_fraction_sr
+  description: ' 3D field of amount of Source Region (SR) NO2 (expressed in moles)
+    divided by the total amount of all constituents in dry air (also expressed in
+    moles)'
+- id: no2_mole_fraction_bg
+  name: NO2 Mole fraction (BG)
+  numeric_id: 348
+  type: Atmospheric chemistry
+  html_unit: ' Dimentionless (mol/mol)'
+  unicode_unit: Dimentionless (nmol/mol)
+  link: https://space.oscar.wmo.int//variables/view/no2_mole_fraction_bg
+  description: ' 3D field of amount of  background (BG) NO2 (expressed in moles) divided
+    by the total amount of all constituents in dry air (also expressed in moles)'
+- id: no2_stratospheric_column
+  name: NO2 Stratospheric Column
+  numeric_id: 364
+  type: Atmospheric chemistry
+  html_unit: molecules/cm2
+  unicode_unit: molecules/cm<sup>2</sup>
+  link: https://space.oscar.wmo.int//variables/view/no2_stratospheric_column
+  description: 2D field of total amount of NO2 molecules (Nitrogen Dioxide) per unit
+    area in an atmospheric column extending from the tropopause to the stratopause
+- id: no2_tropospheric_column
+  name: NO2 Tropospheric column
+  numeric_id: 342
+  type: Atmospheric chemistry
+  html_unit: molecules/cm2
+  unicode_unit: molecules/cm<sup>2</sup>
+  link: https://space.oscar.wmo.int//variables/view/no2_tropospheric_column
+  description: '2D field of total amount of NO2 molecules ( Nitrogen Dioxide) per
+    unit area in an atmospheric column extending from the Earth’s surface to the tropopause. '
+- id: no3_mole_fraction
+  name: NO3 Mole Fraction
+  numeric_id: 350
+  type: Atmospheric chemistry
+  html_unit: dimentionless (mol/mol)
+  unicode_unit: dimentionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/no3_mole_fraction
+  description: ' 3D field of amount of NO3 (expressed in moles) divided by the total
+    amount of all constituents in dry air (also expressed in moles)'
+- id: normalised_difference_vegetation_index_ndvi
+  name: Normalised Difference Vegetation Index (NDVI)
+  numeric_id: 107
+  type: Land surface
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/normalised_difference_vegetation_index_ndvi
+  description: Difference between maximum (in NIR) and minimum (around the Red) vegetation
+    reflectance, normalised to the summation.  Representative of total biomass, supportive
+    for computing LAI if not directly measured
+- id: o3
+  name: O3
+  numeric_id: 108
+  type: Atmospheric chemistry
+  html_unit: Dimentionless (mol/mol)
+  unicode_unit: Dimentionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/o3
+  description: 3D field of amount of O3 (Ozone, expressed in moles) divided by the
+    total amount of all constituents in air (also expressed in moles).
+- id: o3_mole_fraction
+  name: O3 mole fraction
+  numeric_id: 365
+  type: Atmospheric chemistry
+  html_unit: ' % '
+  unicode_unit: ' % '
+  link: https://space.oscar.wmo.int//variables/view/o3_mole_fraction
+  description: 3D field of amount of O<sub>3</sub> (Ozone, expressed in moles) in
+    the troposphere divided by the total amount of all constituents in dry air (also
+    expressed in moles)
+- id: o3_stratospheric_column
+  name: O3 Stratospheric Column
+  numeric_id: 370
+  type: Atmospheric chemistry
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/o3_stratospheric_column
+  description: 2D field of total amount of O3 (ozone) molecules per unit area in an
+    atmospheric column extending from tropopause to stratopause
+- id: o3_total_column
+  name: O3 Total Column
+  numeric_id: 109
+  type: Atmospheric chemistry
+  html_unit: molecules.cm-2 *
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/o3_total_column
+  description: 2D field of total amount of O3 molecules per unit area  in an atmospheric
+    column extending from the Earth’s surface to the upper edge of the atmosphere
+    (Dobson units).
+- id: o3_tropospheric_column
+  name: O3 Tropospheric Column
+  numeric_id: 369
+  type: Atmospheric chemistry
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/o3_tropospheric_column
+  description: 2D field of total amount of O3 (ozone) molecules per unit area in an
+    atmospheric column extending from the Earth’s surface to the to the tropopause
+- id: ocean_chlorophyll_concentration
+  name: 'Ocean chlorophyll concentration '
+  numeric_id: 110
+  type: Ocean
+  html_unit: 'mg/m3 '
+  unicode_unit: mg/m<sup>3 </sup>
+  link: https://space.oscar.wmo.int//variables/view/ocean_chlorophyll_concentration
+  description: Indicator of living phytoplankton biomass, extracted from ocean colour
+    observation. Uncertainty is expressed in mg/m<sup>3</sup> for a given concentration
+    of 1 mg/m<sup>3</sup> .
+- id: ocean_diffuse_attenuation_coefficient_dac
+  name: Ocean Diffuse Attenuation Coefficient (DAC)
+  numeric_id: 111
+  type: Ocean
+  html_unit: 'm-1 '
+  unicode_unit: m<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/ocean_diffuse_attenuation_coefficient_dac
+  description: 'Indicator of water turbidity and vertical processes in the ocean,
+    extracted from ocean colour observation. '
+- id: ocean_dynamic_topography
+  name: Ocean dynamic topography
+  numeric_id: 112
+  type: Ocean
+  html_unit: cm
+  unicode_unit: cm
+  link: https://space.oscar.wmo.int//variables/view/ocean_dynamic_topography
+  description: 'Deviation of sea level from the geoid caused by ocean currents (after
+    corrections for tides and atmospheric pressure effects) - Physical unit: [ cm
+    ] - Accuracy unit: [ cm ].'
+- id: ocean_salinity
+  name: Ocean salinity
+  numeric_id: 113
+  type: Ocean
+  html_unit: psu
+  unicode_unit: psu
+  link: https://space.oscar.wmo.int//variables/view/ocean_salinity
+  description: '3D field of salinity of the ocean  Requested in upper and deep ocean
+    - Physical unit: [ psu ], Practical Salinity Unit, close to 1 '
+- id: ocean_suspended_sediments_concentration
+  name: Ocean suspended sediments concentration
+  numeric_id: 117
+  type: Ocean
+  html_unit: 'g/m3 '
+  unicode_unit: g/m<sup>3</sup>
+  link: https://space.oscar.wmo.int//variables/view/ocean_suspended_sediments_concentration
+  description: Variable extracted from ocean colour observation. Indicative of river
+    outflow, re-suspension or pollution of other-than-biological origin. Uncertainty
+    expressed in g/m<sup>3</sup> at a specific concentration (e.g., 2 g/m<sup>3</sup> ).
+- id: ocean_temperature
+  name: Ocean temperature
+  numeric_id: 118
+  type: Ocean
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/ocean_temperature
+  description: 3D field of temperature of the ocean  Requested in upper and deep ocean.
+- id: ocean_velocity
+  name: Ocean velocity
+  numeric_id: 119
+  type: Ocean
+  html_unit: cm/s
+  unicode_unit: cm/s
+  link: https://space.oscar.wmo.int//variables/view/ocean_velocity
+  description: Ocean motion measured at various depth levels.
+- id: ocs_mole_fraction
+  name: OCS Mole fraction
+  numeric_id: 336
+  type: Atmospheric chemistry
+  html_unit: ' Dimentionless (mol/mol)'
+  unicode_unit: Dimentionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/ocs_mole_fraction
+  description: ' 3D field of amount of OCS (Carbonyl sulfide, expressed in moles)
+    divided by the total amount of all constituents in dry air (also expressed in
+    moles)'
+- id: oh
+  name: OH
+  numeric_id: 120
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mole/mole)
+  unicode_unit: dimensionless (mole/mole)
+  link: https://space.oscar.wmo.int//variables/view/oh
+  description: ' 3D field of amount of OH (Hydroxil radical, expressed in moles) divided
+    by the total amount of all constituents in dry air (also expressed in moles) '
+- id: oil_spill_cover
+  name: Oil spill cover
+  numeric_id: 121
+  type: Ocean
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/oil_spill_cover
+  description: Fraction of an ocean area polluted by hydrocarbons released from ships
+    or off-shore platforms, accidentally or deliberately.
+- id: pan
+  name: PAN
+  numeric_id: 122
+  type: Atmospheric chemistry
+  html_unit: Dimentionless (mol/mol)
+  unicode_unit: Dimentionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/pan
+  description: ' 3D field of amount of PAN (Peroxy Acetyl Nitrate, expressed in moles)
+    divided by the total amount of all constituents in dry air (also expressed in
+    moles) '
+- id: particle_effective_radius_cm
+  name: Particle effective radius [CM]
+  numeric_id: 376
+  type: Atmospheric chemistry
+  html_unit: μm
+  unicode_unit: μm
+  link: https://space.oscar.wmo.int//variables/view/particle_effective_radius_cm
+  description: The effective radius or the area-weighted mean radius of log-normal
+    particle size distribution for coarse mode
+- id: particle_effective_radius_fm
+  name: Particle effective radius [FM]
+  numeric_id: 375
+  type: Atmospheric chemistry
+  html_unit: μm
+  unicode_unit: μm
+  link: https://space.oscar.wmo.int//variables/view/particle_effective_radius_fm
+  description: The effective radius or the area-weighted mean radius of log-normal
+    particle size distribution for fine mode.The effective radius or the area-weighted
+    mean radius of log-normal particle size distribution.
+- id: particle_single_scattering_albedo_cm_550nm
+  name: Particle single scattering albedo [CM, 550nm]
+  numeric_id: 374
+  type: Atmospheric chemistry
+  html_unit: ''
+  unicode_unit: ''
+  link: https://space.oscar.wmo.int//variables/view/particle_single_scattering_albedo_cm_550nm
+  description: The ratio of the coarse mode particle scattering to the coarse mode
+    particle total extinction coefficient at 550nm.
+- id: particle_single_scattering_albedo_fm_550nm
+  name: Particle single scattering albedo [FM, 550nm]
+  numeric_id: 373
+  type: Atmospheric chemistry
+  html_unit: ''
+  unicode_unit: ''
+  link: https://space.oscar.wmo.int//variables/view/particle_single_scattering_albedo_fm_550nm
+  description: 'The ratio of the fine mode particle scattering to the fine mode particle
+    total extinction coefficient at 550nm.According to "WMO Guide to Meteorological
+    Instruments and Methods of Observation" Describes the relative contributions of
+    scattering and absorption to the total light extinction. According to GCOS: The
+    Aerosol Single Scattering Albedo (ω0 or SSA) ratio of particle light scattering
+    coefficient to the particle light extinction coefficient. ω0 is defined as σsp/σep,
+    or σsp/(σsp+ σap) where (σep), is the volumetric cross-section for light extinction
+    and is commonly called the particle light extinction coefficient typically reported
+    in units of Mm-1 (10-6 m-1). It is the sum of the particle light scattering (σsp)
+    and particle light absorption coefficients (σap), σep = σsp + σap . All coefficients
+    are spectrally dependent.'
+- id: pco2
+  name: pCO2
+  numeric_id: 123
+  type: Ocean
+  html_unit: microatm
+  unicode_unit: microatm
+  link: https://space.oscar.wmo.int//variables/view/pco2
+  description: 'Partial pressure of carbon dioxide at the surface of the sea '
+- id: permafrost
+  name: Permafrost
+  numeric_id: 124
+  type: Land surface
+  html_unit: '%'
+  unicode_unit: ''
+  link: https://space.oscar.wmo.int//variables/view/permafrost
+  description: ''
+- id: ph
+  name: pH
+  numeric_id: 125
+  type: Ocean
+  html_unit: Dimensionless
+  unicode_unit: pH units
+  link: https://space.oscar.wmo.int//variables/view/ph
+  description: The hydrogen ion concentration in seawater, which is a measure of acidity
+    and alkalinity
+- id: photosynthetically_active_radiation_par
+  name: Photosynthetically Active Radiation (PAR)
+  numeric_id: 126
+  type: Aerosols and radiation
+  html_unit: W.m-2
+  unicode_unit: W.m<sup>-2</sup>
+  link: https://space.oscar.wmo.int//variables/view/photosynthetically_active_radiation_par
+  description: 'Flux of downwelling photons of wavelength 0.4-0.7 '
+- id: precipitation_liquid_or_solid
+  name: Precipitation  (liquid or solid)
+  numeric_id: 127
+  type: Clouds and precipitations
+  html_unit: 'g .s^-1 .m^-2 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/precipitation_liquid_or_solid
+  description: '3D field of the vertical flux of precipitating water mass (precipitation
+    intensity)  '
+- id: proton_differential_directional_flux
+  name: Proton differential directional flux
+  numeric_id: 130
+  type: 'Energetic particles and solar wind '
+  html_unit: 'protons·(cm2 s sr eV)-1 '
+  unicode_unit: '% '
+  link: https://space.oscar.wmo.int//variables/view/proton_differential_directional_flux
+  description: Flux density energy spectrum of low-, medium-, and high-energy protons
+    from the magnetosphere, the radiation belts or the interplanetary medium, per
+    unit solid angle.
+- id: proton_integral_directional_flux
+  name: Proton integral directional flux
+  numeric_id: 220
+  type: 'Energetic particles and solar wind '
+  html_unit: protons·(cm2 s sr)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/proton_integral_directional_flux
+  description: Flux density of low-, medium-, and high-energy protons from the magnetosphere,
+    the radiation belts or the interplanetary medium.
+- id: psc_occurrence
+  name: PSC occurrence
+  numeric_id: 131
+  type: Atmospheric chemistry
+  html_unit: HR, FAR
+  unicode_unit: FAR/HR
+  link: https://space.oscar.wmo.int//variables/view/psc_occurrence
+  description: '3D field of Polar Stratospheric Clouds occurrence. - Accuracy expressed
+    as Hit Rate [ HR ] and False Alarm Rate [ FAR ].  Simplified: [ FAR/HR]'
+- id: radiation_dose_rate
+  name: Radiation Dose Rate
+  numeric_id: 215
+  type: 'Energetic particles and solar wind '
+  html_unit: mSv·h-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/radiation_dose_rate
+  description: 3D field of the dose rate of energetic particles
+- id: radiation_profile
+  name: Radiation profile
+  numeric_id: 360
+  type: Aerosols and radiation
+  html_unit: W/m2
+  unicode_unit: W/m2
+  link: https://space.oscar.wmo.int//variables/view/radiation_profile
+  description: Vertical profile of upward and downward LW and SW radiation components
+- id: radio_waves
+  name: Radio-waves
+  numeric_id: 257
+  type: Solar monitoring
+  html_unit: watt·m-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/radio_waves
+  description: Travelling radio-waves of solar, galactic and extragalactic origin,
+    entering the Earth’s environment.
+- id: relative_humidity
+  name: Relative humidity
+  numeric_id: 355
+  type: Basic atmospheric
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/relative_humidity
+  description: 3D field of relative humidity in the atmosphere. Relative humidity
+    is the ratio of the amount of atmospheric moisture present relative to the amount
+    that would be present if the air were saturated with respct to water or ice to
+    be specified in the metadata
+- id: river_discharge
+  name: River discharge
+  numeric_id: 132
+  type: Land surface
+  html_unit: 'm^3  . s^-1 '
+  unicode_unit: 'm^3  . s^-1 '
+  link: https://space.oscar.wmo.int//variables/view/river_discharge
+  description: 'Volume of water flowing through a river per unit of time '
+- id: sea_ice_cover
+  name: Sea-ice cover
+  numeric_id: 135
+  type: Sea Ice
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/sea_ice_cover
+  description: Fraction of an ocean area where ice is present
+- id: sea_ice_elevation
+  name: Sea-ice elevation
+  numeric_id: 136
+  type: Sea Ice
+  html_unit: cm
+  unicode_unit: cm
+  link: https://space.oscar.wmo.int//variables/view/sea_ice_elevation
+  description: Elevation of the surface of the sea-ice sheet above sea level
+- id: sea_ice_motion
+  name: Sea-ice motion
+  numeric_id: 198
+  type: Sea Ice
+  html_unit: 'km*d-1 '
+  unicode_unit: km*d<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/sea_ice_motion
+  description: Sea-ice motion
+- id: sea_ice_thickness
+  name: Sea-ice thickness
+  numeric_id: 138
+  type: Sea Ice
+  html_unit: cm
+  unicode_unit: cm
+  link: https://space.oscar.wmo.int//variables/view/sea_ice_thickness
+  description: 'Thickness of the ice sheet. It is related to sea-ice elevation and
+    ice density '
+- id: sea_ice_type
+  name: Sea-ice type
+  numeric_id: 139
+  type: Sea Ice
+  html_unit: Classes
+  unicode_unit: Classes <sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/sea_ice_type
+  description: 'Variable convolving several factors (age, roughness, density, etc.)
+    - Accuracy expressed as number of classes. Actually [ classes^-1 ] is used, so
+    that smaller figure corresponds to better performance, as usual. '
+- id: sf6
+  name: SF6
+  numeric_id: 140
+  type: Atmospheric chemistry
+  html_unit: dimensionless (mol/mol)
+  unicode_unit: dimensionless (mol/mol)
+  link: https://space.oscar.wmo.int//variables/view/sf6
+  description: '3D field of amount  of SF6 (Sulfur hexafluoride,   expressed in moles)
+    divided by the total amount of all constituents in dry air (also expressed in
+    moles). '
+- id: short_wave_cloud_reflectance
+  name: Short-wave cloud reflectance
+  numeric_id: 141
+  type: Aerosols and radiation
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/short_wave_cloud_reflectance
+  description: 'Reflectance of the solar radiation from clouds '
+- id: significant_wave_height
+  name: Significant wave height
+  numeric_id: 142
+  type: Ocean
+  html_unit: m
+  unicode_unit: m
+  link: https://space.oscar.wmo.int//variables/view/significant_wave_height
+  description: Average amplitude of the highest 30 of 100 waves.
+- id: snow_cover
+  name: Snow cover
+  numeric_id: 143
+  type: Land surface
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/snow_cover
+  description: 'Fraction of a given area which is covered by snow '
+- id: snow_depth
+  name: Snow depth
+  numeric_id: 206
+  type: Land surface
+  html_unit: cm
+  unicode_unit: cm
+  link: https://space.oscar.wmo.int//variables/view/snow_depth
+  description: Vertical distance from the snow surface to the underlying surface (ground,
+    glacier ice or sea ice).
+- id: snow_status_wet_dry
+  name: Snow status (wet/dry)
+  numeric_id: 144
+  type: Land surface
+  html_unit: Wet/Dry
+  unicode_unit: HR, FAR
+  link: https://space.oscar.wmo.int//variables/view/snow_status_wet_dry
+  description: Binary product (dry or melting/thawing) expressing the presence of
+    liquid water in a snow layer- Accuracy expressed as Hit Rate [ HR ] and False
+    Alarm Rate [ FAR ].
+- id: snow_water_equivalent
+  name: Snow water equivalent
+  numeric_id: 145
+  type: Land surface
+  html_unit: mm
+  unicode_unit: mm
+  link: https://space.oscar.wmo.int//variables/view/snow_water_equivalent
+  description: Vertical depth of the water that would be obtained by melting a snow
+    layer.  Linked to snow depth through the density of the snow layer.
+- id: so2
+  name: SO2
+  numeric_id: 146
+  type: Atmospheric chemistry
+  html_unit: ppt
+  unicode_unit: ppt
+  link: https://space.oscar.wmo.int//variables/view/so2
+  description: ' 3D field of amount of SO<sub>2</sub> (Sulfur dioxide, expressed in
+    moles) divided by the total amount of all constituents in dry air (also expressed
+    in moles) '
+- id: so2_total_column
+  name: SO2 Total Column
+  numeric_id: 147
+  type: Atmospheric chemistry
+  html_unit: molecules/cm2
+  unicode_unit: molecules/cm<sup>2</sup>
+  link: https://space.oscar.wmo.int//variables/view/so2_total_column
+  description: ' 2D field of total amount of SO2 molecules (Sulfur dioxide) per unit
+    area in an atmospheric column extending from the Earth’s surface to the upper
+    edge of the atmosphere '
+- id: so2_tropospheric_column
+  name: SO2 Tropospheric Column
+  numeric_id: 352
+  type: Atmospheric chemistry
+  html_unit: molecules.cm-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/so2_tropospheric_column
+  description: ' 2D field of total amount of SO2 molecules per unit area in an atmospheric
+    column extending from the Earth’s surface to the tropopause. '
+- id: soil_moisture_in_the_roots_region
+  name: Soil moisture  (in the roots region)
+  numeric_id: 148
+  type: Land surface
+  html_unit: m3 /m3
+  unicode_unit: m<sup>3</sup> /m<sup>3</sup>
+  link: https://space.oscar.wmo.int//variables/view/soil_moisture_in_the_roots_region
+  description: Sub-soil 3D field of the fractional content of water in a volume of
+    wet soil. Requested from surface down to ~ 3 m
+- id: soil_temperature
+  name: Soil temperature
+  numeric_id: 202
+  type: Land surface
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/soil_temperature
+  description: 'The standard depths for soil temperature measurements
+
+    are 5, 10, 20, 50 and 100 cm below the
+
+    surface; additional depths may be included. The
+
+    site for such measurements should be a level plot of
+
+    bare ground (about 75 cm^2 ) and typical of the
+
+    surrounding soil for which information is required.'
+- id: soil_type
+  name: Soil type
+  numeric_id: 150
+  type: Land surface
+  html_unit: Classes
+  unicode_unit: Classes <sup>-1 </sup>
+  link: https://space.oscar.wmo.int//variables/view/soil_type
+  description: Result of the classification of different types of soil within an area
+    - Accuracy expressed as inverse of the number of classes, so that smaller figures
+    correspond to better performance.
+- id: solar_ca_ii_k_image
+  name: Solar Ca II-K image
+  numeric_id: 151
+  type: Solar monitoring
+  html_unit: erg·(cm2 arcsec s)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_ca_ii_k_image
+  description: Image of the Sun in the K-line of Ca-II  (393.4 nm)
+- id: solar_coronagraphic_image
+  name: Solar coronagraphic image
+  numeric_id: 178
+  type: Solar monitoring
+  html_unit: erg·(cm2 arcsec s)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_coronagraphic_image
+  description: Image of the solar corona surrounding the Sun.
+- id: solar_electric_field
+  name: Solar electric field
+  numeric_id: 256
+  type: Solar monitoring
+  html_unit: ' mV·m-1·arcsec-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_electric_field
+  description: ' Map of magnitude and direction of the electric field at the solar
+    surface (photosphere). '
+- id: solar_euv_flux
+  name: Solar EUV flux
+  numeric_id: 58
+  type: Solar monitoring
+  html_unit: 'W·m-2 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_euv_flux
+  description: Integrated EUV flux over the solar disk
+- id: solar_euv_flux_spectrum
+  name: Solar EUV flux spectrum
+  numeric_id: 245
+  type: Solar monitoring
+  html_unit: ' W·m-2·nm-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_euv_flux_spectrum
+  description: ' Energy spectrum of the EUV flux integrated over the solar disk. '
+- id: solar_euv_image
+  name: Solar EUV image
+  numeric_id: 152
+  type: Solar monitoring
+  html_unit: erg·(cm2 arcsec s)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_euv_image
+  description: Images of the Sun in the Extreme Ultra-Violet (EUV) wavelengths in
+    order to identify features such as filaments, active regions and coronal holes.
+- id: solar_gamma_ray_flux
+  name: Solar gamma-ray flux
+  numeric_id: 253
+  type: Solar monitoring
+  html_unit: ' W·m-2 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_gamma_ray_flux
+  description: ' Integrated gamma-ray flux over the solar disk '
+- id: solar_gamma_ray_flux_spectrum
+  name: Solar gamma-ray flux spectrum
+  numeric_id: 252
+  type: Solar monitoring
+  html_unit: ' W·m-2 ·nm-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_gamma_ray_flux_spectrum
+  description: ' Energy spectrum of the gamma-ray flux integrated over the solar disk '
+- id: solar_h_alpha_image
+  name: Solar H-alpha image
+  numeric_id: 153
+  type: Solar monitoring
+  html_unit: 'erg·(cm2 arcsec s)-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_h_alpha_image
+  description: 'Image of the Sun in the Hydrogen-alpha transition wavelength (656.3
+    nm). '
+- id: solar_lyman_alpha_flux
+  name: Solar Lyman-alpha flux
+  numeric_id: 276
+  type: Solar monitoring
+  html_unit: watt·m-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_lyman_alpha_flux
+  description: Solar flux in the Hydrogen Lyman-alpha transition wavelength (121.6
+    nm)
+- id: solar_lyman_alpha_image
+  name: Solar Lyman-alpha image
+  numeric_id: 275
+  type: Solar monitoring
+  html_unit: erg·(cm2 arcsec s)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_lyman_alpha_image
+  description: Image of the Sun in the Hydrogen Lyman-alpha transition wavelength
+    (121.6 nm)
+- id: solar_magnetic_field
+  name: Solar magnetic field
+  numeric_id: 154
+  type: Solar monitoring
+  html_unit: Gauss
+  unicode_unit: Gauss
+  link: https://space.oscar.wmo.int//variables/view/solar_magnetic_field
+  description: Vector magnetic field (1D or 3D) at the solar surface (photosphere/chromosphere)
+- id: solar_radio_flux
+  name: Solar radio flux
+  numeric_id: 155
+  type: Solar monitoring
+  html_unit: W·m-2
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_radio_flux
+  description: Integrated radio flux over the solar disk.
+- id: solar_radio_flux_spectrum
+  name: Solar radio flux spectrum
+  numeric_id: 59
+  type: Solar monitoring
+  html_unit: W·m-2·Hz-1
+  unicode_unit: W·m<sup>-2</sup>·Hz<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/solar_radio_flux_spectrum
+  description: Solar radio flux energy spectrum integrated over the solar disk.
+- id: solar_radio_image
+  name: Solar radio image
+  numeric_id: 301
+  type: Solar monitoring
+  html_unit: 'W.m  -2 '
+  unicode_unit: W.m-2
+  link: https://space.oscar.wmo.int//variables/view/solar_radio_image
+  description: 2D image of the solar radio flux
+- id: solar_spectral_irradiance
+  name: Solar spectral irradiance
+  numeric_id: 359
+  type: Aerosols and radiation
+  html_unit: W/m2/µm
+  unicode_unit: W/m2/µm
+  link: https://space.oscar.wmo.int//variables/view/solar_spectral_irradiance
+  description: 'Total Solar Irradiance (TSI); when measured as a function of wavelength
+    it is the spectral irradiance '
+- id: solar_uv_flux
+  name: Solar UV flux
+  numeric_id: 240
+  type: Solar monitoring
+  html_unit: ' watt·m-2 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_uv_flux
+  description: ' Integrated UV flux over the solar disk. '
+- id: solar_uv_flux_spectrum
+  name: Solar UV flux spectrum
+  numeric_id: 238
+  type: Solar monitoring
+  html_unit: ' W·m-2 ·nm-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_uv_flux_spectrum
+  description: ' Energy spectrum of the UV flux integrated over the solar disk. '
+- id: solar_uv_image
+  name: Solar UV image
+  numeric_id: 241
+  type: Solar monitoring
+  html_unit: ' erg·(cm2 arcsec s)-1'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_uv_image
+  description: ' Images of the Sun in the UV wavelengths. '
+- id: solar_velocity_fields
+  name: Solar velocity fields
+  numeric_id: 258
+  type: Solar monitoring
+  html_unit: m·s-1·arcsec-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_velocity_fields
+  description: ' Map of 3D velocity of particles of the Solar atmosphere, significant
+    of the Sun interior. '
+- id: solar_vis_flux
+  name: Solar VIS flux
+  numeric_id: 265
+  type: Solar monitoring
+  html_unit: ' W·m-2 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_vis_flux
+  description: ' Integrated VIS flux over the solar disk '
+- id: solar_vis_flux_spectrum
+  name: Solar VIS flux spectrum
+  numeric_id: 234
+  type: Solar monitoring
+  html_unit: ' W·m-2 ·nm-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_vis_flux_spectrum
+  description: ' Energy spectrum of the integrated VIS flux over the solar disk. '
+- id: solar_vis_image
+  name: Solar VIS image
+  numeric_id: 235
+  type: Solar monitoring
+  html_unit: ' erg·(cm2 arcsec s)-1'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_vis_image
+  description: ' Images of the Sun in the VIS wavelengths. '
+- id: solar_white_light_image
+  name: Solar white light image
+  numeric_id: 156
+  type: Solar monitoring
+  html_unit: erg·(cm2 arcsec s)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_white_light_image
+  description: Image of the Sun in white light
+- id: solar_wind_density
+  name: Solar wind density
+  numeric_id: 157
+  type: 'Energetic particles and solar wind '
+  html_unit: particles·cm-3
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_wind_density
+  description: 'Density of solar wind plasma '
+- id: solar_wind_temperature
+  name: Solar wind temperature
+  numeric_id: 158
+  type: 'Energetic particles and solar wind '
+  html_unit: K
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_wind_temperature
+  description: Temperature of solar wind protons
+- id: solar_wind_velocity
+  name: Solar wind velocity
+  numeric_id: 159
+  type: 'Energetic particles and solar wind '
+  html_unit: km·s-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_wind_velocity
+  description: Vector velocity of solar wind plasma
+- id: solar_x_ray_flux
+  name: Solar X-ray flux
+  numeric_id: 184
+  type: Solar monitoring
+  html_unit: watt·m-2
+  unicode_unit: watt·m<sup>-2</sup>
+  link: https://space.oscar.wmo.int//variables/view/solar_x_ray_flux
+  description: Integrated X-ray flux over the solar disk
+- id: solar_x_ray_flux_spectrum
+  name: Solar X-ray flux spectrum
+  numeric_id: 249
+  type: Solar monitoring
+  html_unit: ' W·m-2·Á-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_x_ray_flux_spectrum
+  description: ' Energy spectrum of the X-ray flux integrated over the solar disk. '
+- id: solar_x_ray_image
+  name: Solar X-ray image
+  numeric_id: 160
+  type: Solar monitoring
+  html_unit: erg·(cm2 arcsec s)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/solar_x_ray_image
+  description: Image of the Sun in X-ray wavelengths
+- id: specific_humidity
+  name: Specific humidity
+  numeric_id: 161
+  type: Basic atmospheric
+  html_unit: 'g/kg '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/specific_humidity
+  description: 3D field of the specific humidity in the atmosphere. The specific humidity
+    is the ratio between the mass of water vapour and the mass of moist air.
+- id: spread_f
+  name: Spread F
+  numeric_id: 163
+  type: Ionospheric disturbances
+  html_unit: km
+  unicode_unit: km
+  link: https://space.oscar.wmo.int//variables/view/spread_f
+  description: 'Vertical thickness of highly structured ion density in the F-region
+    of the ionosphere. '
+- id: temperature_of_the_tropopause
+  name: Temperature of the tropopause
+  numeric_id: 164
+  type: Basic atmospheric
+  html_unit: K
+  unicode_unit: K
+  link: https://space.oscar.wmo.int//variables/view/temperature_of_the_tropopause
+  description: 'Atmospheric temperature at the height of the surface separating the
+    troposphere from the stratosphere '
+- id: total_alkalinity_at
+  name: Total alkalinity (AT)
+  numeric_id: 165
+  type: Ocean
+  html_unit: 'Mol. Kg-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/total_alkalinity_at
+  description: 'The amount of acid necessary to titrate all weak bases in seawater. '
+- id: total_lightning_density
+  name: Total lightning density
+  numeric_id: 302
+  type: Clouds and precipitations
+  html_unit: Dimensionless
+  unicode_unit: Dimensionless
+  link: https://space.oscar.wmo.int//variables/view/total_lightning_density
+  description: Total number of detected flashes in the corresponding time interval
+    and the space unit. The space unit (grid box) should be equal to the horizontal
+    resolution and the accumulation time to the observing cycle
+- id: turbulence
+  name: Turbulence
+  numeric_id: 166
+  type: Basic atmospheric
+  html_unit: J/m3
+  unicode_unit: J/m<sup>3</sup>
+  link: https://space.oscar.wmo.int//variables/view/turbulence
+  description: '3D field of kinetic energy density of turbulent motion of the air '
+- id: upward_long_wave_irradiance_at_toa
+  name: Upward long-wave irradiance at TOA
+  numeric_id: 169
+  type: Aerosols and radiation
+  html_unit: 'W/m2 '
+  unicode_unit: W/m<sup>2</sup>
+  link: https://space.oscar.wmo.int//variables/view/upward_long_wave_irradiance_at_toa
+  description: 'Flux density of terrestrial radiation emitted by the Earth surface
+    and the gases, aerosols and clouds ot the atmosphere at the top of the atmosphere '
+- id: upward_short_wave_irradiance_at_toa
+  name: Upward short-wave irradiance at TOA
+  numeric_id: 167
+  type: Aerosols and radiation
+  html_unit: 'W/m2 '
+  unicode_unit: W/m<sup>2</sup>
+  link: https://space.oscar.wmo.int//variables/view/upward_short_wave_irradiance_at_toa
+  description: 'Flux density of solar radiation, reflected by the Earth surface and
+    atmosphere, emitted to space at the top of the atmosphere '
+- id: upward_spectral_radiance_at_toa
+  name: Upward spectral radiance at TOA
+  numeric_id: 168
+  type: Aerosols and radiation
+  html_unit: 'W.m-2 .nm-1 . sr-1 '
+  unicode_unit: SNR<sup>-1 </sup>
+  link: https://space.oscar.wmo.int//variables/view/upward_spectral_radiance_at_toa
+  description: 'Upward radiant power measured at the top of the atmosphere per area
+    unit, per solid angle, and per wavelength interval. Spectral range 0.2-200 µm.
+    Resolving power ?/??= 1000. Accuracy quoted as SNR (Signal-to-Noise-Ratio), actually
+    SNR^-1 so that smaller figure means better performance, as usual. '
+- id: uv_flux
+  name: UV flux
+  numeric_id: 243
+  type: Solar monitoring
+  html_unit: ' watt·m-2 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/uv_flux
+  description: ' Integrated UV flux. '
+- id: uv_flux_spectrum
+  name: UV flux spectrum
+  numeric_id: 304
+  type: Solar monitoring
+  html_unit: w.m-2.nm-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/uv_flux_spectrum
+  description: Energy spectrum of diffuse UV flux measured in space.
+- id: uv_sky_image
+  name: UV sky image
+  numeric_id: 244
+  type: Solar monitoring
+  html_unit: ' erg·(cm2 arcsec s)-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/uv_sky_image
+  description: UV image of the sky
+- id: vegetation_type
+  name: Vegetation type
+  numeric_id: 172
+  type: Land surface
+  html_unit: Classes
+  unicode_unit: Classes<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/vegetation_type
+  description: Result of the classification of different types of vegetation within
+    a vegetated area - Accuracy expressed as inverse of the number of classes, so
+    that smaller figures correspond to better performance.
+- id: vis_flux
+  name: VIS flux
+  numeric_id: 306
+  type: Solar monitoring
+  html_unit: watt·m-2
+  unicode_unit: ' % '
+  link: https://space.oscar.wmo.int//variables/view/vis_flux
+  description: Integrated VIS flux
+- id: vis_flux_spectrum
+  name: VIS flux spectrum
+  numeric_id: 307
+  type: Solar monitoring
+  html_unit: watt.m-2.nm-1
+  unicode_unit: ' % '
+  link: https://space.oscar.wmo.int//variables/view/vis_flux_spectrum
+  description: Energy spectrum of diffuse VIS flux measured in space
+- id: vis_sky_image
+  name: VIS sky image
+  numeric_id: 308
+  type: Solar monitoring
+  html_unit: ' erg·(cm2 arcsec s)-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/vis_sky_image
+  description: VIS image of the sky
+- id: water_leaving_spectral_radiance
+  name: Water-leaving spectral radiance
+  numeric_id: 175
+  type: Ocean
+  html_unit: 'W .m-2 . sr-1 .nm-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/water_leaving_spectral_radiance
+  description: Upward spectral radiance from the ocean surface, i.e. amount of light
+    leaving the ocean per unit area, per wavelength and per solid angle.
+- id: wave_1d_energy_frequency_spectrum
+  name: Wave 1D energy frequency spectrum
+  numeric_id: 203
+  type: Ocean
+  html_unit: m2 . Hz-1
+  unicode_unit: m<sup>2</sup> . Hz<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/wave_1d_energy_frequency_spectrum
+  description: 1D variable colloquially referred to as “wave spectrum”. Describes
+    the wave energy in each frequency band (e.g. 25 frequency bands) regardless of
+    the direction of propagation
+- id: wave_directional_energy_frequency_spectrum
+  name: Wave directional energy frequency spectrum
+  numeric_id: 176
+  type: Ocean
+  html_unit: 'm2 . Hz-1 . rad-1 '
+  unicode_unit: m<sup>2</sup> . Hz<sup>-1</sup> . rad<sup>-1 </sup>
+  link: https://space.oscar.wmo.int//variables/view/wave_directional_energy_frequency_spectrum
+  description: 2D variable colloquially referred to as wave spectrum. Describes the
+    wave energy travelling in each direction and frequency band (e.g., 24 distinct
+    azimuth sectors each 15° wide, and 25 frequency bands)
+- id: wetland_extent
+  name: Wetland extent
+  numeric_id: 177
+  type: Land surface
+  html_unit: '%'
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/wetland_extent
+  description: 'Fraction of an area flood by water '
+- id: wind_horizontal
+  name: Wind (horizontal)
+  numeric_id: 179
+  type: Basic atmospheric
+  html_unit: m.s-1
+  unicode_unit: m.s<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/wind_horizontal
+  description: 3D field of the horizontal vector component (2D) of the 3D wind vector.
+    The acuracy is meant as vector error, i.e. the module of the vector difference
+    between the observed vector and the true vector.
+- id: wind_vertical
+  name: Wind (vertical)
+  numeric_id: 180
+  type: Basic atmospheric
+  html_unit: cm.s-1
+  unicode_unit: cm.s<sup>-1</sup>
+  link: https://space.oscar.wmo.int//variables/view/wind_vertical
+  description: '3D field of the vertical component of the 3D wind vector '
+- id: wind_gust
+  name: Wind gust
+  numeric_id: 205
+  type: Land surface
+  html_unit: m.s-1 
+  unicode_unit: m.s<sup>-1</sup> 
+  link: https://space.oscar.wmo.int//variables/view/wind_gust
+  description: Maximum value, over the observing cycle, of the 3-second running average
+    wind speed
+- id: wind_stress
+  name: Wind stress
+  numeric_id: 182
+  type: Ocean
+  html_unit: ''
+  unicode_unit: Pa
+  link: https://space.oscar.wmo.int//variables/view/wind_stress
+  description: 'The shear force per unit area exerted by wind blowing over the sea
+    surface - '
+- id: x_ray_flux
+  name: X-ray flux
+  numeric_id: 251
+  type: Solar monitoring
+  html_unit: ' watt·m-2 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/x_ray_flux
+  description: ' Integrated X-ray flux. '
+- id: x_ray_flux_spectrum
+  name: X-ray flux spectrum
+  numeric_id: 250
+  type: Solar monitoring
+  html_unit: ' W·m-2·Å-1 '
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/x_ray_flux_spectrum
+  description: ' Energy spectrum of the integrated X-ray flux. '
+- id: x_ray_sky_image
+  name: X-ray sky image
+  numeric_id: 263
+  type: Solar monitoring
+  html_unit: erg·(cm2 arcsec s)-1
+  unicode_unit: '%'
+  link: https://space.oscar.wmo.int//variables/view/x_ray_sky_image
+  description: X-ray image of the sky

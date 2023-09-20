@@ -1,0 +1,198 @@
+# name & type: mars key is name@type
+
+# These values pulled from codes.ecmwf.int/ if possible
+# dtype: INTEGER
+# column_decription: the description for this column
+# value_description: the meaning of this particular numeric value
+# dtype: one of REAL, DOUBLE, INTEGER, STRING
+
+# Each Mars_key can can be populated using different methods:
+
+# Fill this column with a literal constant
+# method: constant
+# value: value
+
+# Fill this column by looking the observation variable up in the config
+# method: from_config
+
+# Fill this column with a static value by looking up a key in the message metadata
+# fill_method: from_metadata
+# key: author
+
+# Fill this column with a varying value by looking up a key in the message data
+# fill_method: from_data
+# key: lat
+
+# Fill this column using a function defined in obsproc.encoders.odb
+# fill_method: function
+# key: function_name
+
+# - name: codetype@body
+#   dtype: INTEGER
+#   column_description: custom
+#   fill_method: from_config
+
+- name: entryno@body
+  fill_method: constant
+  value: 1
+  column_description: entry sq. no.
+  dtype: INTEGER
+
+- name: varno@body
+  fill_method: from_config
+  column_description: variable number
+  dtype: INTEGER
+
+- name: statid@hdr
+  fill_method: constant
+  value: ++++xxxx
+  column_description: station id (character*8)
+  dtype: STRING
+
+- name: obstype@hdr
+  fill_method: from_config
+  column_description: observation type
+  dtype: INTEGER
+
+- name: codetype@hdr
+  fill_method: from_config
+  column_description: observation code type
+  dtype: INTEGER
+
+- name: source@hdr
+  fill_method: function
+  key: source
+  column_description: 'source id of obs. (character*8) : re-analysis purposes'
+  dtype: STRING
+
+  # This on should be some incremental alphanumeric key based on a mapping
+  # from incoming keys to our 8 byte asci byte output
+- name: stationid@hdr
+  dtype: STRING
+  fill_method: function
+  key: station_id
+  column_description: custom
+
+- name: project@hdr
+  dtype: STRING
+  fill_method: constant
+  value: iCHANGE
+  column_description: custom
+
+  # For now just fixed to "meteotracker" or "cima"
+- name: dataset@hdr
+  dtype: STRING
+  fill_method: function
+  key: dataset
+  column_description: custom
+
+- name: groupid@hdr
+  dtype: INTEGER
+  fill_method: constant
+  value: 17
+  column_description: mars key - observation group
+
+
+- name: reportype@hdr
+  dtype: INTEGER
+  fill_method: constant
+  value: 16022
+  column_description: mars key - report type for mar
+
+
+- name: class@desc
+  dtype: INTEGER
+  fill_method: constant
+  value: 2
+  column_description: mars key - ecmwf classification for data
+
+
+- name: type@desc
+  dtype: INTEGER
+  fill_method: constant
+  value: 264
+  column_description: mars key - type of field used to retrieve data
+
+
+- name: stream@desc
+  dtype: INTEGER
+  fill_method: constant
+  value: 1247
+  column_description: mars key - forecasting system used to generate data
+
+
+- name: expver@desc
+  dtype: STRING
+  fill_method: constant
+  value: xxxx
+  column_description: mars key - experiment id
+
+- name: levtype@desc
+  dtype: STRING
+  fill_method: constant
+  value: sfc
+  column_description: custom
+
+- name: date@hdr
+  dtype: INTEGER
+  column_description: obs. date
+  fill_method: function
+  key: decimal_encoded_date
+
+- name: time@hdr
+  dtype: INTEGER
+  column_description: obs. exact time
+  fill_method: function
+  key: four_digit_hour
+
+- name: andate@desc
+  dtype: INTEGER
+  column_description: analysis date
+  fill_method: function
+  key: decimal_encoded_date
+
+- name: antime@desc
+  dtype: INTEGER
+  column_description: analysis time
+  fill_method: function
+  key: four_digit_hour
+
+- name: stalt@hdr
+  column_description: altitude
+  dtype: REAL
+  fill_method: function
+  key: altitude
+
+# lat and lon coords
+- name: lat@hdr
+  column_description: latitude
+  dtype: REAL
+  fill_method: from_data
+  key: lat
+
+- name: lon@hdr
+  column_description: longitude
+  dtype: REAL
+  fill_method: from_data
+  key: lon
+
+# The minutes including 2dp fractional part
+- name: min@body
+  dtype: REAL
+  column_description: custom
+  fill_method: function
+  key: minutes_with_fractional_seconds
+
+# surface pressure that acts as an implicit altitude
+- name: press@body
+  dtype: REAL
+  column_description: custom
+  fill_method: from_data
+  key: air_pressure_near_surface
+
+# The actual observed value
+- name: obsvalue@body
+  column_description: observed variable
+  dtype: REAL
+  fill_method: function
+  key: obsvalue

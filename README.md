@@ -98,7 +98,7 @@ The `-vv` and `--finish-after` options are useful for debugging runs.
 See [this notebook](examples/notebooks/run_the_pipeline_manually.ipynb) for a walkthrough of assembling the pipeline from various components and then running it. This is useful for debugging the output at various stages in the pipeline.
 
 ## The config
-There's a lot happening in `examples/config.yaml`. The structure of the file is defined by a set of nested python dataclasses starting with `Config` in `obsproc.core.config_parser`.
+There's a lot happening in `config/config.yaml`. The structure of the file is defined by a set of nested python dataclasses starting with `Config` in `obsproc.core.config_parser`.
 
 The three big pieces are the parsers which define how to rename and clean up the input data, `canonical_variables.yaml` which defines a unique internal name, dtype and unit for each variable and `MARS_keys.yaml` which defines how to spit the data out to ODB format.
 

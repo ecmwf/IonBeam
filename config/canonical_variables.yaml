@@ -1,0 +1,164 @@
+# This file will contain a list of our canonical variables various metadata associated with them
+
+# This is our canonical name for each variable
+# Where possible I have used the same keys as defined by the WMO, see WMO_variables.yaml
+# When that's not possible we need to define the key, unit and definition
+# Possibly other variables too
+
+# for dtype use object aliases from https://pandas.pydata.org/docs/user_guide/basics.html#basics-dtypes
+# default dtype is float64
+
+- name: time
+  dtype: datetime64[ns, UTC]
+
+- name: offset_tz
+  desc: a variable that appears in the meteotracker data
+  dtype: object
+
+- name: lat
+  unit: "°"
+
+- name: lon
+  unit: "°"
+
+- name: altitude
+  unit: m
+
+- name: author
+  dtype: object
+
+- name: track_id
+  desc: A unique identifer for a single recorded track from a mobile sensor.
+  dtype: object
+
+- name: station_id
+  desc: A unique identifer for a stationary sensor.
+  dtype: object
+
+- name: sensor_type
+  dtype: object
+
+- name: location
+  dtype: int
+
+- name: observation_id
+  desc: A unique identifer for a stationary sensor.
+  dtype: object
+
+- name: air_temperature_near_surface
+  output: true
+  unit: K
+  codetype: 35 # Land TEMP
+  varno: 39 # 2m temperature (K)
+  obstype: 5 # TEMP
+
+- name: relative_humidity_near_surface
+  output: true
+  unit: "%"
+  WMO: true # indicates this exact name is defined by the WMO
+  codetype: 14 # Automatic Land SYNOP
+  varno: 58 # 2m rel. humidity
+  obstype: 1 # SYNOP
+
+
+- name: internal_temperature
+  unit: K
+  desc: The internal temperature of the sensor.
+
+- name: air_pressure_near_surface
+  unit: Pa
+  WMO: False #the WMO use hPa as the unit
+
+- name: pressure_sealevel
+  unit: Pa
+
+
+
+- name: co2
+  unit: ppm
+  WMO: true
+
+- name: wind_gust
+  unit: m.s-1 
+  WMO: true
+
+- name: wind_gust_direction
+  unit: "°"
+
+- name: dew_point_temperature
+  unit: K
+  WMO: true
+
+- name: wind_direction_near_surface
+  unit: "°"
+  WMO: true
+
+- name: wind_speed_near_surface
+  unit: "m/s"
+  WMO: true
+
+- name: rain_gauge
+  unit: "mm"
+
+- name: wind_direction
+  unit: "Degrees"
+
+- name: anemometer
+  unit: "m/s"
+
+
+- name: radiometer
+  unit: "W/m^2"
+- name: battery_level
+  unit: "V"
+
+
+- name: thermometer_min
+  unit: K
+- name: thermometer_max
+  unit: K
+
+- name: signal_strength
+  unit: "CSQ"
+
+- name: altitude
+  unit: m
+
+- name: dew_point
+  unit: K
+- name: humidity_index
+  unit: K
+- name: vertical_temperature_gradient
+  unit: "K/100m"
+
+- name: solar_radiation_index
+- name: bluetooth_RSSI
+  unit: dBm
+- name: carbon_dioxide
+  unit: ppm
+- name: PM1.0
+  unit: "μg/m³"
+- name: mass_concentration_PM1.0
+  unit: "μg/m3"
+- name: mass_concentration_PM2.5
+  unit: "μg/m3"
+- name: mass_concentration_PM4.0
+  unit: "μg/m3"
+- name: mass_concentration_PM10
+  unit: "μg/m3"
+- name: number_concentration_PM0.5
+  unit: "#/cm3"
+- name: number_concentration_PM1.0
+  unit: "#/cm3"
+- name: number_concentration_PM2.5
+  unit: "#/cm3"
+- name: number_concentration_PM4.0
+  unit: "#/cm3"
+- name: number_concentration_PM10
+  unit: "#/cm3"
+- name: typical_particle_size
+  unit: "μm"
+- name: EPA_Air_Quality
+- name: Fast_Air_Quality
+- name: ozone
+  unit: ppb
