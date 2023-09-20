@@ -1,24 +1,7 @@
----
-# Structure of this config file
-#
-# At a high level it defines a pipeline that looks like this:
-#
-# Sources -> Prepocessors -> Aggregators -> Encoders
-#
-# NB: Currently only one encoder is allowed but this will be fixed soon.
-# Sources - Either operate over data files or by pulling time delineated chunks from APIs
-# Preprocessors - Mainly their job is to rename the data columns and do some cleanup here and there
-# Aggregators - Group observations by some criteria,
-#        i.e all MeteoTracks that start in a in a one hour time window get grouped
-# Encoders - Write out the data to some output, currently CSV or ODB to disk
-
-# The structure of this config file is controlled my the structure of python dataclasses
-# To see for example, which encoders exist, go to src/obsproc/core/config_parser.py
-# From there we see an encoder is either ODCEncoder or CSVEncoder
-# Finding ODCEncoder in the codebase we can see what fields it expects in the config
-# With some docstrings and autodoc magic one should be able to use this to generate a
-# nice documentation page for this yaml config.
-canonical_variables: !include canonical_variables.yaml
+global_config:
+  canonical_variables: !include canonical_variables.yaml
+  config_path: .
+  data_path: ../data/
 
 pipeline:
   - sources

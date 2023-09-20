@@ -19,7 +19,13 @@ import pandas as pd
 
 from datetime import timezone, timedelta
 
-from ..core.bases import Aggregator, MetaData, TabularMessage, FinishMessage
+from ..core.bases import (
+    Aggregator,
+    MetaData,
+    DataMessage,
+    TabularMessage,
+    FinishMessage,
+)
 from ..core.history import MessageInfo
 
 logger = logging.getLogger()
@@ -52,7 +58,9 @@ class TimeSliceBucket:
 
         self.messages.append(msg)
 
-    def aggregate(self) -> TabularMessage | None:
+    def aggregate(
+        self, representative_previous_message: TabularMessage
+    ) -> TabularMessage | None:
         "Return the aggregated contents of this bucket"
 
         # Make an id which is source + period_start + period_size
@@ -68,6 +76,7 @@ class TimeSliceBucket:
 
         message = TabularMessage(
             data=data,
+            columns=representative_previous_message.columns,
             metadata=MetaData(
                 source=source,
                 observation_variable=observation,
@@ -82,6 +91,7 @@ class BucketContainer:
     "Holds a set of TimeSliceBuckets and implements the logic of when to empty them"
     source: str
     observation_variable: str
+    representative_previous_message: TabularMessage
     granularity: str = "1H"
     buckets: Dict[pd.Period, TimeSliceBucket] = field(
         default_factory=defaultdict, init=False
@@ -131,7 +141,7 @@ class BucketContainer:
             to_emit = it.takewhile(lambda p: p > pivot_value, periods)
 
         for period in to_emit:
-            msg = self.buckets[period].aggregate()
+            msg = self.buckets[period].aggregate(self.representative_previous_message)
             if msg is not None:
                 yield msg
             del self.buckets[period]
@@ -140,7 +150,7 @@ class BucketContainer:
         """Call this when no new data is coming, so clean the pipeline up nicely
         by emitting everything we have."""
         for bucket in self.buckets.values():
-            msg = bucket.aggregate()
+            msg = bucket.aggregate(self.representative_previous_message)
             if msg is not None:
                 yield msg
 
@@ -164,23 +174,14 @@ class TimeAggregator(Aggregator):
     def __repr__(self):
         return f"{self.__class__.__name__}({self.match}, {self.granularity}, {self.direction})"
 
-    def __post_init__(self):
+    def init(self, global_config):
+        super().init(global_config)
         self.bucket_containers: Dict[tuple, BucketContainer] = {}
-        # Set the dafault value of parsed but let it be overridden
         self.metadata = dataclasses.replace(self.metadata, state="time_aggregated")
 
     def emit_message(self, msg, bucket):
         msg = dataclasses.replace(msg, metadata=self.generate_metadata(msg))
-        msg = self.tag_message(
-            msg,
-            MessageInfo(
-                name="Multiple Messages",
-                metadata=MetaData(
-                    source=bucket.source,
-                    observation_variable=bucket.observation_variable,
-                ),
-            ),
-        )
+        msg = self.tag_message(msg, bucket.representative_previous_message)
         return msg
 
     def process(
@@ -219,9 +220,10 @@ class TimeAggregator(Aggregator):
             if key not in self.bucket_containers:
                 logger.debug(f"{key} starts a new bucket")
                 self.bucket_containers[key] = BucketContainer(
-                    message.metadata.source,
+                    message.metadata.source or "???",
                     message.metadata.observation_variable,
-                    self.granularity,
+                    representative_previous_message=message,
+                    granularity=self.granularity,
                 )
 
             bucket_container = self.bucket_containers[key]

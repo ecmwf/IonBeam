@@ -22,13 +22,13 @@ from yamlinclude import YamlIncludeConstructor
 from .converters import unit_conversions
 from ..encoders.odb import ODCEncoder
 from .bases import Source, Processor, Parser, Aggregator, Encoder, CanonicalVariable
-from .history import describe_code_source
+from .history import describe_code_source, CodeSourceInfo
 from .config_parser_machinery import parse_config_from_dict, ConfigError
 
 # This line is necessary to automatically find all the subclasses of things like "Encoder"
 from .. import sources, parsers, aggregators, encoders
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 
 # Set up the yaml parser to include line numbers with the key "__line__"
@@ -40,10 +40,18 @@ class SafeLineLoader(yaml.SafeLoader):
         return mapping
 
 
+@dataclass
+class GlobalConfig:
+    canonical_variables: List[CanonicalVariable]
+    config_path: Path
+    data_path: Path
+    code_source: CodeSourceInfo | None = None
+
+
 # The overall config file spec
 @dataclass
 class Config:
-    canonical_variables: List[CanonicalVariable]
+    global_config: GlobalConfig
     pipeline: List[str]
     sources: List[Source] = field(default_factory=list)
     parsers: List[Parser] = field(default_factory=list)
@@ -65,73 +73,20 @@ def parse_config(yaml_file: Path):
     # Parse the yaml file using python dataclasses as a template
     config = parse_config_from_dict(Config, config_dict, filepath=yaml_file)
 
+    # Resolve the paths in the global config relative to the config file
+    for name in ["data_path", "config_path"]:
+        path = getattr(config.global_config, name)
+        if not path.is_absolute():
+            path = (yaml_file.parent / path).resolve()
+        setattr(config.global_config, name, path)
+        logger.debug(f"Resolved global_config.{name} to {path}")
+
     # Figure out the git status clean/dirty and the current git hash
-    code_source = describe_code_source()
+    config.global_config.code_source = describe_code_source()
+
+    # Let all the actions initialise themselves with access to the global config
     for stage in config.pipeline:
         for action in getattr(config, stage):
-            action.code_source = code_source
+            action.init(config.global_config)
 
-    # Do post load work that links data from one place to another
-    # This is mostly giving information about the canonical variables to other
-    # parts of the system
-    canonical_variables = {c.name: c for c in config.canonical_variables}
-    for p in config.parsers:
-        for col in p.all_columns:
-            # Check that preprocessors only create columns with canonical names
-            if col.name not in canonical_variables:
-                raise ConfigError(f"{col.name} not in canonical names!")
-
-            # Just copy the whole canonical variable object onto it
-            col.canonical_variable = canonical_variables[col.name]
-
-            # Emit a warning if the config doesn't include the unit conversion
-            if (
-                col.unit != col.canonical_variable.unit
-                and f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}"
-                not in unit_conversions
-            ):
-                logger.warning(
-                    f"No unit conversion registered for {col.name} {col.unit} -> {col.canonical_variable.unit}|"
-                )
-
-            # Tell the parsers what dtypes they need to use
-            col.dtype = canonical_variables[col.name].dtype
-
-    for encoder in config.encoders:
-        if isinstance(encoder, ODCEncoder):
-            # Get all the MARS keys whose value is set by lookup in canonical variables
-            # convert i.e obstype@desc to obstype in order to look it up in the canonical variables
-            # mars_keys_to_annotate = {"obstype" : [obstype@hdr, obstype@desc], varno : ...}
-            mars_keys_to_annotate = defaultdict(list)
-            for key in encoder.MARS_keys:
-                if key.fill_method == "from_config":
-                    mars_name, mars_type = key.name.split("@")
-                    mars_keys_to_annotate[mars_name].append(key)
-
-            # keys should be something like ["obstype", "codetype", "varno"]
-
-            for var in canonical_variables.values():
-                # canonical variables should have either no mars keys or all of them
-                has_key = [
-                    getattr(var, m) is not None for m in mars_keys_to_annotate.keys()
-                ]
-                if not any(has_key):
-                    continue
-                if not all(has_key):
-                    raise ConfigError(
-                        f"{var.name} has only a partial set of the necessary \
-                            MARS keys {mars_keys_to_annotate.keys()}"
-                    )
-
-                # Copy the value for each mars key over so a canonical variable with
-                # air_temp
-                #    varno: 5
-                # will lead to the mars key object for varno having
-                #  key.name == "varno@body"
-                #  key.by_observation_variable["air_temp"] == 5
-                for mars_name, mars_keys in mars_keys_to_annotate.items():
-                    for mars_key in mars_keys:
-                        mars_key.by_observation_variable[var.name] = getattr(
-                            var, mars_name
-                        )
     return config

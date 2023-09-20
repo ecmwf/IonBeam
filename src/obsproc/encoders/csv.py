@@ -27,9 +27,10 @@ class CSVEncoder(Encoder):
     def __str__(self):
         return f"{self.__class__.__name__}({self.match})"
 
-    def __post_init__(self):
+    def init(self, global_config):
+        super().init(global_config)
         if not self.one_file_per_granule:
-            self.output_file = Path(self.output).resolve()
+            self.output_file = self.resolve_path(self.output, type="data")
 
     def encode(self, msg: TabularMessage | FinishMessage) -> Iterable[FileMessage]:
         if isinstance(msg, FinishMessage):

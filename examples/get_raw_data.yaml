@@ -1,12 +1,14 @@
 ---
-canonical_variables: !include canonical_variables.yaml
+global_config:
+  canonical_variables: !include canonical_variables.yaml
+  config_path: .
+  data_path: ../data
 
 pipeline:
   - sources
 
 sources:
-  - name: MeteoTrackerSource
-    source: "MeteoTracker"
+  - class: MeteoTrackerSource
     cache_directory: data/inputs/meteotracker
     secrets_file: secrets.yaml
     end_date: "2023-07-26"

@@ -36,12 +36,13 @@ class CIMASource(Source):
         cls = self.__class__.__name__
         return f"{cls}({self.start_date} - {self.end_date})"
 
-    def __post_init__(self):
+    def init(self, global_config):
+        super().init(global_config)
         logger.debug(
             f"Initialialised CIMA source with {self.start_date=}, {self.end_date=}, {self.finish_after=}"
         )
-        self.secrets_file = self.resolve_path(self.secrets_file)
-        self.cache_directory = self.resolve_data_path(self.cache_directory)
+        self.secrets_file = self.resolve_path(self.secrets_file, type="config")
+        self.cache_directory = self.resolve_path(self.cache_directory, type="data")
 
     def generate(self):
         # Do  API requests in chunks larger than the data granularity, upto 3 days

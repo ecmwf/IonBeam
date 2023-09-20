@@ -19,6 +19,7 @@ import pandas as pd
 import hashlib
 
 from dataclasses import field
+from collections import defaultdict
 
 # try:
 #     import codc as odc
@@ -199,13 +200,46 @@ class ODCEncoder(Encoder):
     def __str__(self):
         return f"{self.__class__.__name__}({self.match})"
 
-    def __post_init__(self):
+    def init(self, global_config):
+        super().init(global_config)
         if not self.one_file_per_granule:
             self.output_file = self.resolve_path(self.output_file)
             self.output_file.parent.mkdir(exist_ok=True, parents=True)
             self.output_file.unlink(missing_ok=True)
 
-        super().__post_init__()
+        # Get all the MARS keys whose value is set by lookup in canonical variables
+        # convert i.e obstype@desc to obstype in order to look it up in the canonical variables
+        # mars_keys_to_annotate = {"obstype" : [obstype@hdr, obstype@desc], varno : ...}
+        mars_keys_to_annotate = defaultdict(list)
+        for key in self.MARS_keys:
+            if key.fill_method == "from_config":
+                mars_name, mars_type = key.name.split("@")
+                mars_keys_to_annotate[mars_name].append(key)
+
+        # keys should be something like ["obstype", "codetype", "varno"]
+        canonical_variables = {c.name: c for c in global_config.canonical_variables}
+        for var in canonical_variables.values():
+            # canonical variables should have either no mars keys or all of them
+            has_key = [
+                getattr(var, m) is not None for m in mars_keys_to_annotate.keys()
+            ]
+            if not any(has_key):
+                continue
+            if not all(has_key):
+                raise ValueError(
+                    f"{var.name} has only a partial set of the necessary \
+                        MARS keys {mars_keys_to_annotate.keys()}"
+                )
+
+            # Copy the value for each mars key over so a canonical variable with
+            # air_temp
+            #    varno: 5
+            # will lead to the mars key object for varno having
+            #  key.name == "varno@body"
+            #  key.by_observation_variable["air_temp"] == 5
+            for mars_name, mars_keys in mars_keys_to_annotate.items():
+                for mars_key in mars_keys:
+                    mars_key.by_observation_variable[var.name] = getattr(var, mars_name)
 
     def create_output_df(self, msg: TabularMessage) -> pd.DataFrame:
         output_data = {}

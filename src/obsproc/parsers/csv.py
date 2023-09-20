@@ -44,13 +44,35 @@ class CSVParser(Parser):
     def __str__(self):
         return f"{self.__class__.__name__}({self.match})"
 
-    def __post_init__(self):
+    def init(self, global_config):
+        super().init(global_config)
         self.all_columns = (
             self.value_columns + self.metadata_columns + self.identifying_columns
         )
         self.fixed_columns = self.identifying_columns + self.metadata_columns
         self.columns_mapping = {c.key: c.name for c in self.all_columns}
-        super().__post_init__()
+
+        canonical_variables = {c.name: c for c in global_config.canonical_variables}
+        for col in self.all_columns:
+            # Check that preprocessors only create columns with canonical names
+            if col.name not in canonical_variables:
+                raise ValueError(f"{col.name} not in canonical names!")
+
+            # Just copy the whole canonical variable object onto it
+            col.canonical_variable = canonical_variables[col.name]
+
+            # Emit a warning if the config doesn't include the unit conversion
+            if (
+                col.unit != col.canonical_variable.unit
+                and f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}"
+                not in unit_conversions
+            ):
+                logger.warning(
+                    f"No unit conversion registered for {col.name} {col.unit} -> {col.canonical_variable.unit}|"
+                )
+
+            # Tell the parsers what dtypes they need to use
+            col.dtype = canonical_variables[col.name].dtype
 
     def format_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()

@@ -43,12 +43,13 @@ class SensorCommunitySource(Source):
     finish_after: int | None = None
     base_url: str = "https://archive.sensor.community/"
 
-    def __post_init__(self):
+    def init(self, global_config):
+        super().init(global_config)
         logger.debug(
             f"Initialialised SensorCommunity source with {self.start_date=}, {self.end_date=}"
         )
-        self.cache_file = self.resolve_data_path(self.cache_file)
-        self.cache_directory = self.resolve_data_path(self.cache_directory)
+        self.cache_file = self.resolve_path(self.cache_file, type="data")
+        self.cache_directory = self.resolve_path(self.cache_directory, type="data")
 
     def load_cache_from_file(self):
         if not self.cache_file.exists():

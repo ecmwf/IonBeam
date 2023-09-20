@@ -9,7 +9,7 @@
 # #
 
 import dataclasses
-from typing import Iterable, Callable, List, Literal, TypeVar
+from typing import Iterable, Callable, List, Literal, TypeVar, Any
 import re
 import pandas
 from pathlib import Path
@@ -103,20 +103,28 @@ class Action:
     # kw_only is necessary so that classes that inherit from this one can have positional fields
     metadata: MetaData = dataclasses.field(default_factory=MetaData, kw_only=True)
     code_source: CodeSourceInfo | None = dataclasses.field(default=None, kw_only=True)
+    global_config: Any | None = dataclasses.field(default=None, kw_only=True)
 
-    def resolve_path(self, path: str | Path) -> Path:
-        base = os.environ.get("IOT_INGESTER_BASE_PATH") or Path(__file__).parents[3]
+    def init(self, global_config):
+        "Initialise self with access to the global config variables"
+        self.global_config = global_config
+
+    def resolve_path(
+        self, path: str | Path, type: Literal["data", "config"] = "data"
+    ) -> Path:
+        assert self.global_config
+        if type == "data":
+            base = self.global_config.data_path
+        elif type == "config":
+            base = self.global_config.config_path
+        else:
+            raise ValueError(f"{type} must be 'config' or 'data'")
+
         path = Path(path)
         if not path.is_absolute():
             path = base / path
-        return path
 
-    def resolve_data_path(self, path: str | Path) -> Path:
-        base = os.environ.get("IOT_INGESTER_DATA_PATH") or Path(__file__).parents[3]
-        path = Path(path)
-        if not path.is_absolute():
-            path = base / path
-        return path
+        return Path(path)
 
     def generate_metadata(self, message: DataMessage | None = None, **explicit_keys):
         "Defines the semantics for combining metadata from multiple sources"
@@ -248,7 +256,8 @@ class Parser(Processor):
 
     """
 
-    def __post_init__(self):
+    def init(self, global_config):
+        super().init(global_config)
         # Set the dafault value of parsed but let it be overridden
         self.metadata = dataclasses.replace(self.metadata, state="parsed")
 

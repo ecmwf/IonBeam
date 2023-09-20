@@ -24,8 +24,9 @@ class MultiFileSource(Source):
     basepath: Path = Path(".")
     finish_after: int | None = None
 
-    def __post_init__(self):
-        self.basepath = self.resolve_data_path(self.basepath)
+    def init(self, global_config):
+        super().init(global_config)
+        self.basepath = self.resolve_path(self.basepath, type="data")
         logger.debug(f"{self.__class__.__name__}: resolved basepath to {self.basepath}")
 
     def __str__(self):

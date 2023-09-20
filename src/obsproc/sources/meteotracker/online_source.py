@@ -47,13 +47,13 @@ class MeteoTrackerSource(Source):
     source: str = "meteotracker"
     bbox: List[float] | None = northern_italy
 
-    def __post_init__(self):
+    def init(self, global_config):
+        super().init(global_config)
         logger.debug(
             f"Initialialised MeteoTracker source with {self.start_date=}, {self.end_date=}"
         )
         self.secrets_file = self.resolve_path(self.secrets_file)
-        self.cache_directory = self.resolve_data_path(self.cache_directory)
-        super().__post_init__()
+        self.cache_directory = self.resolve_path(self.cache_directory, type="data")
 
     def __str__(self):
         cls = self.__class__.__name__

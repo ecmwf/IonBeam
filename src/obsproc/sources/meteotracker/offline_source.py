@@ -26,13 +26,13 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class MeteoTrackerOfflineSource(MeteoTrackerSource):
-    def __post_init__(self):
+    def init(self, global_config):
+        super().init(global_config)
         logger.debug(
             f"Initialialised MeteoTrackerOfflineSource source with {self.start_date=}, {self.end_date=}"
         )
-        self.cache_directory = self.resolve_data_path(self.cache_directory)
-        self.data_path = self.resolve_data_path(self.cache_directory)
-        Source.__post_init__(self)
+        self.cache_directory = self.resolve_path(self.cache_directory, type="data")
+        self.data_path = self.resolve_path(self.cache_directory, type="data")
 
     def generate(self) -> Iterable[FileMessage]:
         # Do  API requests in chunks larger than the data granularity, upto 3 days

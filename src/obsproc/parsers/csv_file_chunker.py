@@ -15,6 +15,9 @@ class CSVChunker(Processor):
     rows_per_chunk: int = 10_000
     separator: str = ","
 
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.match})"
+
     def process(
         self, input_message: FileMessage | FinishMessage
     ) -> Iterable[TabularMessage]:
