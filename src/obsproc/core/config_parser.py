@@ -26,7 +26,7 @@ from .history import describe_code_source, CodeSourceInfo
 from .config_parser_machinery import parse_config_from_dict, ConfigError
 
 # This line is necessary to automatically find all the subclasses of things like "Encoder"
-from .. import sources, parsers, aggregators, encoders
+from .. import sources, parsers, aggregators, quality_assessment, encoders
 
 logger = logging.getLogger(__name__)
 
