@@ -106,12 +106,15 @@ parsers:
         key: humidity
         unit: "%"
       - name: pressure_sealevel
-        unit: Pa
+        key: pressure
+        unit: "hPa"
 
       - name: P1
-      - name: durP1
-      - name: ratioP1
-
+        key: pm10
+        unit: "ug/m^3"
       - name: P2
-      - name: durP2
-      - name: ratioP2
+        key: pm2_5
+        unit: "ug/m^3"
+      - name: P0
+        key: pm1_0
+        unit: "ug/m^3"

@@ -79,7 +79,7 @@
   value: iCHANGE
   column_description: custom
 
-  # For now just fixed to "meteotracker" or "cima"
+  # For now just fixed to "meteotracker" or "cima", "station" for Personal Weather Stations
 - name: dataset@hdr
   dtype: STRING
   fill_method: function
