@@ -39,20 +39,20 @@
   dtype: INTEGER
 
 - name: varno@body
-  fill_method: from_config
+  fill_method: from_config    # value: rh2m: 58; t2m: 39; still checking ADS/CAMS for particulate matter_10um and particulate_matter_2.5um 
   column_description: variable number
   dtype: INTEGER
+
+- name: obstype@hdr
+  value: 1   # 
+  dtype: INTEGER
+
 
 - name: statid@hdr
   fill_method: constant
   value: ++++xxxx
   column_description: station id (character*8)
   dtype: STRING
-
-- name: obstype@hdr
-  fill_method: from_config
-  column_description: observation type
-  dtype: INTEGER
 
 - name: codetype@hdr
   fill_method: from_config
