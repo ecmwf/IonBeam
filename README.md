@@ -6,15 +6,37 @@
     <em>A streaming library for IoT data</em>
 </p>
 
-
 :warning: This project is ALPHA and will be experimental for the foreseeable future. Interfaces and functionality are likely to change. DO NOT use this software in any project/software that is operational. :warning:
 
-This is a prototype of infrastructure for ingesting IOT observations into the data ECMWF ecosystem.
+This is a prototype library for streaming IOT observations into a database. It's based on message + action model where streams of messages are transformed by different actions before reaching their final destination which could be a database or external service.
 
-![A block diagram of different components feeding into one another.](docs/_static/block_diagram.png)
+This project can be deployed in three ways:
+    1. Locally, as a single threaded process, see Command Line Usage.
+    3. A local docker-compose setup, see [the deployment repo](https://github.com/ecmwf-projects/iot-ingester-deployment)
+    3. TODO: The above but running on a kubernetes cluster.
 
-This project is intended to be deployed as a set of worker nodes which can be invoke manually with `python -m ionbeam.`
-- services
+## Dev Installation
+
+Install from source
+```sh
+$ git clone github.com/ecmwf-projects/iot-ingester
+$ cd ionbeam
+```
+
+Create a conda or mamba environment, venv or similar
+```sh
+$ conda env create --name ionbeam ipykernel
+$ conda activate ionbeam
+$ pip install --editable ".[dev]"
+```
+
+Recommended: Install pre-commit hooks that run ruff, black, isort, flake8, etc on the code before you commit
+```sh
+pre-commit install
+```
+
+Create a `secrets.yaml` file containing the access credentials for the various sources of data, use `example_secrets.yaml` as a template. `secrets.yaml` is in the gitignore to lower the risk that it accidentally gets committed to git.
+
 
 ## Documentation
 
@@ -25,28 +47,7 @@ The documentation will be available at on readthedocs.io once this repo is made 
 [Apache License 2.0](LICENSE) In applying this license, ECMWF does not waive the privileges and immunities
 granted to it by virtue of its status as an intergovernmental organisation nor does it submit to any jurisdiction.
 
-## Installation
 
-Install from source
-```sh
-$ git clone github.com/ecmwf-projects/iot-ingester
-$ cd ionbeam
-```
-
-Create a conda environemnt, vevnv or similar
-```sh
-$ conda env create --name iot-ingester ipykernel
-$ conda activate iot-ingester 
-$ pip install -r requirements.txt #Not strictly necessary because requirements.txt and setup.cfg both contain dependenciess but doesn't hurt
-$ pip install --editable ".[dev]"
-```
-
-Recommeneded: Install pre-commit hooks that run ruff, black, isort, flake8, etc on the code before you commit
-```sh
-pre-commit install
-```
-
-Create a `secrets.yaml` file containing the access credentials for the various sources of data, use `example_secrets.yaml` as a template. `secrets.yaml` is in the gitignore to lower the risk that it accidentally gets committed to git.
 
 ## Testing
 To run the default battery of smoke tests, just run pytest:
@@ -65,9 +66,8 @@ Setting up a jupyer lab server from scratch using conda or mamba:
 ```sh
 # Make an environment for iot-ingester
 # Do this at the root of the repository pwd=something/iot-ingester/
-conda env create --name iot-ingester ipykernel
-conda activate iot-ingester 
-pip install -r requirements.txt #Not strictly necessary because requirements.txt and setup.cfg both contain dependenciess but doesn't hurt
+conda env create --name ionbeam ipykernel
+conda activate ionbeam
 pip install --editable ".[dev]"
 
 # Make an environment to run jupyter from, using separate ones is best practice
@@ -77,10 +77,10 @@ jupyter lab
 ```
 
 
-## Usage
+## Command Line Usage
 Currently the main way to interact with the pipeline is through the command line interface.
 ```bash
-% ./main.py --help
+% python -m ionbeam --help
 usage: ECMWF IOT Observation Processor [-h] [--validate-config] [-v] [-j [NUMBER]]
                                        [--finish-after [NUMBER]]
                                        config_file
