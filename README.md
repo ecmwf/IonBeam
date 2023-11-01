@@ -2,7 +2,6 @@
 <p align="center">
     <img alt="The IONBeam logo, showing the name and a line drawing of a stylised scientific instrument who operation involves streams of ions."src="https://github.com/ecmwf-projects/iot-ingester/blob/ac8c020bda2a1143d0c4ffb6a29ff58eb0e2c790/ionbeam.png">
 </p>
-<h1 align="center"># IonBeam - </h1>
 <p align="center">
     <em>A streaming library for IoT data</em>
 </p>
