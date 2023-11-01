@@ -84,7 +84,7 @@ if __name__ == "__main__":
         level=[logging.WARNING, logging.INFO, logging.DEBUG][min(2, args.verbose)],
     )
 
-    from obsproc.core.config_parser import parse_config
+    from ionbeam.core.config_parser import parse_config
 
     config = parse_config(args.config_file)
 
@@ -106,10 +106,10 @@ if __name__ == "__main__":
             source.finish_after = args.finish_after
 
     if "parallel_workers" not in args:
-        from obsproc.core.singleprocess_pipeline import singleprocess_pipeline
+        from ionbeam.core.singleprocess_pipeline import singleprocess_pipeline
 
         singleprocess_pipeline(config, pipeline)
     else:
-        from obsproc.core.multiprocess_pipeline import mulitprocess_pipeline
+        from ionbeam.core.multiprocess_pipeline import mulitprocess_pipeline
 
         mulitprocess_pipeline(config, pipeline)

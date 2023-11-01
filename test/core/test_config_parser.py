@@ -10,7 +10,7 @@
 
 from pathlib import Path
 
-from obsproc.core.config_parser import parse_config
+from ionbeam.core.config_parser import parse_config
 
 
 def test_config_parser():

@@ -5,10 +5,10 @@ The main sources of data accessible are Acronet weather stations in Northern Ita
 
 ## Example usage:
 Make sure there is a `secrets.yaml` file containing your CIMA access credentials, use `example_secrets.yaml` as a template.
-Install `obsproc` using the instructions in the root readme.
+Install `ionbeam` using the instructions in the root readme.
 
 ```python
-from obsproc.sources.cima.cima import CIMA_API, GenericSensor, APISensor
+from ionbeam.sources.cima.cima import CIMA_API, GenericSensor, APISensor
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 

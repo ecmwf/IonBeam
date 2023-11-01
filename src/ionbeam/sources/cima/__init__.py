@@ -8,11 +8,7 @@
 # # does it submit to any jurisdiction.
 # #
 
-from .online_source import MeteoTrackerSource
-from .offline_source import MeteoTrackerOfflineSource
-from .meteotracker import MeteoTracker_API
+from .source import CIMASource
 
-# Expose the Source object at obsproc.sources.cima.source so that load_source can find it
-source = MeteoTrackerSource
-
-__all__ = ["MeteoTracker_API", "MeteoTrackerSource", "MeteoTrackerOfflineSource"]
+# Expose the Source object at ionbeam.sources.cima.source so that load_source can find it
+source = CIMASource

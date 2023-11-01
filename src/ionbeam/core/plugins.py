@@ -36,7 +36,7 @@ def find_plugin(search_dir: Path, search_module: str, category: str, plugin_name
     3. An entrypoint can be registered by an external package, in its setup.py
 
         setuptools.setup(
-            entry_points={'obsproc.sources': [
+            entry_points={'ionbeam.sources': [
                 'source-name = package_name:ClassName'
             ]},
         )
@@ -66,7 +66,7 @@ def find_plugin(search_dir: Path, search_module: str, category: str, plugin_name
 
     # Look for other plugins
 
-    for e in entry_points(group=f"obsproc.{category}"):
+    for e in entry_points(group=f"ionbeam.{category}"):
         if e.name == plugin_name or e.name == name_lower:
             klass = e.load()
             category_lookup[plugin_name] = klass

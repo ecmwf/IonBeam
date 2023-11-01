@@ -1,10 +1,19 @@
-# IOT Ingester
+
+![Logo](ionbeam.png)
+<h1 align="center"># IonBeam - </h1>
+<p align="center">
+    <em>A streaming library for IoT data</em>
+</p>
+
 
 :warning: This project is ALPHA and will be experimental for the foreseeable future. Interfaces and functionality are likely to change. DO NOT use this software in any project/software that is operational. :warning:
 
 This is a prototype of infrastructure for ingesting IOT observations into the data ECMWF ecosystem.
 
 ![A block diagram of different components feeding into one another.](docs/_static/block_diagram.png)
+
+This project is intended to be deployed as a set of worker nodes which can be invoke manually with `python -m ionbeam.`
+- services
 
 ## Documentation
 
@@ -20,7 +29,7 @@ granted to it by virtue of its status as an intergovernmental organisation nor d
 Install from source
 ```sh
 $ git clone github.com/ecmwf-projects/iot-ingester
-$ cd iot_ingester
+$ cd ionbeam
 ```
 
 Create a conda environemnt, vevnv or similar
@@ -98,7 +107,7 @@ The `-vv` and `--finish-after` options are useful for debugging runs.
 See [this notebook](examples/notebooks/run_the_pipeline_manually.ipynb) for a walkthrough of assembling the pipeline from various components and then running it. This is useful for debugging the output at various stages in the pipeline.
 
 ## The config
-There's a lot happening in `config/config.yaml`. The structure of the file is defined by a set of nested python dataclasses starting with `Config` in `obsproc.core.config_parser`.
+There's a lot happening in `config/config.yaml`. The structure of the file is defined by a set of nested python dataclasses starting with `Config` in `ionbeam.core.config_parser`.
 
 The three big pieces are the parsers which define how to rename and clean up the input data, `canonical_variables.yaml` which defines a unique internal name, dtype and unit for each variable and `MARS_keys.yaml` which defines how to spit the data out to ODB format.
 

@@ -30,7 +30,7 @@ from time import time
 
 from datetime import datetime, timezone, timedelta
 
-from obsproc.sources.cima.cima import CIMA_API, GenericSensor, APISensor
+from ionbeam.sources.cima.cima import CIMA_API, GenericSensor, APISensor
 
 from pathlib import Path
 
