@@ -60,18 +60,16 @@ class Config:
     other_processors: List[Processor] = field(default_factory=list)
 
 
-def parse_config(yaml_file: Path):
+def parse_config(yaml_file: Path, schema=Config):
     # Set up the yaml parser to support file includes
-    YamlIncludeConstructor.add_to_loader_class(
-        loader_class=SafeLineLoader, base_dir=str(yaml_file.parent)
-    )
+    YamlIncludeConstructor.add_to_loader_class(loader_class=SafeLineLoader, base_dir=str(yaml_file.parent))
 
     # Load the yaml file
     with open(yaml_file) as f:
         config_dict = yaml.load(f, Loader=SafeLineLoader)
 
     # Parse the yaml file using python dataclasses as a template
-    config = parse_config_from_dict(Config, config_dict, filepath=yaml_file)
+    config = parse_config_from_dict(schema, config_dict, filepath=yaml_file)
 
     # Resolve the paths in the global config relative to the config file
     for name in ["data_path", "config_path"]:
