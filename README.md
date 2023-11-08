@@ -19,7 +19,7 @@ This project can be deployed in three ways:
 
 Install from source
 ```sh
-$ git clone github.com/ecmwf-projects/iot-ingester
+$ git clone github.com/ecmwf-projects/IonBeam
 $ cd ionbeam
 ```
 
