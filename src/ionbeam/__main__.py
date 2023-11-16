@@ -82,14 +82,12 @@ if __name__ == "__main__":
 
     globals, actions = parse_config(args.config_folder)
 
-    sources, stateless_actions, aggregators = [], [], []
+    sources, downstream_actions = [], []
     for action in actions:
         if isinstance(action, Source):
             sources.append(action)
-        elif isinstance(action, Aggregator):
-            aggregators.append(action)
         else:
-            stateless_actions.append(action)
+            downstream_actions.append(action)
 
     logger.info(f"Globals:")
     logger.info(f"    Data Path: {globals.globals.data_path}")
@@ -100,10 +98,6 @@ if __name__ == "__main__":
     for i, a in enumerate(sources):
         logger.info(f"    {i} {str(a)}")
 
-    logger.info("Aggregators")
-    for i, a in enumerate(aggregators):
-        logger.info(f"    {i} {str(a)}")
-
     if args.validate_config:
         sys.exit()
 
@@ -112,11 +106,9 @@ if __name__ == "__main__":
         for source in sources:
             source.finish_after = args.finish_after
 
-    pipeline_names = ["Sources", "Pre-Agg Actions", "Aggregators", "Post-Agg Actions"]
-
     from .core.singleprocess_pipeline import singleprocess_pipeline
 
     try:
-        singleprocess_pipeline(pipeline_names, [sources, stateless_actions, aggregators, stateless_actions])
+        singleprocess_pipeline(sources, downstream_actions)
     except Exception:
         logger.exception("Exception during run:")

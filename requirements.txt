@@ -14,5 +14,5 @@
     pyyaml-include
     bs4
     lxml
-    dataclass_wizard # TODO: excise this
     pika
+    rich

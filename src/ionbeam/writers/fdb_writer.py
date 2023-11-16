@@ -31,12 +31,10 @@ class FDBWriter(Writer):
         self.metadata = dataclasses.replace(self.metadata, state="written")
 
     def process(self, input_message: FileMessage | FinishMessage) -> Iterable[Message]:
-        logger.debug(f"CSV Chunker got {input_message}")
         if isinstance(input_message, FinishMessage):
             return
 
         assert input_message.metadata.filepath is not None
-        logger.debug("FDB Writer got message with metadata {input_message.metadata}")
 
         metadata = self.generate_metadata(input_message)
         output_msg = FileMessage(metadata=metadata)

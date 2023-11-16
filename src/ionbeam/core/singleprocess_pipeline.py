@@ -13,7 +13,8 @@ from typing import Iterable, Sequence
 
 from itertools import cycle, islice, chain
 
-from .bases import FinishMessage, MessageStream, Processor, Action, DataMessage
+from .bases import FinishMessage, MessageStream, Processor, Action, DataMessage, Message, Aggregator
+from typing import Tuple
 
 
 logger = logging.getLogger(__name__)
@@ -80,12 +81,81 @@ def connect_up(names: list[str], pipeline):
     return incoming_datastream
 
 
-def singleprocess_pipeline(pipeline_names: list[str], pipeline: list[list[Action]]):
+def process_message(msg: Message, actions) -> Tuple[bool, Iterable[Message]]:
+    for dest in actions:
+        if dest.matches(msg):
+            if getattr(msg, "history", []):
+                prev_action = f"{msg.history[-1].action.name} --->"
+            else:
+                prev_action = ""
+
+            logger.info(f"{prev_action} {str(msg)} --> {dest.__class__.__name__}")
+            return False, dest.process(msg)
+    return True, [msg]
+
+
+def empty_aggregators(actions) -> Iterable[Message]:
+    """
+    Iterate over all the actions and send a finish message to the aggregators
+    yield any messages that result.
+    """
+    for a in actions:
+        if isinstance(a, Aggregator):
+            for m in a.process(FinishMessage(f"Sources Exhausted")):
+                yield m
+
+
+def log_message_transmission(msg, dest):
+    "Print a nicely formatted message showing where a message came from and where it got sent."
+    prev_action = f"{msg.history[-1].action.name} --->" if getattr(msg, "history", []) else ""
+    logger.info(f"{prev_action} {str(msg)} --> {dest.__class__.__name__}")
+
+
+def singleprocess_pipeline(sources, actions):
     logger.info("Starting single threaded execution...")
 
-    outgoing_datastream = connect_up(pipeline_names, pipeline)
+    source = roundrobin(sources)
+    source = chain(source, [FinishMessage(f"Sources Exhausted")])
 
-    from rich.progress import track
+    input_messages = []
+    finished_messages = []
+    sources_done = False
+    aggregators_emptied = False
+    while True:
+        # Grab a message from the source if there are any.
+        if not sources_done:
+            try:
+                input_messages.append(next(source))
+            except StopIteration:
+                sources_done = True
 
-    for msg in track(outgoing_datastream, description="Output messages:", total=None):
-        logger.debug(f"{pipeline_names[-1]} emitted {msg}")
+        # If we've processed every message we can, empty the aggregators.
+        if not input_messages and not aggregators_emptied:
+            logger.info(f"Initial messages consumed, emptying aggregators.")
+            input_messages.extend(empty_aggregators(actions))
+            aggregators_emptied = True
+
+        # If we've processed every message and emptied the aggregators, finish.
+        if not input_messages and aggregators_emptied:
+            break
+
+        # Pop a message off the queue and process it
+        msg = input_messages.pop()
+
+        # We don't want to send a FinshMessage to the aggregators before all messages have had a chance to get there.
+        if isinstance(msg, FinishMessage):
+            continue
+
+        # If the message doesn't match any actions, we move it to the finished queue.
+        matched = False
+        for dest in actions:
+            if dest.matches(msg):
+                log_message_transmission(msg, dest)
+                input_messages.extend(dest.process(msg))
+                matched = True
+        if not matched:
+            logger.info(f"{str(msg)} --> Done")
+            finished_messages.append(msg)
+
+    logger.info(f"Finshed messages: {finished_messages}")
+    return finished_messages

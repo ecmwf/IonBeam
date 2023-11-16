@@ -72,7 +72,7 @@ class DataMessage(Message):
         }.items():
             val = getattr(self.metadata, key, None)
             if val is not None:
-                arg_string.append(f"{name} = {val}")
+                arg_string.append(f"{val}")
 
         return f"{class_name}({', '.join(arg_string)})"
 
