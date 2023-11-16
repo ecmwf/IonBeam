@@ -1,4 +1,4 @@
-from dataclasses import fields
+from dataclasses import fields, is_dataclass
 import pandas as pd
 import string, random
 import pyodc as odc
@@ -64,9 +64,7 @@ def column_metadata_to_html(columns):
 
 def summarise_metadata(m):
     return ", ".join(
-        str(v)
-        for k in ["source", "observation_variable", "time_slice", "encoded_format"]
-        if (v := getattr(m, k))
+        str(v) for k in ["source", "observation_variable", "time_slice", "encoded_format"] if (v := getattr(m, k))
     )
 
 
@@ -109,11 +107,7 @@ def odb_summary(filepath):
     r = odc.Reader(filepath)
     codecs = r.frames[0]._column_codecs
 
-    properties = (
-        pd.DataFrame(r.frames[0].properties, index=[0])
-        .transpose()
-        .to_html(header=False, notebook=True)
-    )
+    properties = pd.DataFrame(r.frames[0].properties, index=[0]).transpose().to_html(header=False, notebook=True)
 
     summary = pd.DataFrame(
         zip(
@@ -173,9 +167,7 @@ def message_to_html(message):
         sections.append(make_section("Reason", message.reason, open=True))
 
     if hasattr(message, "metadata"):
-        sections.append(
-            make_section("Metadata", dataclass_to_html(message.metadata), open=True)
-        )
+        sections.append(make_section("Metadata", dataclass_to_html(message.metadata), open=True))
 
     if hasattr(message, "columns") and message.columns:
         sections.append(
@@ -189,9 +181,7 @@ def message_to_html(message):
         sections.append(
             make_section(
                 "History",
-                "<ol>"
-                + "\n".join(previous_action_info_to_html(h) for h in message.history)
-                + "</ol>",
+                "<ol>" + "\n".join(previous_action_info_to_html(h) for h in message.history) + "</ol>",
                 open=False,
             )
         )
@@ -202,20 +192,13 @@ def message_to_html(message):
         title = f"Tabular Data ({rows} rows x {columns} columns) ({size})"
         sections.append(make_section(title, data_to_html(message.data)))
 
-    if (
-        hasattr(message, "metadata")
-        and getattr(message.metadata, "filepath", None) is not None
-    ):
+    if hasattr(message, "metadata") and getattr(message.metadata, "filepath", None) is not None:
         file_section = summarise_file(message.metadata.filepath)
         if file_section:
             sections.append(file_section)
 
     newline = "\n"
-    details = (
-        f"({summarise_metadata(message.metadata)})"
-        if hasattr(message, "metadata")
-        else ""
-    )
+    details = f"({summarise_metadata(message.metadata)})" if hasattr(message, "metadata") else ""
     return f"""
         <style>
         #{container_id} summary:hover {{
@@ -261,6 +244,85 @@ def message_to_html(message):
 
         <div id="{container_id}">
         <h4>{message.__class__.__name__}{details}</h4>
+        <div id="{inner_container_id}">
+            {newline.join(sections)}
+            </div>
+        </div>
+        """
+
+
+def action_to_html(action):
+    # Link the CSS and HTML using random ids so that if multiple
+    # elements are emitted on the same page they don't interfere with one another.
+    container_id = f"container-{random_id(15)}"
+    inner_container_id = f"inner-container-{random_id(15)}"
+
+    sections, attributes = [], []
+    for field in fields(action):
+        value = getattr(action, field.name, None)
+        if is_dataclass(value):
+            sections.append(make_section(field.name, dataclass_to_html(value)))
+        else:
+            attributes.append([field.name, value])
+
+    df = pd.DataFrame(attributes)
+    with pd.option_context("display.max_colwidth", 100):
+        html = df.to_html(
+            index=False,
+            header=False,
+            notebook=True,
+            render_links=True,
+        )
+
+    sections.insert(0, make_section("Attributes", html, open=True))
+
+    newline = "\n"
+    details = f"({summarise_metadata(action.metadata)})" if hasattr(action, "metadata") else ""
+    return f"""
+        <style>
+        #{container_id} summary:hover {{
+                background: var(--jp-rendermime-table-row-hover-background);
+            }}
+
+        #{container_id} summary {{
+            display: list-item !important;
+        }}
+        #{container_id} td {{
+                text-align: left !important;
+            }}
+        #{container_id} h4 {{
+            text-align: center;
+            background-color: black;
+            color: white;
+            padding: 5px;
+            margin: 0px !important;
+        }}
+
+        #{container_id} {{
+            display: inline-flex;
+            flex-direction: column;
+            border: solid black 1px;
+            border-radius: 5px;
+            min-width: 100%;
+            margin-top: 1em;
+            margin-bottom: 1em;
+        }}
+
+        #{inner_container_id} {{
+            width: 100%;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }}
+
+        details {{
+        margin-left: 1em;
+        }}
+        </style>
+
+        <div id="{container_id}">
+        <h4>{action.__class__.__name__}{details}</h4>
         <div id="{inner_container_id}">
             {newline.join(sections)}
             </div>

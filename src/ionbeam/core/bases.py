@@ -14,7 +14,7 @@ import re
 import pandas
 from pathlib import Path
 import os
-from .html_formatters import dataclass_to_html, message_to_html
+from .html_formatters import dataclass_to_html, message_to_html, action_to_html
 from .history import (
     PreviousActionInfo,
     ActionInfo,
@@ -151,6 +151,9 @@ class Action:
     def init(self, globals):
         "Initialise self with access to the global config variables"
         self.globals = globals
+
+    def _repr_html_(self):
+        return action_to_html(self)
 
     def resolve_path(self, path: str | Path, type: Literal["data", "config"] = "data") -> Path:
         assert self.globals
