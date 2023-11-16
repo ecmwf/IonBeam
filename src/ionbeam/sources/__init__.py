@@ -12,8 +12,7 @@ from pathlib import Path
 from ..core.plugins import find_plugin
 from ..core.bases import Source
 
-from .meteotracker.online_source import MeteoTrackerSource
-from .meteotracker.offline_source import MeteoTrackerOfflineSource
+from .meteotracker.source import MeteoTrackerSource
 from .cima.source import CIMASource
 from .multi_file import MultiFileSource
 from .watch_directory import WatchDirectorySource

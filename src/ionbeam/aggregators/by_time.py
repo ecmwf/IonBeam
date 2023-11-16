@@ -28,7 +28,7 @@ from ..core.bases import (
 )
 from ..core.history import MessageInfo
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -58,9 +58,7 @@ class TimeSliceBucket:
 
         self.messages.append(msg)
 
-    def aggregate(
-        self, representative_previous_message: TabularMessage
-    ) -> TabularMessage | None:
+    def aggregate(self, representative_previous_message: TabularMessage) -> TabularMessage | None:
         "Return the aggregated contents of this bucket"
 
         # Make an id which is source + period_start + period_size
@@ -93,9 +91,7 @@ class BucketContainer:
     observation_variable: str
     representative_previous_message: TabularMessage
     granularity: str = "1H"
-    buckets: Dict[pd.Period, TimeSliceBucket] = field(
-        default_factory=defaultdict, init=False
-    )
+    buckets: Dict[pd.Period, TimeSliceBucket] = field(default_factory=defaultdict, init=False)
 
     def add_message(self, msg: TabularMessage) -> None:
         "Take an incoming message, split it up into 1H granules and the store it internally"
@@ -112,9 +108,7 @@ class BucketContainer:
                 metadata=msg.metadata,
             )
             if period not in self.buckets:
-                self.buckets[period] = TimeSliceBucket(
-                    self.source, self.observation_variable, period
-                )
+                self.buckets[period] = TimeSliceBucket(self.source, self.observation_variable, period)
 
             self.buckets[period].add_message(message_slice)
 
@@ -170,12 +164,13 @@ class TimeAggregator(Aggregator):
     granularity: str = "1H"
     direction: Literal["oldest", "youngest"] = "youngest"
     emit_after_hours: int = 10
+    stateful: bool = True
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.match}, {self.granularity}, {self.direction})"
 
-    def init(self, global_config):
-        super().init(global_config)
+    def init(self, globals):
+        super().init(globals)
         self.bucket_containers: Dict[tuple, BucketContainer] = {}
         self.metadata = dataclasses.replace(self.metadata, state="time_aggregated")
 
@@ -184,9 +179,7 @@ class TimeAggregator(Aggregator):
         msg = self.tag_message(msg, bucket.representative_previous_message)
         return msg
 
-    def process(
-        self, message: TabularMessage | FinishMessage
-    ) -> Iterable[TabularMessage]:
+    def process(self, message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
         # A finish message here means there's nothing else coming down the line,
         # so just return everything we have
         if isinstance(message, FinishMessage):
@@ -198,9 +191,9 @@ class TimeAggregator(Aggregator):
 
         assert message.metadata.observation_variable is not None
 
-        for period, data_chunk in message.data.resample(
-            self.granularity, on="time", kind="period"
-        ):
+        for period, data_chunk in message.data.resample(self.granularity, on="time", kind="period"):
+            if data_chunk.empty:
+                continue
             chunked_message = dataclasses.replace(message, data=data_chunk)
 
             start_time = chunked_message.data.time.iloc[0]
@@ -218,7 +211,7 @@ class TimeAggregator(Aggregator):
             # Find the bucket container that manages this key and give the message to it
             # the container handles splitting the message up
             if key not in self.bucket_containers:
-                logger.debug(f"{key} starts a new bucket")
+                # logger.debug(f"{key} starts a new bucket")
                 self.bucket_containers[key] = BucketContainer(
                     message.metadata.source or "???",
                     message.metadata.observation_variable,
@@ -232,7 +225,5 @@ class TimeAggregator(Aggregator):
             # tell the bucket to go through what it has and emit all data older/younger
             # than the current data by a certain amount.
             # Direction depends on the order in which we're ingesting data
-            for msg in bucket_container.emit(
-                age=timedelta(hours=self.emit_after_hours), direction=self.direction
-            ):
+            for msg in bucket_container.emit(age=timedelta(hours=self.emit_after_hours), direction=self.direction):
                 yield self.emit_message(msg, bucket_container)

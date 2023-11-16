@@ -15,8 +15,8 @@ class QualityControl(Processor):
         return f"{self.__class__.__name__}({self.test_variable})"
 
     # Gets called by the config parsing code to create the action object
-    def init(self, global_config):
-        super().init(global_config)
+    def init(self, globals):
+        super().init(globals)
         self.metadata = dataclasses.replace(self.metadata, state="quality_controlled")
 
     def process(self, incoming_message: TabularMessage) -> Iterable[TabularMessage]:

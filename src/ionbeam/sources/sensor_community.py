@@ -43,11 +43,9 @@ class SensorCommunitySource(Source):
     finish_after: int | None = None
     base_url: str = "https://archive.sensor.community/"
 
-    def init(self, global_config):
-        super().init(global_config)
-        logger.debug(
-            f"Initialialised SensorCommunity source with {self.start_date=}, {self.end_date=}"
-        )
+    def init(self, globals):
+        super().init(globals)
+        logger.debug(f"Initialialised SensorCommunity source with {self.start_date=}, {self.end_date=}")
         self.cache_file = self.resolve_path(self.cache_file, type="data")
         self.cache_directory = self.resolve_path(self.cache_directory, type="data")
 
@@ -93,10 +91,7 @@ class SensorCommunitySource(Source):
         "Given a url for a particular year, get all the month folders"
         soup = BeautifulSoup(self.cached_get_text(url), "lxml")
         links = soup.find_all("a", dict(href=re.compile(r"^\d\d\d\d-\d\d-\d\d/$")))
-        return [
-            month_page(url=url + m["href"], dt=date.fromisoformat(m["href"][:-1]))
-            for m in links
-        ]
+        return [month_page(url=url + m["href"], dt=date.fromisoformat(m["href"][:-1])) for m in links]
 
     def get_months(self):
         "Get the data and url for every month for which sensor.community data exists"
@@ -131,15 +126,8 @@ class SensorCommunitySource(Source):
                 url = (
                     month.url + link["href"]
                 )  # e.g: https://archive.sensor.community/2023-06-19/2023-06-19_bme280_sensor_113.csv
-                url_path = Path(
-                    urlparse(url).path
-                )  # "/2023-06-19/2023-06-19_bme280_sensor_113.csv"
-                filepath = (
-                    Path(self.cache_directory)
-                    / f"{month.dt.year:04}"
-                    / month.dt.isoformat()
-                    / url_path.name
-                )
+                url_path = Path(urlparse(url).path)  # "/2023-06-19/2023-06-19_bme280_sensor_113.csv"
+                filepath = Path(self.cache_directory) / f"{month.dt.year:04}" / month.dt.isoformat() / url_path.name
 
                 if not filepath.exists():
                     logger.debug(f"Sensor.Community: Downloading {filepath}")
@@ -155,8 +143,5 @@ class SensorCommunitySource(Source):
                     ),
                 )
                 emitted_messages += 1
-                if (
-                    self.finish_after is not None
-                    and emitted_messages >= self.finish_after
-                ):
+                if self.finish_after is not None and emitted_messages >= self.finish_after:
                     return

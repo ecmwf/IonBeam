@@ -13,13 +13,10 @@ from typing import Iterable, Sequence
 
 from itertools import cycle, islice, chain
 
-from .bases import FinishMessage, MessageStream, Processor
-
-from tqdm.contrib.logging import logging_redirect_tqdm
-from tqdm import tqdm
+from .bases import FinishMessage, MessageStream, Processor, Action, DataMessage
 
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 
 def roundrobin(iterables: Sequence[MessageStream]) -> MessageStream:
@@ -36,7 +33,7 @@ def roundrobin(iterables: Sequence[MessageStream]) -> MessageStream:
 
 
 def pipeline_connection(
-    destination_stage: str, source: MessageStream, destinations: Iterable[Processor]
+    source_stage: str, destination_stage: str, source: MessageStream, destinations: Iterable[Processor]
 ) -> MessageStream:
     """
     This function is the 'pipe' in between factory functions of the pipeline
@@ -48,42 +45,47 @@ def pipeline_connection(
     """
     # at the end of the message stream, add a FinishMessage which tells the consumers
     # to finish up and yield any last data they want to before stopping
-    msg_stream = chain(source, [FinishMessage("Pipeline Stage Exhausted")])
+    msg_stream = chain(source, [FinishMessage(f"{source_stage} Stage Exhausted")])
 
     for input_message in msg_stream:
         atleast_one_match = False
         for dest in destinations:
             if isinstance(input_message, FinishMessage) or dest.matches(input_message):
                 atleast_one_match = True
-                logger.debug(f"Giving {input_message} to {dest}")
+
+                if getattr(input_message, "history", []):
+                    prev_action = f"{input_message.history[-1].action.name} --->"
+                else:
+                    prev_action = ""
+
+                logger.info(f"{prev_action} {str(input_message)} --> {dest.__class__.__name__}")
                 for output_message in dest.process(input_message):
                     yield output_message
 
         if not atleast_one_match:
-            assert not isinstance(input_message, FinishMessage)
+            assert isinstance(input_message, DataMessage)
             logger.warning(
                 f"Message {input_message} {input_message.metadata} did not match with anything in {destination_stage}!"
             )
 
 
-def connect_up(names: Iterable[str], pipeline):
+def connect_up(names: list[str], pipeline):
     # Take all the sources and aggregate their streams in a roundrobin fashion
     incoming_datastream = roundrobin(pipeline[0])
 
     # Connect each step of the pipeline
-    for dest_name, connection in zip(names[1:], pipeline[1:]):
-        incoming_datastream = pipeline_connection(
-            dest_name, incoming_datastream, connection
-        )
+    for src_name, dest_name, connection in zip(names, names[1:], pipeline[1:]):
+        incoming_datastream = pipeline_connection(src_name, dest_name, incoming_datastream, connection)
 
     return incoming_datastream
 
 
-def singleprocess_pipeline(config, pipeline):
-    with logging_redirect_tqdm():
-        logger.info("Starting single threaded execution...")
+def singleprocess_pipeline(pipeline_names: list[str], pipeline: list[list[Action]]):
+    logger.info("Starting single threaded execution...")
 
-        outgoing_datastream = connect_up(config.pipeline, pipeline)
+    outgoing_datastream = connect_up(pipeline_names, pipeline)
 
-        for msg in tqdm(outgoing_datastream):
-            logger.debug(f"Encoder emitted {msg}")
+    from rich.progress import track
+
+    for msg in track(outgoing_datastream, description="Output messages:", total=None):
+        logger.debug(f"{pipeline_names[-1]} emitted {msg}")

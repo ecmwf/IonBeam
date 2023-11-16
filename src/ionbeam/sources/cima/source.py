@@ -36,22 +36,16 @@ class CIMASource(Source):
         cls = self.__class__.__name__
         return f"{cls}({self.start_date} - {self.end_date})"
 
-    def init(self, global_config):
-        super().init(global_config)
-        logger.debug(
-            f"Initialialised CIMA source with {self.start_date=}, {self.end_date=}, {self.finish_after=}"
-        )
+    def init(self, globals):
+        super().init(globals)
+        logger.debug(f"Initialialised CIMA source with {self.start_date=}, {self.end_date=}, {self.finish_after=}")
         self.secrets_file = self.resolve_path(self.secrets_file, type="config")
         self.cache_directory = self.resolve_path(self.cache_directory, type="data")
 
     def generate(self):
         # Do  API requests in chunks larger than the data granularity, upto 3 days
-        self.api = CIMA_API(
-            self.secrets_file, cache_file=Path(self.cache_directory) / "cache.pickle"
-        )
-        dates = pd.date_range(
-            start=self.start_date, end=self.end_date, freq=self.frequency
-        )
+        self.api = CIMA_API(self.secrets_file, cache_file=Path(self.cache_directory) / "cache.pickle")
+        dates = pd.date_range(start=self.start_date, end=self.end_date, freq=self.frequency)
         if dates[-1] != self.end_date:
             dates = pd.DatetimeIndex(
                 dates.union(
@@ -82,9 +76,7 @@ class CIMASource(Source):
                             data[column.name] = getattr(station, column.key)
 
                     data.to_csv(path, index=True, index_label="time")
-                    logger.debug(
-                        f"Yielding meteotracker CSV file with columns {data.columns}"
-                    )
+                    logger.debug(f"Yielding meteotracker CSV file with columns {data.columns}")
 
                 yield FileMessage(
                     metadata=self.generate_metadata(
@@ -92,10 +84,7 @@ class CIMASource(Source):
                     ),
                 )
                 emitted_messages += 1
-                if (
-                    self.finish_after is not None
-                    and emitted_messages >= self.finish_after
-                ):
+                if self.finish_after is not None and emitted_messages >= self.finish_after:
                     return
 
 

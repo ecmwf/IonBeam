@@ -11,10 +11,12 @@
 # #
 
 # Note: I've put some imports after the argparse code to make the cmdline usage feel snappier
-import logging
 import argparse
 from pathlib import Path
 import sys
+
+import logging
+from rich.logging import RichHandler
 
 if __name__ == "__main__":
     # Stages:
@@ -27,7 +29,6 @@ if __name__ == "__main__":
 
     # n.b. Design these such that they can be driven from a configuration database (i.e.
     #      the pre-processing configuration can change dynamically.
-    logger = logging.getLogger()
 
     parser = argparse.ArgumentParser(
         prog="ECMWF IOT Observation Processor",
@@ -35,9 +36,8 @@ if __name__ == "__main__":
         epilog="See https://github.com/ecmwf-projects for more info.",
     )
     parser.add_argument(
-        "config_file",
-        default="examples/example.yaml",
-        help="Path to a yaml config file.",
+        "config_folder",
+        help="Path to the config folder.",
         type=Path,
     )
 
@@ -55,19 +55,6 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "-j",
-        "--parallel",
-        dest="parallel_workers",
-        metavar="NUMBER",
-        type=int,
-        nargs="?",
-        default=argparse.SUPPRESS,
-        const=None,
-        help="Engage parallel mode. Optionally specify how many parallel workers to use, \
-        defaults to the number of CPUs + the number of srcs in the pipeline",
-    )
-
-    parser.add_argument(
         "--finish-after",
         metavar="NUMBER",
         type=int,
@@ -82,34 +69,54 @@ if __name__ == "__main__":
     # Set the log level, default is warnings, -v gives info, -vv for debug
     logging.basicConfig(
         level=[logging.WARNING, logging.INFO, logging.DEBUG][min(2, args.verbose)],
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(markup=True, rich_tracebacks=True)],
     )
+    logger = logging.getLogger("CMDLINE")
 
-    from ionbeam.core.config_parser import parse_config
+    print(logger.handlers)
 
-    config = parse_config(args.config_file)
+    from .core.config_parser import parse_config
+    from .core.bases import Source, Aggregator
 
-    # The pipeline has sources, a bunch of processors and then a set of sinks
-    # between each there is a queue holding messages ready to pass to the next stage
-    # the main task iterates through each queue and 'pumps' the pipeline
-    # pipeline = [config.sources, config.preprocessors, config.aggregators, config.encoders]
-    pipeline = [getattr(config, name) for name in config.pipeline]
-    for name, stage in zip(config.pipeline, pipeline):
-        logger.info(f" {name.capitalize()}: " + " ".join(s.__class__.__name__ for s in stage))
+    globals, actions = parse_config(args.config_folder)
+
+    sources, stateless_actions, aggregators = [], [], []
+    for action in actions:
+        if isinstance(action, Source):
+            sources.append(action)
+        elif isinstance(action, Aggregator):
+            aggregators.append(action)
+        else:
+            stateless_actions.append(action)
+
+    logger.info(f"Globals:")
+    logger.info(f"    Data Path: {globals.globals.data_path}")
+    logger.info(f"    Config Path: {globals.globals.config_path}")
+    logger.info(f"    Data Path: {globals.globals.data_path}")
+
+    logger.info("Sources")
+    for i, a in enumerate(sources):
+        logger.info(f"    {i} {str(a)}")
+
+    logger.info("Aggregators")
+    for i, a in enumerate(aggregators):
+        logger.info(f"    {i} {str(a)}")
 
     if args.validate_config:
         sys.exit()
 
-    # If --finish-after N is set then tell all the sources to finish after N messages
     if "finish_after" in args:
         logger.warning(f"Telling all sources to finish after emitting {args.finish_after} messages")
-        for source in pipeline[0]:
+        for source in sources:
             source.finish_after = args.finish_after
 
-    if "parallel_workers" not in args:
-        from ionbeam.core.singleprocess_pipeline import singleprocess_pipeline
+    pipeline_names = ["Sources", "Pre-Agg Actions", "Aggregators", "Post-Agg Actions"]
 
-        singleprocess_pipeline(config, pipeline)
-    else:
-        from ionbeam.core.multiprocess_pipeline import mulitprocess_pipeline
+    from .core.singleprocess_pipeline import singleprocess_pipeline
 
-        mulitprocess_pipeline(config, pipeline)
+    try:
+        singleprocess_pipeline(pipeline_names, [sources, stateless_actions, aggregators, stateless_actions])
+    except Exception:
+        logger.exception("Exception during run:")

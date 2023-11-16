@@ -9,7 +9,7 @@
 # #
 
 import dataclasses
-from typing import Literal, List, Dict
+from typing import Literal, List, Dict, Iterable
 from pathlib import Path
 
 from ..core.bases import TabularMessage, FinishMessage, FileMessage, Encoder
@@ -136,9 +136,7 @@ class MARS_Key:
     dtype: ODC_Dtype
 
     # specify how this column will be filled
-    fill_method: Literal[
-        "constant", "from_config", "from_metadata", "from_data", "function"
-    ]
+    fill_method: Literal["constant", "from_config", "from_metadata", "from_data", "function"]
     value: str | None = None
     key: str | None = None
 
@@ -153,9 +151,7 @@ class MARS_Key:
         elif self.fill_method == "constant":
             assert self.value is not None
         elif self.key is None:
-            raise ValueError(
-                f"{self.name} method: {self.fill_method} must have an associated key"
-            )
+            raise ValueError(f"{self.name} method: {self.fill_method} must have an associated key")
 
         self.dtype = getattr(odc.DataType, self.dtype)
 
@@ -169,9 +165,7 @@ class MARS_Key:
             case "from_config":
                 obsvar = msg.metadata.observation_variable
                 if obsvar not in self.by_observation_variable:
-                    logger.warning(
-                        f"{self.name} doesn't have a value for {obsvar}. [{self.by_observation_variable}]"
-                    )
+                    logger.warning(f"{self.name} doesn't have a value for {obsvar}. [{self.by_observation_variable}]")
                     return -1
                 val = self.by_observation_variable[obsvar]
             case "from_metadata":
@@ -200,8 +194,11 @@ class ODCEncoder(Encoder):
     def __str__(self):
         return f"{self.__class__.__name__}({self.match})"
 
-    def init(self, global_config):
-        super().init(global_config)
+    def init(self, globals):
+        super().init(globals)
+
+        self.metadata = dataclasses.replace(self.metadata, state="odc_encoded")
+
         if not self.one_file_per_granule:
             self.output_file = self.resolve_path(self.output_file)
             self.output_file.parent.mkdir(exist_ok=True, parents=True)
@@ -217,12 +214,10 @@ class ODCEncoder(Encoder):
                 mars_keys_to_annotate[mars_name].append(key)
 
         # keys should be something like ["obstype", "codetype", "varno"]
-        canonical_variables = {c.name: c for c in global_config.canonical_variables}
+        canonical_variables = {c.name: c for c in globals.canonical_variables}
         for var in canonical_variables.values():
             # canonical variables should have either no mars keys or all of them
-            has_key = [
-                getattr(var, m) is not None for m in mars_keys_to_annotate.keys()
-            ]
+            has_key = [getattr(var, m) is not None for m in mars_keys_to_annotate.keys()]
             if not any(has_key):
                 continue
             if not all(has_key):
@@ -251,7 +246,7 @@ class ODCEncoder(Encoder):
                 raise e
         return pd.DataFrame(output_data)
 
-    def encode(self, msg: TabularMessage | FinishMessage):
+    def encode(self, msg: TabularMessage | FinishMessage) -> Iterable[FileMessage]:
         if isinstance(msg, FinishMessage):
             return
 
@@ -278,12 +273,10 @@ class ODCEncoder(Encoder):
                     additional_metadata[key] = val
 
             if msg.metadata.time_slice is not None:
-                additional_metadata["timeslice"] = str(
-                    msg.metadata.time_slice.start_time.isoformat()
-                )
+                additional_metadata["timeslice"] = str(msg.metadata.time_slice.start_time.isoformat())
 
         if self.one_file_per_granule:
-            f = "data/outputs/{source}/odb/{observation_variable}/{date}_{time:04d}.odb"
+            f = "outputs/{source}/odb/{observation_variable}/{date}_{time:04d}.odb"
             kwargs = dict(
                 observation_variable=msg.metadata.observation_variable,
                 source=msg.metadata.source,
@@ -292,7 +285,7 @@ class ODCEncoder(Encoder):
             )
             f = f.format(**kwargs)
 
-            self.output_file = Path(f).resolve()
+            self.output_file = self.globals.data_path / f
             self.output_file.parent.mkdir(parents=True, exist_ok=True)
             self.output_file.unlink(missing_ok=True)
 
@@ -327,24 +320,16 @@ class ODCEncoder(Encoder):
                 """
                 )
 
-        with open(
-            self.output_file, "wb" if self.one_file_per_granule else "ab"
-        ) as fout:
+        with open(self.output_file, "wb" if self.one_file_per_granule else "ab") as fout:
             odc.encode_odb(
                 output_df,
                 fout,
                 properties=additional_metadata,
-                types={
-                    col.name: col.dtype
-                    for col in self.MARS_keys
-                    if col.dtype is not None
-                },
+                types={col.name: col.dtype for col in self.MARS_keys if col.dtype is not None},
             )
 
         output_msg = FileMessage(
-            metadata=self.generate_metadata(
-                msg, filepath=self.output_file, encoded_format="odb"
-            ),
+            metadata=self.generate_metadata(msg, filepath=self.output_file, encoded_format="odb"),
         )
         yield self.tag_message(output_msg, msg)
 

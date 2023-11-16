@@ -155,13 +155,11 @@ class MeteoTracker_API:
 
     def __init__(
         self,
-        credentials_file: str | None = None,
-        logLevel: int = logging.DEBUG,
+        credentials_file: str | Path | None = None,
     ):
         credentials_file = credentials_file or str(Path(__file__).parents[4] / "secrets.yaml")
 
         self.logger = logging.getLogger("MeteoTracker_API")
-        self.logger.setLevel(logLevel)
 
         with open(credentials_file, "r") as f:
             parsed_yaml = yaml.safe_load(f)
@@ -177,7 +175,6 @@ class MeteoTracker_API:
         self.token = None
 
     def auth(self):
-        self.logger.info("Fetching the token...")
         resp = self.oauth.post(
             self.endpoints.token_endpoint, json=dict(email=self.credentials.email, password=self.credentials.password)
         )

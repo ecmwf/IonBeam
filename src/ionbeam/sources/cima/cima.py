@@ -61,10 +61,9 @@ class CIMA_API:
         cache_file: Path | None = None,
     ):
         self.logger = logging.getLogger(__name__)
-        if logLevel is not None:
-            self.logger.setLevel(logLevel)
 
         self.cache_file = cache_file
+        logger.info(f"Looking for cache file at {cache_file}")
         try:
             with cache_file.open("rb") as f:
                 self.cache = pickle.load(f)
@@ -240,6 +239,8 @@ class CIMA_API:
 
         if self.cache_file is not None:
             logger.info("Writing out cache to file.")
+            if not self.cache_file.parent.exists():
+                self.cache_file.parent.mkdir(parents=True)
             with self.cache_file.open("wb") as f:
                 self.cache["date"] = datetime.now(tz=timezone.utc)
                 pickle.dump(self.cache, f)

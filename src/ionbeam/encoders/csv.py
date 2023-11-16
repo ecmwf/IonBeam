@@ -27,8 +27,8 @@ class CSVEncoder(Encoder):
     def __str__(self):
         return f"{self.__class__.__name__}({self.match})"
 
-    def init(self, global_config):
-        super().init(global_config)
+    def init(self, globals):
+        super().init(globals)
         if not self.one_file_per_granule:
             self.output_file = self.resolve_path(self.output, type="data")
 
@@ -43,9 +43,7 @@ class CSVEncoder(Encoder):
 
         msg.data.to_csv(self.output_file, index=False)
 
-        metadata = self.generate_metadata(
-            msg, filepath=self.output_file, encoded_format="csv"
-        )
+        metadata = self.generate_metadata(msg, filepath=self.output_file, encoded_format="csv")
         output_message = FileMessage(metadata=metadata)
         output_message = self.tag_message(output_message, msg)
         yield output_message

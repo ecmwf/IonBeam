@@ -24,8 +24,8 @@ class MultiFileSource(Source):
     basepath: Path = Path(".")
     finish_after: int | None = None
 
-    def init(self, global_config):
-        super().init(global_config)
+    def init(self, globals):
+        super().init(globals)
         self.basepath = self.resolve_path(self.basepath, type="data")
         logger.debug(f"{self.__class__.__name__}: resolved basepath to {self.basepath}")
 
@@ -39,9 +39,7 @@ class MultiFileSource(Source):
             pattern = Path(pattern)
 
             if pattern.is_absolute():
-                raise ValueError(
-                    "Absolute paths patterns are not supported, use basepath."
-                )
+                raise ValueError("Absolute paths patterns are not supported, use basepath.")
 
             # make the pattern absolute so that we can check if it exists as a file or folder
             pattern = self.basepath / pattern
@@ -59,9 +57,7 @@ class MultiFileSource(Source):
             paths = (p for p in paths if p.is_file() and not p.name.startswith("."))
 
             if not paths:
-                logger.warning(
-                    f"Specified path pattern '{pattern}' does not exist. Skipping."
-                )
+                logger.warning(f"Specified path pattern '{pattern}' does not exist. Skipping.")
 
             for path in paths:
                 yield FileMessage(
@@ -70,10 +66,7 @@ class MultiFileSource(Source):
                     ),
                 )
                 emitted_messages += 1
-                if (
-                    self.finish_after is not None
-                    and emitted_messages >= self.finish_after
-                ):
+                if self.finish_after is not None and emitted_messages >= self.finish_after:
                     return
 
 

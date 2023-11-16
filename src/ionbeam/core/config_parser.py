@@ -19,14 +19,12 @@ from collections import defaultdict
 import yaml
 from yamlinclude import YamlIncludeConstructor
 
-from .converters import unit_conversions
-from ..encoders.odb import ODCEncoder
-from .bases import Source, Processor, Parser, Aggregator, Encoder, CanonicalVariable
+from .bases import CanonicalVariable, Action, Globals
 from .history import describe_code_source, CodeSourceInfo
 from .config_parser_machinery import parse_config_from_dict, ConfigError
 
-# This line is necessary to automatically find all the subclasses of things like "Encoder"
-from .. import sources, parsers, aggregators, quality_assessment, encoders
+# # This line is necessary to automatically find all the subclasses of things like "Encoder"
+from .. import sources, parsers, aggregators, quality_assessment, encoders, writers
 
 logger = logging.getLogger(__name__)
 
@@ -40,27 +38,29 @@ class SafeLineLoader(yaml.SafeLoader):
         return mapping
 
 
+# The overall config file spec
 @dataclass
-class GlobalConfig:
-    canonical_variables: List[CanonicalVariable]
-    config_path: Path
-    data_path: Path
-    code_source: CodeSourceInfo | None = None
+class SubConfig:
+    actions: List[Action] = field(default_factory=list)
 
 
 # The overall config file spec
 @dataclass
 class Config:
-    global_config: GlobalConfig
-    pipeline: List[str]
-    sources: List[Source] = field(default_factory=list)
-    parsers: List[Parser] = field(default_factory=list)
-    aggregators: List[Aggregator] = field(default_factory=list)
-    encoders: List[Encoder] = field(default_factory=list)
-    other_processors: List[Processor] = field(default_factory=list)
+    globals: Globals
+    sources: List[str]
 
 
-def parse_config(yaml_file: Path, schema=Config):
+def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
+    """
+    Refering to the docs for parse_config, this function deals with the subfolders:
+    ├── acronet - a set of folders for each logically distinct source of data.
+    ├── MARS_keys.yaml - Info on how to create a MARS key for this source
+    └── actions.yaml - the actions that define the pipeline for this source
+
+    It loads in the actions, MARS_keys.yaml is include'd with a directive.
+    It then calls action.init() to give all the actions a change to look at the global config.
+    """
     # Set up the yaml parser to support file includes
     YamlIncludeConstructor.add_to_loader_class(loader_class=SafeLineLoader, base_dir=str(yaml_file.parent))
 
@@ -71,20 +71,71 @@ def parse_config(yaml_file: Path, schema=Config):
     # Parse the yaml file using python dataclasses as a template
     config = parse_config_from_dict(schema, config_dict, filepath=yaml_file)
 
-    # Resolve the paths in the global config relative to the config file
-    for name in ["data_path", "config_path"]:
-        path = getattr(config.global_config, name)
-        if not path.is_absolute():
-            path = (yaml_file.parent / path).resolve()
-        setattr(config.global_config, name, path)
-        logger.debug(f"Resolved global_config.{name} to {path}")
-
-    # Figure out the git status clean/dirty and the current git hash
-    config.global_config.code_source = describe_code_source()
-
     # Let all the actions initialise themselves with access to the global config
-    for stage in config.pipeline:
-        for action in getattr(config, stage):
-            action.init(config.global_config)
+    for action in config.actions:
+        action.init(globals)
 
     return config
+
+
+def parse_config(config_dir: Path, schema=Config):
+    """
+    Config directory has the structure:
+    .
+    ├── config.yaml - Top level config
+    ├── canonical_variables.yaml - A list of all known variables with metadata
+    ├── secrets.yaml - not checked into source control
+    ├── acronet - a set of folders for each logically distinct source of data.
+    │   ├── MARS_keys.yaml - Info on how to create a MARS key for this source
+    │   └── actions.yaml - the actions that define the pipeline for this source
+    ├── meteotracker
+    │   ├── MARS_keys.yaml
+    │   └── actions.yaml
+    └── sensor.community
+        ├── MARS_keys.yaml
+        └── actions.yaml
+    """
+    YamlIncludeConstructor.add_to_loader_class(loader_class=SafeLineLoader, base_dir=str(config_dir))
+
+    if not config_dir.exists():
+        raise ConfigError(f"{config_dir} does not exist!")
+
+    global_config_file = config_dir / "config.yaml"
+    if not global_config_file.exists():
+        raise ConfigError(f"Could not find config.yaml in {config_dir}")
+
+    with open(global_config_file) as f:
+        data = yaml.load(f, Loader=SafeLineLoader)
+        global_config = parse_config_from_dict(Config, data, filepath=global_config_file)
+
+    logger.debug(f"Loaded global config...")
+
+    # Resolve the paths in the global config relative to the config file
+    for name in ["data_path", "config_path"]:
+        path = getattr(global_config.globals, name)
+        if not path.is_absolute():
+            path = (config_dir.parent / path).resolve()
+        setattr(global_config.globals, name, path)
+        logger.debug(f"Resolved global_config.globals.{name} to {path}")
+
+    # # Figure out the git status clean/dirty and the current git hash
+    global_config.globals.code_source = describe_code_source()
+    logger.debug(f"Checked repository source state: {global_config.globals.code_source}")
+
+    # Loop over one level of subdirectories and read in the actions from each one
+    action_source_files = {
+        source_name: config_dir / source_name / "actions.yaml" for source_name in global_config.sources
+    }
+    action_source_files["base"] = config_dir / "actions.yaml"
+
+    sources = {}
+    actions = []
+    for name, file in action_source_files.items():
+        assert file.exists()
+        logger.debug(f"Parsing {file}")
+        source = parse_sub_config(file, globals=global_config.globals, schema=SubConfig)
+        sources[name] = source
+        actions.extend(source.actions)
+
+    global_config.sources = sources
+    return global_config, actions

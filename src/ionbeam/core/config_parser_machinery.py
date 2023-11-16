@@ -5,9 +5,6 @@ from typing import Union, get_origin, get_args, List
 import typing
 from pathlib import Path
 
-# This line is necessary to automatically find all the subclasses of things like "Encoder"
-from .. import sources, parsers, aggregators, encoders
-
 # TYPE_KEY is a special key that determines which class or type to pick in ambiguous cases.
 # Case 1: Unions: like "str | int"
 # Case 2: is the type specified is a class and name is given, the subclasses will be searched for one that matches.
@@ -35,9 +32,7 @@ class ConfigLineError(ConfigError):
 
 def has_default(field):
     "Determine whether a dataclass field has a default value"
-    return (field.default is not dataclasses.MISSING) or (
-        field.default_factory is not dataclasses.MISSING
-    )
+    return (field.default is not dataclasses.MISSING) or (field.default_factory is not dataclasses.MISSING)
 
 
 def check_matching(context, datacls, input_dict):
@@ -80,12 +75,8 @@ class Subclasses:
             return self.cache[target.__name__]
         except KeyError:
             # Deduplicate classes by __name__
-            deduped = list(
-                {subcls.__name__: subcls for subcls in target.__subclasses__()}.values()
-            )
-            subclasses = {target.__name__: target} | {
-                k: v for subcls in deduped for k, v in self.get(subcls).items()
-            }
+            deduped = list({subcls.__name__: subcls for subcls in target.__subclasses__()}.values())
+            subclasses = {target.__name__: target} | {k: v for subcls in deduped for k, v in self.get(subcls).items()}
             self.cache[target.__name__] = subclasses
             return subclasses
 
@@ -119,7 +110,7 @@ def determine_matching_dataclass(context, key, datacls, input_dict):
             datacls,
             {},
             f"Config yaml entry for section '{datacls.__name__}' invalid"
-            f"got {input_dict} but was expecting a dictionary entry",
+            f" got {input_dict} but was expecting a dictionary entry",
         )
 
     if TYPE_KEY in input_dict:
@@ -136,8 +127,8 @@ def determine_matching_dataclass(context, key, datacls, input_dict):
                 input_dict,
                 f"Config yaml entry for section '{datacls.__name__}' invalid"
                 f" name: '{cls_name}' could not be found as a subclass of {datacls.__name__}"
-                f" known subclasses: {subclasses}",
-            )
+                f"\n\nKnown subclasses: {subclasses.keys()}",
+            ) from None
 
     return datacls
 
@@ -152,13 +143,10 @@ def parse_list(context, key, list_type, value):
             value,
             f"Cannot use bare type '{list_type.__name__}',"
             f"you must specifiy what type it contains i.e {list_type.__name__}[int].",
-        )
+        ) from None
 
     contained_type = args[0]
-    return [
-        parse_field(context, f"element {i}", contained_type, v)
-        for i, v in enumerate(value)
-    ]
+    return [parse_field(context, f"element {i}", contained_type, v) for i, v in enumerate(value)]
 
 
 def is_literal(t):
@@ -234,7 +222,7 @@ def parse_field(context, key, _type, value):
     try:
         result = _type(value)
     except Exception as e:
-        raise ConfigLineError(context, key, _type, value, str(e))
+        raise ConfigLineError(context, key, _type, value, str(e)) from None
 
     return result
 

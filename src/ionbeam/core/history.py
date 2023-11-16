@@ -14,9 +14,10 @@ class CodeSourceInfo:
     git_hash: str | None
 
 
-def describe_code_source() -> CodeSourceInfo:
+def describe_code_source(repo_path=None) -> CodeSourceInfo:
     try:
-        repo_path = Path(__file__).parents[1]
+        if repo_path is None:
+            repo_path = Path(__file__).parents[1]
         status = (
             "Dirty"
             if subprocess.check_output(

@@ -44,16 +44,18 @@ class CSVParser(Parser):
     def __str__(self):
         return f"{self.__class__.__name__}({self.match})"
 
-    def init(self, global_config):
-        super().init(global_config)
-        self.all_columns = (
-            self.value_columns + self.metadata_columns + self.identifying_columns
-        )
+    def init(self, globals):
+        super().init(globals)
+        self.all_columns = self.value_columns + self.metadata_columns + self.identifying_columns
         self.fixed_columns = self.identifying_columns + self.metadata_columns
         self.columns_mapping = {c.key: c.name for c in self.all_columns}
 
-        canonical_variables = {c.name: c for c in global_config.canonical_variables}
+        canonical_variables = {c.name: c for c in globals.canonical_variables}
         for col in self.all_columns:
+            # We are explicitly ignoring this input key
+            if col.discard:
+                continue
+
             # Check that preprocessors only create columns with canonical names
             if col.name not in canonical_variables:
                 raise ValueError(f"{col.name} not in canonical names!")
@@ -63,9 +65,9 @@ class CSVParser(Parser):
 
             # Emit a warning if the config doesn't include the unit conversion
             if (
-                col.unit != col.canonical_variable.unit
-                and f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}"
-                not in unit_conversions
+                col.unit
+                and col.unit != col.canonical_variable.unit
+                and f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}" not in unit_conversions
             ):
                 logger.warning(
                     f"No unit conversion registered for {col.name} {col.unit} -> {col.canonical_variable.unit}|"
@@ -78,9 +80,7 @@ class CSVParser(Parser):
         df = df.copy()
         extra_keys = {k for k in df.columns if k not in self.columns_mapping}
         if extra_keys:
-            logger.warning(
-                f"Data keys [{','.join(extra_keys)}] do not exist in the config!"
-            )
+            logger.warning(f"Data keys [{','.join(extra_keys)}] do not exist in the config!")
 
         df.rename(columns=self.columns_mapping, inplace=True)
 
@@ -89,28 +89,19 @@ class CSVParser(Parser):
         for col in self.all_columns:
             if col.name in df and col.canonical_variable.dtype is not None:
                 # convert any custom nan values to the string "NaN"
-                if (
-                    self.custom_nans is not None
-                    and col.canonical_variable.dtype.startswith("float")
-                ):
+                if self.custom_nans is not None and col.canonical_variable.dtype.startswith("float"):
                     for nan in self.custom_nans:
                         df[col.name].replace(nan, "NaN", inplace=True)
 
                 try:
-                    df[col.name] = df[col.name].astype(
-                        col.canonical_variable.dtype, copy=False
-                    )
+                    df[col.name] = df[col.name].astype(col.canonical_variable.dtype, copy=False)
                 except ValueError as e:
-                    raise ValueError(
-                        f"{col.name} conversion to {col.canonical_variable.dtype} failed with error {e}"
-                    )
+                    raise ValueError(f"{col.name} conversion to {col.canonical_variable.dtype} failed with error {e}")
 
         # Do unit conversions
         for col in self.all_columns:
             if col.name in df and col.unit != col.canonical_variable.unit:
-                converter = unit_conversions[
-                    f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}"
-                ]
+                converter = unit_conversions[f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}"]
                 df[col.name] = df[col.name].apply(converter)
 
         return df
@@ -154,9 +145,7 @@ class CSVParser(Parser):
 
             output_msg = TabularMessage(
                 metadata=metadata,
-                columns=[
-                    c.canonical_variable for c in self.fixed_columns + [variable_column]
-                ],
+                columns=[c.canonical_variable for c in self.fixed_columns + [variable_column]],
                 data=df,
             )
 

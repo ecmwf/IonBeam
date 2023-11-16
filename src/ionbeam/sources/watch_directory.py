@@ -39,8 +39,8 @@ class WatchDirectorySource(PatternMatchingEventHandler, Source):
     case_sensitive: bool = True
     # @todo: Provide a sensible way of stopping the observer threads...
 
-    def init(self, global_config):
-        super().init(global_config)
+    def init(self, globals):
+        super().init(globals)
 
         self.paths = [os.path.abspath(p) for p in self.paths]
         # The output queue

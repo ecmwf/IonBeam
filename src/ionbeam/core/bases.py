@@ -96,27 +96,68 @@ ProcessFunction = Callable[[Message], Iterable[Message]]
 DataMessageVar = TypeVar("DataMessageVar", bound=DataMessage)
 
 
+# Config Classes
+@dataclasses.dataclass
+class CanonicalVariable:
+    """
+    Represents a physical variable with units, dtype and other metadata
+    name: our internal name, i.e air_temperature_near_surface
+    desc: a description of the variable
+    unit: the physical unit
+    WMO: whether this exact name exists in the WMO variables
+    dtype: the dtype with which to store this data internally
+    output: whether this variable should be output as an observation at the end of the pipeline
+
+    These three set the MARS keys for this variable
+    codetype: int
+    varno: int
+    obstype: int
+    """
+
+    name: str
+    desc: str | None = None
+    unit: str | None = None
+    CRS: str | None = None
+    WMO: bool = False
+    dtype: str | None = "float64"
+    output: bool = False
+
+    codetype: int | None = None
+    varno: int | None = None
+    obstype: int | None = None
+
+    def __repr__(self):
+        return f"CanonicalVariable({self.name})"
+
+
+@dataclasses.dataclass
+class Globals:
+    canonical_variables: List[CanonicalVariable]
+    config_path: Path
+    data_path: Path
+    online: bool
+    code_source: CodeSourceInfo | None = None
+
+
 @dataclasses.dataclass
 class Action:
     "The base class for actions, from which Source and Processor inherit"
 
     # kw_only is necessary so that classes that inherit from this one can have positional fields
     metadata: MetaData = dataclasses.field(default_factory=MetaData, kw_only=True)
-    code_source: CodeSourceInfo | None = dataclasses.field(default=None, kw_only=True)
-    global_config: Any | None = dataclasses.field(default=None, kw_only=True)
+    # code_source: CodeSourceInfo | None = dataclasses.field(default=None, kw_only=True)
+    globals: Globals | None = dataclasses.field(default=None, kw_only=True)
 
-    def init(self, global_config):
+    def init(self, globals):
         "Initialise self with access to the global config variables"
-        self.global_config = global_config
+        self.globals = globals
 
-    def resolve_path(
-        self, path: str | Path, type: Literal["data", "config"] = "data"
-    ) -> Path:
-        assert self.global_config
+    def resolve_path(self, path: str | Path, type: Literal["data", "config"] = "data") -> Path:
+        assert self.globals
         if type == "data":
-            base = self.global_config.data_path
+            base = self.globals.data_path
         elif type == "config":
-            base = self.global_config.config_path
+            base = self.globals.config_path
         else:
             raise ValueError(f"{type} must be 'config' or 'data'")
 
@@ -141,31 +182,23 @@ class Action:
         keys = message_keys | action_keys | explicit_keys
         return MetaData(**keys)
 
-    def tag_message(
-        self, msg: DataMessageVar, previous_msg: DataMessage | MessageInfo | None
-    ) -> DataMessageVar:
+    def tag_message(self, msg: DataMessageVar, previous_msg: DataMessage | MessageInfo | None) -> DataMessageVar:
         """
         Update the message history, using the current message and the previous message
         If there is no logical previous message, such as when doing TimeAggregation,
         you can directly pass a MessageInfo object in place of previous_message.
         """
         if isinstance(previous_msg, DataMessage):
-            message = MessageInfo(
-                name=previous_msg.__class__.__name__, metadata=previous_msg.metadata
-            )
+            message = MessageInfo(name=previous_msg.__class__.__name__, metadata=previous_msg.metadata)
         elif isinstance(previous_msg, MessageInfo):
             message = previous_msg
         else:
-            raise ValueError(
-                f"previous_msg was of type {type(previous_msg)} not DataMessage or MessageInfo"
-            )
+            raise ValueError(f"previous_msg was of type {type(previous_msg)} not DataMessage or MessageInfo")
 
-        msg.history = (
-            previous_msg.history.copy() if isinstance(previous_msg, DataMessage) else []
-        )
+        msg.history = previous_msg.history.copy() if isinstance(previous_msg, DataMessage) else []
         msg.history.append(
             PreviousActionInfo(
-                action=ActionInfo(name=self.__class__.__name__, code=self.code_source),
+                action=ActionInfo(name=self.__class__.__name__, code=self.globals.code_source),
                 message=message,
             )
         )
@@ -256,8 +289,8 @@ class Parser(Processor):
 
     """
 
-    def init(self, global_config):
-        super().init(global_config)
+    def init(self, globals):
+        super().init(globals)
         # Set the dafault value of parsed but let it be overridden
         self.metadata = dataclasses.replace(self.metadata, state="parsed")
 
@@ -286,35 +319,13 @@ class Encoder(Processor):
         self.metadata = dataclasses.replace(self.metadata, state="encoded")
 
 
-# Config Classes
 @dataclasses.dataclass
-class CanonicalVariable:
-    """
-    Represents a physical variable with units, dtype and other metadata
-    name: our internal name, i.e air_temperature_near_surface
-    desc: a description of the variable
-    unit: the physical unit
-    WMO: whether this exact name exists in the WMO variables
-    dtype: the dtype with which to store this data internally
-    output: whether this variable should be output as an observation at the end of the pipeline
+class Writer(Processor):
+    def process(self, data: EncodedMessage) -> Iterable[Message]:
+        raise NotImplementedError("Implement encode() in derived class")
 
-    These three set the MARS keys for this variable
-    codetype: int
-    varno: int
-    obstype: int
-    """
-
-    name: str
-    desc: str | None = None
-    unit: str | None = None
-    CRS: str | None = None
-    WMO: bool = False
-    dtype: str | None = "float64"
-    output: bool = False
-
-    codetype: int | None = None
-    varno: int | None = None
-    obstype: int | None = None
+    def __post_init__(self):
+        self.metadata = dataclasses.replace(self.metadata, state="written")
 
 
 @dataclasses.dataclass
@@ -333,6 +344,7 @@ class InputColumn:
     key: str = "__DEFAULT_TO_NAME__"
     type: type | str | None = None
     unit: str | None = None
+    discard: bool = False
     canonical_variable: CanonicalVariable | None = None
 
     def __post_init__(self):
