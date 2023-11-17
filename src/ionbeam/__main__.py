@@ -75,8 +75,6 @@ if __name__ == "__main__":
     )
     logger = logging.getLogger("CMDLINE")
 
-    print(logger.handlers)
-
     from .core.config_parser import parse_config
     from .core.bases import Source, Aggregator
 

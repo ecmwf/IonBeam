@@ -49,7 +49,8 @@ dtype_lookup = {
 
 def source(msg: TabularMessage) -> pd.Series:
     "populates source@hdr"
-    return pd.Series([msg.metadata.source for _ in range(len(msg.data))])
+    return msg.data.author
+    # return pd.Series([msg.metadata.source for _ in range(len(msg.data))])
 
     mapping = {
         "genova": "GENOALL",
@@ -113,6 +114,7 @@ def station_id(msg: TabularMessage) -> pd.Series:
     def f(string):
         return hashlib.sha256(str(string).encode()).hexdigest()[:8]
 
+    return strings
     return strings.apply(f)
 
 
@@ -264,7 +266,8 @@ class ODCEncoder(Encoder):
         # logger.debug(f"Columns before encoding to ODC: {df.columns}")
         # logger.info(f"Encoded {msg} to {self.output}")
         additional_metadata = {
-            "encoded_by": "ionbeam",  # TODO: add git commit hash or version here
+            "encoded_by": "IonBeam",  # TODO: add git commit hash or version here
+            "IonBeam_git_hash": self.globals.code_source.git_hash,
         }
         if msg.metadata:
             for key in ["source", "observation_variable"]:

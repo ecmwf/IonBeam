@@ -251,7 +251,7 @@ def message_to_html(message):
         """
 
 
-def action_to_html(action):
+def action_to_html(action, extra_sections=[]):
     # Link the CSS and HTML using random ids so that if multiple
     # elements are emitted on the same page they don't interfere with one another.
     container_id = f"container-{random_id(15)}"
@@ -264,6 +264,8 @@ def action_to_html(action):
             sections.append(make_section(field.name, dataclass_to_html(value)))
         else:
             attributes.append([field.name, value])
+
+    sections.extend(extra_sections)
 
     df = pd.DataFrame(attributes)
     with pd.option_context("display.max_colwidth", 100):
@@ -324,7 +326,7 @@ def action_to_html(action):
         <div id="{container_id}">
         <h4>{action.__class__.__name__}{details}</h4>
         <div id="{inner_container_id}">
-            {newline.join(sections)}
+            {newline.join(str(s) for s in sections)}
             </div>
         </div>
         """

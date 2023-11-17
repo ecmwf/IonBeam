@@ -27,6 +27,7 @@ from ..core.bases import (
     FinishMessage,
 )
 from ..core.history import MessageInfo
+from ..core.html_formatters import make_section, data_to_html, action_to_html
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ class BucketContainer:
     def emit(
         self,
         age: timedelta = timedelta(hours=10),
-        direction: Literal["oldest", "youngest"] = "oldest",
+        direction: Literal["forwards", "backwards"] = "forwards",
     ) -> Iterable[TabularMessage]:
         """Look at the current data we have aggreated
         and emit the data that is old/young enough that we don't
@@ -123,13 +124,13 @@ class BucketContainer:
         periods = sorted(self.buckets.keys())
 
         min_p, max_p = periods[0], periods[-1]
-        pivot_value = max_p - age if direction == "oldest" else min_p + age
+        pivot_value = max_p - age if direction == "forwards" else min_p + age
 
         # put the values we want to emit at the begining
-        if direction == "youngest":
+        if direction == "backwards":
             periods = periods[::-1]
 
-        if direction == "oldest":
+        if direction == "forwards":
             to_emit = it.takewhile(lambda p: p < pivot_value, periods)
         else:
             to_emit = it.takewhile(lambda p: p > pivot_value, periods)
@@ -137,6 +138,7 @@ class BucketContainer:
         for period in to_emit:
             msg = self.buckets[period].aggregate(self.representative_previous_message)
             if msg is not None:
+                logger.debug(f"TimeAggregator yielding {msg}")
                 yield msg
             del self.buckets[period]
 
@@ -162,12 +164,19 @@ class TimeAggregator(Aggregator):
     """
 
     granularity: str = "1H"
-    direction: Literal["oldest", "youngest"] = "youngest"
+    time_direction: Literal["forwards", "backwards"] = "forwards"
     emit_after_hours: int = 10
     stateful: bool = True
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.match}, {self.granularity}, {self.direction})"
+        return f"{self.__class__.__name__}({self.match}, {self.granularity}, {self.time_direction})"
+
+    def _repr_html_(self):
+        keys = []
+        for key, bucket_container in self.bucket_containers.items():
+            df = pd.DataFrame([[k, len(v.messages)] for k, v in bucket_container.buckets.items()])
+            keys.append(make_section(", ".join(key), data_to_html(df)))
+        return action_to_html(self, extra_sections=[make_section("Contents (by key)", "\n".join(keys))])
 
     def init(self, globals):
         super().init(globals)
@@ -179,6 +188,19 @@ class TimeAggregator(Aggregator):
         msg = self.tag_message(msg, bucket.representative_previous_message)
         return msg
 
+    def total_messages(self) -> int:
+        return sum(
+            len(bucket.messages)
+            for bucket_container in self.bucket_containers.values()
+            for bucket in bucket_container.buckets.values()
+        )
+
+    def time_span(self) -> dict:
+        return {
+            key: max(bucket_container.buckets.keys()) - min(bucket_container.buckets.keys())
+            for key, bucket_container in self.bucket_containers.items()
+        }
+
     def process(self, message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
         # A finish message here means there's nothing else coming down the line,
         # so just return everything we have
@@ -189,7 +211,14 @@ class TimeAggregator(Aggregator):
 
             return
 
+        logger.debug(f"Current timespan = {self.time_span()} total_messages = {self.total_messages()}")
+
         assert message.metadata.observation_variable is not None
+        message_timedelta = message.data.time.max() - message.data.time.min()
+        if 2 * message_timedelta > timedelta(hours=self.emit_after_hours):
+            logger.warning(
+                f"Messages has timedelta = {message_timedelta} which is too close to the emit_after_hours setting ({self.emit_after_hours}H)!"
+            )
 
         for period, data_chunk in message.data.resample(self.granularity, on="time", kind="period"):
             if data_chunk.empty:
@@ -205,7 +234,7 @@ class TimeAggregator(Aggregator):
             key = (
                 message.metadata.source,
                 message.metadata.observation_variable,
-                period,
+                # period,
             )
 
             # Find the bucket container that manages this key and give the message to it
@@ -225,5 +254,5 @@ class TimeAggregator(Aggregator):
             # tell the bucket to go through what it has and emit all data older/younger
             # than the current data by a certain amount.
             # Direction depends on the order in which we're ingesting data
-            for msg in bucket_container.emit(age=timedelta(hours=self.emit_after_hours), direction=self.direction):
+            for msg in bucket_container.emit(age=timedelta(hours=self.emit_after_hours), direction=self.time_direction):
                 yield self.emit_message(msg, bucket_container)

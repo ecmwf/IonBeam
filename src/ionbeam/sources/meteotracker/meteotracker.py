@@ -215,24 +215,23 @@ class MeteoTracker_API:
         type: MT_DataType = "all",
         items: int = 1000,
         page: int = 0,
+        author: str = "",
         raw=False,
         **kwargs,
     ) -> List[MT_Session]:
-        if timespan is None:
-            now = datetime.now()
-            earlier = now - timedelta(days=3)
-            timespan = (earlier, now)
-
-        t1, t2 = (int(t.timestamp()) for t in timespan)
-        if t2 < t1:
-            raise ValueError("The timespan must be ordered (earlier, later)")
-
         params = {
             "dataType": type,
             "items": items,
-            "startTime": f'{{"$gte":{t1},"$lte":{t2}}}',
-            # This cannot contain any spaces and must use double quotes, hence the ugly f-string
         }
+        if author:
+            params["by"] = author
+
+        if timespan is not None:
+            t1, t2 = (int(t.timestamp()) for t in timespan)
+            if t2 < t1:
+                raise ValueError("The timespan must be ordered (earlier, later)")
+            # This cannot contain any spaces and must use double quotes, hence the ugly f-string
+            params["startTime"] = (f'{{"$gte":{t1},"$lte":{t2}}}',)
 
         params.update(kwargs)
         responses = []
@@ -256,8 +255,9 @@ class MeteoTracker_API:
         ).json()
 
         df = pandas.DataFrame.from_records(json)
-        df["lat"], df["lon"] = [r[1] for r in df["lo"].values], [r[0] for r in df["lo"].values]
-        del df["lo"]
+        if "lo" in df:
+            df["lat"], df["lon"] = [r[1] for r in df["lo"].values], [r[0] for r in df["lo"].values]
+            del df["lo"]
 
         return df
 
