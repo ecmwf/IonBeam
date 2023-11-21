@@ -13,7 +13,7 @@
 # Encoders - Write out the data to some output, currently CSV or ODB to disk
 
 # The structure of this config file is controlled my the structure of python dataclasses
-# To see for example, which encoders exist, go to src/obsproc/core/config_parser.py
+# To see for example, which encoders exist, go to src/ionbeam/core/config_parser.py
 # From there we see an encoder is either ODCEncoder or CSVEncoder
 # Finding ODCEncoder in the codebase we can see what fields it expects in the config
 # With some docstrings and autodoc magic one should be able to use this to generate a

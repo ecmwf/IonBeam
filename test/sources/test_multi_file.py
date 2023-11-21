@@ -10,8 +10,8 @@
 
 from pathlib import Path
 
-from obsproc.sources import load_source
-from obsproc.sources.multi_file import MultiFileSource
+from ionbeam.sources import load_source
+from ionbeam.sources.multi_file import MultiFileSource
 
 # import pytest
 

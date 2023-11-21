@@ -8,17 +8,10 @@
 # # does it submit to any jurisdiction.
 # #
 
-from pathlib import Path
+from .source import MeteoTrackerSource
+from .meteotracker import MeteoTracker_API
 
-from ionbeam.core.config_parser import parse_config
+# Expose the Source object at ionbeam.sources.cima.source so that load_source can find it
+source = MeteoTrackerSource
 
-
-def test_config_parser():
-    for p in Path("../examples").glob("*.yaml"):
-        print(p)
-        parse_config(p)
-
-    yaml_file = Path(
-        "/Users/math/git/iot-ingester-deployment/dockerfiles/config/iot-ingester/config.yaml"
-    ).resolve()
-    parse_config(yaml_file)
+__all__ = ["MeteoTracker_API", "MeteoTrackerSource", "MeteoTrackerOfflineSource"]

@@ -23,6 +23,6 @@ line-length = 120
 [tool.mypy]
 strict = false
 files = [
-    "src/obsproc/sources/cima",
-    "src/obsproc/sources/meteotracker",
+    "src/ionbeam/sources/cima",
+    "src/ionbeam/sources/meteotracker",
 ]

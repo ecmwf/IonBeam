@@ -8,17 +8,7 @@
 # # does it submit to any jurisdiction.
 # #
 
-from pathlib import Path
+from .source import CIMASource
 
-from ionbeam.core.config_parser import parse_config
-
-
-def test_config_parser():
-    for p in Path("../examples").glob("*.yaml"):
-        print(p)
-        parse_config(p)
-
-    yaml_file = Path(
-        "/Users/math/git/iot-ingester-deployment/dockerfiles/config/iot-ingester/config.yaml"
-    ).resolve()
-    parse_config(yaml_file)
+# Expose the Source object at ionbeam.sources.cima.source so that load_source can find it
+source = CIMASource

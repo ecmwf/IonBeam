@@ -23,7 +23,7 @@
 # fill_method: from_data
 # key: lat
 
-# Fill this column using a function defined in obsproc.encoders.odb
+# Fill this column using a function defined in ionbeam.encoders.odb
 # fill_method: function
 # key: function_name
 

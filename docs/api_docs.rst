@@ -3,31 +3,31 @@ API Docs
 
 Config Parser
 ---------------------------------------------
-.. automodule:: obsproc.core.config_parser
+.. automodule:: ionbeam.core.config_parser
    :members:
 
 Base Classes
 ---------------------------------------------
-.. .. automodule:: obsproc.core.bases
+.. .. automodule:: ionbeam.core.bases
 ..    :members:
 
 Sources
 ---------------------------------------------
 
-.. .. automodule:: obsproc.sources
+.. .. automodule:: ionbeam.sources
 ..    :members:
 
-.. autoclass:: obsproc.core.bases.Match
+.. autoclass:: ionbeam.core.bases.Match
    :members:
 
 Parsers
 ---------------------------------------------
 
-.. automodule:: obsproc.parsers
+.. automodule:: ionbeam.parsers
    :members:
 
 Encoders
 ---------------------------------------------
 
-.. automodule:: obsproc.encoders
+.. automodule:: ionbeam.encoders
    :members:

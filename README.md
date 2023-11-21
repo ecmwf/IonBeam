@@ -1,10 +1,42 @@
-# IOT Ingester
+
+<p align="center">
+    <img alt="The IONBeam logo, showing the name and a line drawing of a stylised scientific instrument who operation involves streams of ions."src="https://github.com/ecmwf-projects/iot-ingester/blob/ac8c020bda2a1143d0c4ffb6a29ff58eb0e2c790/ionbeam.png">
+</p>
+<p align="center">
+    <em>A streaming library for IoT data</em>
+</p>
 
 :warning: This project is ALPHA and will be experimental for the foreseeable future. Interfaces and functionality are likely to change. DO NOT use this software in any project/software that is operational. :warning:
 
-This is a prototype of infrastructure for ingesting IOT observations into the data ECMWF ecosystem.
+This is a prototype library for streaming IOT observations into a database. It's based on message + action model where streams of messages are transformed by different actions before reaching their final destination which could be a database or external service.
 
-![A block diagram of different components feeding into one another.](docs/_static/block_diagram.png)
+This project can be deployed in three ways:
+    1. Locally, as a single threaded process, see Command Line Usage.
+    3. A local docker-compose setup, see [the deployment repo](https://github.com/ecmwf-projects/iot-ingester-deployment)
+    3. TODO: The above but running on a kubernetes cluster.
+
+## Dev Installation
+
+Install from source
+```sh
+$ git clone github.com/ecmwf-projects/IonBeam
+$ cd ionbeam
+```
+
+Create a conda or mamba environment, venv or similar
+```sh
+$ conda env create --name ionbeam ipykernel
+$ conda activate ionbeam
+$ pip install --editable ".[dev]"
+```
+
+Recommended: Install pre-commit hooks that run ruff, black, isort, flake8, etc on the code before you commit
+```sh
+pre-commit install
+```
+
+Create a `secrets.yaml` file containing the access credentials for the various sources of data, use `example_secrets.yaml` as a template. `secrets.yaml` is in the gitignore to lower the risk that it accidentally gets committed to git.
+
 
 ## Documentation
 
@@ -15,28 +47,7 @@ The documentation will be available at on readthedocs.io once this repo is made 
 [Apache License 2.0](LICENSE) In applying this license, ECMWF does not waive the privileges and immunities
 granted to it by virtue of its status as an intergovernmental organisation nor does it submit to any jurisdiction.
 
-## Installation
 
-Install from source
-```sh
-$ git clone github.com/ecmwf-projects/iot-ingester
-$ cd iot_ingester
-```
-
-Create a conda environemnt, vevnv or similar
-```sh
-$ conda env create --name iot-ingester ipykernel
-$ conda activate iot-ingester 
-$ pip install -r requirements.txt #Not strictly necessary because requirements.txt and setup.cfg both contain dependenciess but doesn't hurt
-$ pip install --editable ".[dev]"
-```
-
-Recommeneded: Install pre-commit hooks that run ruff, black, isort, flake8, etc on the code before you commit
-```sh
-pre-commit install
-```
-
-Create a `secrets.yaml` file containing the access credentials for the various sources of data, use `example_secrets.yaml` as a template. `secrets.yaml` is in the gitignore to lower the risk that it accidentally gets committed to git.
 
 ## Testing
 To run the default battery of smoke tests, just run pytest:
@@ -55,9 +66,8 @@ Setting up a jupyer lab server from scratch using conda or mamba:
 ```sh
 # Make an environment for iot-ingester
 # Do this at the root of the repository pwd=something/iot-ingester/
-conda env create --name iot-ingester ipykernel
-conda activate iot-ingester 
-pip install -r requirements.txt #Not strictly necessary because requirements.txt and setup.cfg both contain dependenciess but doesn't hurt
+conda env create --name ionbeam ipykernel
+conda activate ionbeam
 pip install --editable ".[dev]"
 
 # Make an environment to run jupyter from, using separate ones is best practice
@@ -67,10 +77,10 @@ jupyter lab
 ```
 
 
-## Usage
+## Command Line Usage
 Currently the main way to interact with the pipeline is through the command line interface.
 ```bash
-% ./main.py --help
+% python -m ionbeam --help
 usage: ECMWF IOT Observation Processor [-h] [--validate-config] [-v] [-j [NUMBER]]
                                        [--finish-after [NUMBER]]
                                        config_file
@@ -98,7 +108,7 @@ The `-vv` and `--finish-after` options are useful for debugging runs.
 See [this notebook](examples/notebooks/run_the_pipeline_manually.ipynb) for a walkthrough of assembling the pipeline from various components and then running it. This is useful for debugging the output at various stages in the pipeline.
 
 ## The config
-There's a lot happening in `config/config.yaml`. The structure of the file is defined by a set of nested python dataclasses starting with `Config` in `obsproc.core.config_parser`.
+There's a lot happening in `config/config.yaml`. The structure of the file is defined by a set of nested python dataclasses starting with `Config` in `ionbeam.core.config_parser`.
 
 The three big pieces are the parsers which define how to rename and clean up the input data, `canonical_variables.yaml` which defines a unique internal name, dtype and unit for each variable and `MARS_keys.yaml` which defines how to spit the data out to ODB format.
 

@@ -1,7 +1,7 @@
 # To set up a conda env or update one from this file
 # $ conda env create -f conda_env.yml
 
-name: iot_ingester
+name: ionbeam
 channels:
   - conda-forge
 dependencies:

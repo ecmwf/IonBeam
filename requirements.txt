@@ -12,6 +12,7 @@
     watchdog
     shapely
     pyyaml-include
-    bs4 # For sensor.community
+    bs4
     lxml
-    dataclass_wizard # TODO: excise this
+    pika
+    rich

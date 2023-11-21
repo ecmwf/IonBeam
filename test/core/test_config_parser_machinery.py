@@ -1,5 +1,5 @@
 import pytest
-from obsproc.core.config_parser_machinery import parse_config_from_dict, Subclasses
+from ionbeam.core.config_parser_machinery import parse_config_from_dict, Subclasses
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +20,7 @@ def test_subclass_finder():
     assert set(subclasses.get(Animal)) == {"Animal", "Dog", "Cat"}
 
 
-from obsproc.core.bases import Source, Parser, Aggregator, Encoder
+from ionbeam.core.bases import Source, Parser, Aggregator, Encoder
 
 
 @pytest.mark.parametrize("cls", [Source, Parser, Aggregator, Encoder])
