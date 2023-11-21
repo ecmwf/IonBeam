@@ -78,7 +78,7 @@ def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
     return config
 
 
-def parse_config(config_dir: Path, schema=Config):
+def parse_config(config_dir: Path, schema=Config, offline=None):
     """
     Config directory has the structure:
     .
@@ -107,6 +107,9 @@ def parse_config(config_dir: Path, schema=Config):
     with open(global_config_file) as f:
         data = yaml.load(f, Loader=SafeLineLoader)
         global_config = parse_config_from_dict(Config, data, filepath=global_config_file)
+
+    if offline is not None:
+        global_config.globals.offline = offline
 
     logger.debug(f"Loaded global config...")
 

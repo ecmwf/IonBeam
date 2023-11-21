@@ -135,7 +135,7 @@ class Globals:
     canonical_variables: List[CanonicalVariable]
     config_path: Path
     data_path: Path
-    online: bool
+    offline: bool
     code_source: CodeSourceInfo | None = None
 
 

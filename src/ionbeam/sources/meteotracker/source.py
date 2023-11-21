@@ -212,10 +212,12 @@ class MeteoTrackerSource(Source):
 
     def generate(self) -> Iterable[FileMessage]:
         # Do  API requests in chunks larger than the data granularity, upto 3 days
-        if self.globals.online:
+        if not self.globals.offline:
+            logger.debug("Starting in online mode...")
             # return self.online_generate_by_daterange()
             return self.online_generate_by_author()
         else:
+            logger.debug("Starting in offline mode...")
             return self.offline_generate()
 
 

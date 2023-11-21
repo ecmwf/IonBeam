@@ -47,6 +47,11 @@ if __name__ == "__main__":
         help="Just parse the config and do nothing else.",
     )
     parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Run in offline mode.",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="count",
@@ -78,7 +83,7 @@ if __name__ == "__main__":
     from .core.config_parser import parse_config
     from .core.bases import Source, Aggregator
 
-    globals, actions = parse_config(args.config_folder)
+    globals, actions = parse_config(args.config_folder, offline=args.offline)
 
     sources, downstream_actions = [], []
     for action in actions:
@@ -91,6 +96,7 @@ if __name__ == "__main__":
     logger.info(f"    Data Path: {globals.globals.data_path}")
     logger.info(f"    Config Path: {globals.globals.config_path}")
     logger.info(f"    Data Path: {globals.globals.data_path}")
+    logger.info(f"    Offline: {globals.globals.offline}")
 
     logger.info("Sources")
     for i, a in enumerate(sources):
