@@ -32,7 +32,7 @@
 #   column_description: custom
 #   fill_method: from_config
 
-- name: entryno@body          # this is a given
+- name: entryno@body
   fill_method: constant
   value: 1
   column_description: entry sq. no.
@@ -43,100 +43,95 @@
   column_description: variable number
   dtype: INTEGER
 
-- name: obstype@hdr           # https://codes.ecmwf.int/odb/obstype/
-  fill_method: constant
-  value: 1                    # we go with synop for now
+- name: obstype@hdr
+  value: 1   # 
   dtype: INTEGER
 
-- name: statid@hdr            # this is set for our dev work
+
+- name: statid@hdr
   fill_method: constant
   value: ++++xxxx
+  column_description: station id (character*8)
   dtype: STRING
 
-- name: codetype@hdr # value 17 for Automatic Land SYNOP
-  fill_method: constant
-  value: 17
-  column_description: observation codetype
+- name: codetype@hdr
+  fill_method: from_config
+  column_description: observation code type
   dtype: INTEGER
 
-- name: project@hdr 
-  fill_method: constant
-  value: IOT
-  column_description: project name
-  dtype: STRING
-
 - name: source@hdr
-  value: sensor.community
+  fill_method: function
+  key: source
   column_description: 'source id of obs. (character*8) : re-analysis purposes'
   dtype: STRING
 
-  # This should be the station_id from the datasets 
+  # This on should be some incremental alphanumeric key based on a mapping
+  # from incoming keys to our 8 byte asci byte output
 - name: stationid@hdr
-  fill_method: from_config    # location key: station_id
-  column_description: variable identifier
-  dtype: INTEGER
+  dtype: STRING
+  fill_method: function
+  key: station_id
+  column_description: custom
+
+- name: project@hdr
+  dtype: STRING
+  fill_method: constant
+  value: iCHANGE
+  column_description: custom
 
   # For now just fixed to "meteotracker" or "cima", "station" for Personal Weather Stations
 - name: dataset@hdr
-  fill_method: from_config    # sensor_id, key: sensor_id
-  column_description: variable identifier
-  dtype: INTEGER
+  dtype: STRING
+  fill_method: function
+  key: dataset
+  column_description: custom
 
-- name: groupid@hdr  # 17 for conventional or CONV is a given for us
-  dtype: INTEGER 
+- name: groupid@hdr
+  dtype: INTEGER
   fill_method: constant
   value: 17
   column_description: mars key - observation group
 
+
 - name: reportype@hdr
   dtype: INTEGER
   fill_method: constant
-  value: 16001
-  column_description: mars key - report type for mars
+  value: 16022
+  column_description: mars key - report type for mar
 
 
-- name: class@desc # given
+- name: class@desc
   dtype: INTEGER
   fill_method: constant
   value: 2
   column_description: mars key - ecmwf classification for data
 
-- name: type@desc   # ODB Analysis input "oai" is a given
+
+- name: type@desc
   dtype: INTEGER
   fill_method: constant
   value: 264
   column_description: mars key - type of field used to retrieve data
 
-- name: stream@desc # given
+
+- name: stream@desc
   dtype: INTEGER
   fill_method: constant
   value: 1247
   column_description: mars key - forecasting system used to generate data
 
-- name: expver@desc # given
+
+- name: expver@desc
   dtype: STRING
   fill_method: constant
   value: xxxx
   column_description: mars key - experiment id
 
-- name: levtype@desc # that's a given for us :)
+- name: levtype@desc
   dtype: STRING
   fill_method: constant
   value: sfc
-  column_description: mars key for pressure level / surface level
-
-- name: andate@desc
-  dtype: INTEGER
-  column_description: analysis date
-  fill_method: function
-  key: decimal_encoded_date
-
-- name: antime@desc
-  dtype: INTEGER
-  column_description: analysis time
-  fill_method: function
-  key: four_digit_hour
-
+  column_description: custom
 
 - name: date@hdr
   dtype: INTEGER
@@ -147,6 +142,18 @@
 - name: time@hdr
   dtype: INTEGER
   column_description: obs. exact time
+  fill_method: function
+  key: four_digit_hour
+
+- name: andate@desc
+  dtype: INTEGER
+  column_description: analysis date
+  fill_method: function
+  key: decimal_encoded_date
+
+- name: antime@desc
+  dtype: INTEGER
+  column_description: analysis time
   fill_method: function
   key: four_digit_hour
 
@@ -168,6 +175,20 @@
   dtype: REAL
   fill_method: from_data
   key: lon
+
+# The minutes including 2dp fractional part
+- name: min@body
+  dtype: REAL
+  column_description: custom
+  fill_method: function
+  key: minutes_with_fractional_seconds
+
+# surface pressure that acts as an implicit altitude
+# - name: press@body
+#   dtype: REAL
+#   column_description: custom
+#   fill_method: from_data
+#   key: air_pressure_near_surface
 
 # The actual observed value
 - name: obsvalue@body
