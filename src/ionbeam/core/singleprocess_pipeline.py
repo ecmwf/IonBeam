@@ -79,7 +79,7 @@ def customProgress():
     )
 
 
-def singleprocess_pipeline(sources, actions):
+def singleprocess_pipeline(sources, actions, emit_partial: bool):
     logger.info("Starting single threaded execution...")
 
     source = roundrobin(sources)
@@ -118,8 +118,11 @@ def singleprocess_pipeline(sources, actions):
                 # If we've processed every message we can, empty the aggregators.
                 if not input_messages and not aggregators_emptied:
                     progress.update(message_queue_bar, description="[red]Aggregated Messages Queue")
-                    logger.warning(f"Initial messages consumed, emptying aggregators.")
-                    input_messages.extend(empty_aggregators(actions))
+
+                    # By default (i.e emit_partial == false) we just throw half filled message buckets away
+                    if emit_partial:
+                        logger.warning(f"Initial messages consumed, emptying aggregators.")
+                        input_messages.extend(empty_aggregators(actions))
                     aggregators_emptied = True
 
                 # If we've processed every message and emptied the aggregators, finish.

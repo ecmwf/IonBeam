@@ -13,6 +13,7 @@ from typing import Literal, List, Dict, Iterable
 from pathlib import Path
 
 from ..core.bases import TabularMessage, FinishMessage, FileMessage, Encoder
+from ..core.fdb_schema_parser import FDBSchema
 
 import pandas as pd
 
@@ -189,6 +190,7 @@ class MARS_Key:
 class ODCEncoder(Encoder):
     output: str
     MARS_keys: List[MARS_Key]
+    fdb_schema: FDBSchema | None = None
     one_file_per_granule: bool = True
     seconds: bool = True
     minutes: bool = True
@@ -261,6 +263,20 @@ class ODCEncoder(Encoder):
             return
 
         output_df = self.create_output_df(msg)
+
+        if self.fdb_schema is not None:
+            # Remove everything past the @ in the odb column names
+            kwords = {k.split("@")[0]: output_df[k].iloc[0] for k in output_df.columns}
+
+            # Check the column names and first value against the schema
+            logger.debug(f"Generated MARS keys for {msg}")
+            key_matches = list(self.fdb_schema.match(kwords))
+
+            for k in key_matches:
+                logger.debug(k.info())
+
+            if not all(k.good() for k in key_matches):
+                raise ValueError("Generated ODC file does not match given schema!")
 
         # And encode the supplied data
         # logger.debug(f"Columns before encoding to ODC: {df.columns}")
