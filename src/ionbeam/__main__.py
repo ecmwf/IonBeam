@@ -58,6 +58,11 @@ if __name__ == "__main__":
         default=0,
         help="Set the logging level, default is warnings only, -v and -vv give increasing verbosity",
     )
+    parser.add_argument(
+        "--emit-partial",
+        action="store_true",
+        help="If set, tells the time aggregators to emit messages containing partial information when the program is terminated. By default these are thrown away.",
+    )
 
     parser.add_argument(
         "--finish-after",
@@ -113,6 +118,6 @@ if __name__ == "__main__":
     from .core.singleprocess_pipeline import singleprocess_pipeline
 
     try:
-        singleprocess_pipeline(sources, downstream_actions)
+        singleprocess_pipeline(sources, downstream_actions, emit_partial=args.emit_partial)
     except Exception:
         logger.exception("Exception during run:")
