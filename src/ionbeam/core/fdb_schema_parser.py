@@ -60,7 +60,7 @@ fdb_schema = pe.compile(
     non_eol              <- [\x09\x20-\x7F] / non_ascii
     non_ascii            <- [\x80-\uD7FF\uE000-\U0010FFFF]
 
-    # Deafault Type Definitions
+    # Default Type Definitions
     TypeDef < String ":" String ";"
 
     # Schemas are the main attraction
@@ -146,6 +146,7 @@ class KeyMatch:
     value: Any
     key_spec: Attr
     reason: str
+    odb_table: str | None = None
 
     def good(self):
         return self.reason in {"Matches", "Skipped"}
@@ -167,19 +168,33 @@ class FDBSchema:
     def __repr__(self):
         return repr(self.schema)
 
+    def strip_ODB_table_keys(self, request: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+        "Filter out at ODB keys of the form 'key@table' from the request and return those separately"
+        _request, odb_tables = {}, {}
+        for k, v in request.items():
+            if "@" in k:
+                key, odb_table = k.split("@")
+            else:
+                key, odb_table = k, None
+            _request[key] = v
+            odb_tables[key] = odb_table
+        return _request, odb_tables
+
     def match(self, request: dict[str, Any]):
+        request, odb_tables = self.strip_ODB_table_keys(request)
+
         for key_spec in self.flat_schema:
             key = key_spec.key
             try:
                 value = request[key]
             except KeyError:
                 if key_spec.is_optional():
-                    yield KeyMatch(key_spec.key, "", key_spec, "Skipped")
+                    yield KeyMatch(key_spec.key, "", key_spec, "Skipped", None)
                 else:
-                    yield KeyMatch(key_spec.key, "", key_spec, "Key Missing")
+                    yield KeyMatch(key_spec.key, "", key_spec, "Key Missing", odb_tables[key])
                 continue
 
             if key_spec.matches(key, value):
-                yield KeyMatch(key_spec.key, value, key_spec, "Matches")
+                yield KeyMatch(key_spec.key, value, key_spec, "Matches", odb_tables[key])
             else:
-                yield KeyMatch(key_spec.key, value, key_spec, "Incorrect Value")
+                yield KeyMatch(key_spec.key, value, key_spec, "Incorrect Value", odb_tables[key])

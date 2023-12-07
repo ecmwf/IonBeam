@@ -32,6 +32,7 @@ class MetaData:
     time_slice: pandas.Period | None = None
     encoded_format: str | None = None
     filepath: Path | None = None
+    mars_keys: dict = dataclasses.field(default_factory=dict)
     # unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
 
     def __str__(self):

@@ -9,6 +9,18 @@ def random_id(n):
     return "".join(random.choices(string.hexdigits, k=n))
 
 
+def dataframe_to_html(data: pd.DataFrame, max_colwidth=100, **kwargs):
+    kwargs = dict(index=False, notebook=True, render_links=True, max_rows=20) | kwargs
+
+    with pd.option_context("display.max_colwidth", max_colwidth):
+        return data.to_html(**kwargs)
+
+
+def dict_to_html(d: dict):
+    df = pd.DataFrame.from_records([dict(name=key, value=value) for key, value in d.items()])
+    return dataframe_to_html(df)
+
+
 def dataclass_to_html(dc):
     df = pd.DataFrame.from_records(
         [
@@ -21,24 +33,7 @@ def dataclass_to_html(dc):
             if getattr(dc, field.name, None)
         ],
     )
-    with pd.option_context("display.max_colwidth", 100):
-        html = df.to_html(
-            index=False,
-            header=False,
-            notebook=True,
-            render_links=True,
-        )
-
-    return html
-
-
-def data_to_html(data: pd.DataFrame):
-    return data.to_html(
-        index=False,
-        # notebook=True,
-        render_links=True,
-        max_rows=20,
-    )
+    return dataframe_to_html(df)
 
 
 def column_metadata_to_html(columns):
@@ -53,13 +48,7 @@ def column_metadata_to_html(columns):
             for c in columns
         ]
     )
-    with pd.option_context("display.max_colwidth", 100):
-        return df.to_html(
-            header=False,
-            index=False,
-            notebook=True,
-            render_links=True,
-        )
+    return dataframe_to_html(df)
 
 
 def summarise_metadata(m):
@@ -69,20 +58,31 @@ def summarise_metadata(m):
 
 
 def previous_action_info_to_html(action_info):
-    msg_name = action_info.message.name
-    msg_details = summarise_metadata(action_info.message.metadata)
-    return f"""
-        <li>
-            <details>
-            <summary>{msg_name}({msg_details}) → {action_info.action.name}</summary>
-                Previous Message
-                {dataclass_to_html(action_info.message)}
-                Action
-                {dataclass_to_html(action_info.action)}
-              
-            </details>
-        </li>
-    """
+    if action_info.message is not None:
+        msg_name = action_info.message.name
+        msg_details = summarise_metadata(action_info.message.metadata)
+        return f"""
+            <li>
+                <details>
+                <summary>{msg_name}({msg_details}) → {action_info.action.name}</summary>
+                    Previous Message
+                    {dataclass_to_html(action_info.message)}
+                    Action
+                    {dataclass_to_html(action_info.action)}
+                
+                </details>
+            </li>
+        """
+    else:
+        return f"""
+            <li>
+                <details>
+                <summary>{action_info.action.name}</summary>
+                    Source
+                    {dataclass_to_html(action_info.action)}
+                </details>
+            </li>
+        """
 
 
 def human_readable_bytes(n):
@@ -190,7 +190,17 @@ def message_to_html(message):
         rows, columns = message.data.shape
         size = human_readable_bytes(message.data.memory_usage().sum())
         title = f"Tabular Data ({rows} rows x {columns} columns) ({size})"
-        sections.append(make_section(title, data_to_html(message.data)))
+        sections.append(make_section(title, dataframe_to_html(message.data)))
+
+    if hasattr(message, "metadata") and getattr(message.metadata, "mars_keys", {}):
+        df = pd.DataFrame(
+            [
+                ("✅" if k.good() else "❌", k.key, k.value, k.key_spec, k.reason, k.odb_table if k.odb_table else "")
+                for k in message.metadata.mars_keys
+            ],
+            columns=["", "Key", "Value", "Schema Entry", "Info", "ODB Table"],
+        )
+        sections.append(make_section("Mars Keys", dataframe_to_html(df)))
 
     if hasattr(message, "metadata") and getattr(message.metadata, "filepath", None) is not None:
         file_section = summarise_file(message.metadata.filepath)
@@ -261,7 +271,7 @@ def action_to_html(action, extra_sections=[]):
     for field in fields(action):
         value = getattr(action, field.name, None)
         if is_dataclass(value):
-            sections.append(make_section(field.name, dataclass_to_html(value)))
+            sections.append(make_section(field.name.capitalize(), dataclass_to_html(value)))
         else:
             attributes.append([field.name, value])
 

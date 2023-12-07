@@ -16,3 +16,4 @@
     lxml
     pika
     rich
+    pe

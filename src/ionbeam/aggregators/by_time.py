@@ -27,7 +27,7 @@ from ..core.bases import (
     FinishMessage,
 )
 from ..core.history import MessageInfo
-from ..core.html_formatters import make_section, data_to_html, action_to_html
+from ..core.html_formatters import make_section, dataframe_to_html, action_to_html
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,7 @@ class TimeAggregator(Aggregator):
         keys = []
         for key, bucket_container in self.bucket_containers.items():
             df = pd.DataFrame([[k, len(v.messages)] for k, v in bucket_container.buckets.items()])
-            keys.append(make_section(", ".join(key), data_to_html(df)))
+            keys.append(make_section(", ".join(key), dataframe_to_html(df)))
         return action_to_html(self, extra_sections=[make_section("Contents (by key)", "\n".join(keys))])
 
     def init(self, globals):

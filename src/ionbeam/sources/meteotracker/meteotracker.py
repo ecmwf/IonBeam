@@ -26,8 +26,6 @@ from pathlib import Path
 
 from datetime import datetime, timedelta
 
-from dataclass_wizard import json_key
-
 
 @dataclasses.dataclass
 class Credentials:
@@ -105,7 +103,7 @@ class MT_WeatherPoint:
         }
 
 
-SessionId = Annotated[NewType("SessionId", str), json_key("_id")]
+SessionId = NewType("SessionId", str)
 Location = NewType("Location", str)
 Username = NewType("Username", str)
 
@@ -155,23 +153,18 @@ class MeteoTracker_API:
 
     def __init__(
         self,
-        credentials_file: str | Path | None = None,
+        credentials: dict,
+        headers,
     ):
-        credentials_file = credentials_file or str(Path(__file__).parents[4] / "secrets.yaml")
-
+        self.credentials = Credentials(**credentials)
         self.logger = logging.getLogger("MeteoTracker_API")
-
-        with open(credentials_file, "r") as f:
-            parsed_yaml = yaml.safe_load(f)
-            secrets_yaml_headers = parsed_yaml["headers"]
-            self.credentials = Credentials(**parsed_yaml["MeteoTracker_API"])
 
         # let oauth-requests handle all the Open-ID/OAuth2 authentication stuff
         self.oauth = requests.Session()
 
         # OAuth2Session is a subclass of requests.Session so see that documentation for generic usage
-        # Update the headers for all our requests so that
-        self.oauth.headers.update(secrets_yaml_headers)
+        # Update the headers for all our requests so that people know who's crawling them
+        self.oauth.headers.update(headers)
         self.token = None
 
     def auth(self):

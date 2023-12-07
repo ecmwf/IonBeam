@@ -23,6 +23,7 @@ from ...core.history import PreviousActionInfo, ActionInfo
 from .meteotracker import MeteoTracker_API, MeteoTracker_API_Error
 
 import shapely
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +51,16 @@ class MeteoTrackerSource(Source):
     def init(self, globals):
         super().init(globals)
         logger.debug(f"Initialialised MeteoTracker source with {self.start_date=}, {self.end_date=}")
-        self.secrets_file = self.resolve_path(self.secrets_file, type="config")
         self.cache_directory = self.resolve_path(self.cache_directory, type="data")
-        self.cache_directory.mkdir(parents=True, exist_ok=True)
 
         if self.wkt_bounding_polygon is not None:
             self.bounding_polygon = shapely.from_wkt(self.wkt_bounding_polygon)
+
+        secrets_file = self.resolve_path(self.secrets_file, type="config")
+        with open(secrets_file, "r") as f:
+            parsed_yaml = yaml.safe_load(f)
+            self.api_headers = parsed_yaml["headers"]
+            self.credentials = parsed_yaml["MeteoTracker_API"]
 
         logger.debug(f"cache_directory: {self.cache_directory}")
 
@@ -94,6 +99,7 @@ class MeteoTrackerSource(Source):
         return True
 
     def process_sessions(self, sessions):
+        self.cache_directory.mkdir(parents=True, exist_ok=True)
         for session in sessions:
             filename = f"MeteoTracker_{session.id}.csv"
             path = Path(self.cache_directory) / filename
@@ -126,7 +132,7 @@ class MeteoTrackerSource(Source):
 
     def online_generate_by_daterange(self) -> Iterable[FileMessage]:
         # Do  API requests in chunks larger than the data granularity, upto 3 days
-        self.api = MeteoTracker_API(self.secrets_file)
+        self.api = MeteoTracker_API(self.credentials, self.api_headers)
         dates = pd.date_range(start=self.start_date, end=self.end_date, freq="3D")
         date_ranges = list(zip(dates[:-1], dates[1:]))
         emitted_messages = 0
@@ -148,7 +154,7 @@ class MeteoTrackerSource(Source):
 
     def online_generate_by_author(self) -> Iterable[FileMessage]:
         # Do  API requests in chunks larger than the data granularity, upto 3 days
-        self.api = MeteoTracker_API(self.secrets_file)
+        self.api = MeteoTracker_API(self.credentials, self.api_headers)
 
         # Set up the list of target authors
         lls = ["bologna", "barcelona", "jerusalem", "hasselt", "llwa"]

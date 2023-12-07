@@ -1,21 +1,12 @@
-import os
 import pika
-from pathlib import Path
-from typing import Iterable
 import pickle
-import logging
-import argparse
 import sys
 
-from ..core.config_parser import parse_config
-from ..core.bases import Message, FinishMessage
-
-from .common import arg_parser, get_rabbitMQ_connection
-
-logger = logging.getLogger()
-logger.setLevel(level=logging.DEBUG)
+from .common import arg_parser, get_rabbitMQ_connection, setup_logging, send_to_queue
+from ..core.singleprocess_pipeline import log_message_transmission
 
 parser = arg_parser("Source")
+
 parser.add_argument(
     "--redirect-to-terminal",
     action="store_true",
@@ -23,15 +14,12 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-# Set the log level, default is warnings, -v gives info, -vv for debug
-logging.basicConfig(
-    level=[logging.WARNING, logging.INFO, logging.DEBUG][min(2, args.verbose)],
-)
-
 with open(args.config_file, "rb") as f:
     config = pickle.load(f)
 
 producer = config["action"]
+name = f"{producer.source}_source"
+logger = setup_logging(name, verbosity=args.verbose)
 
 if args.redirect_to_terminal:
     print("Just printing messages directly to the terminal")
@@ -40,30 +28,22 @@ if args.redirect_to_terminal:
         print(message)
     sys.exit()
 
+publish_queue = "Stateless"
+
 channel, connection = get_rabbitMQ_connection()
 
 # Send a message
-for i, message in enumerate(producer.generate()):
-    body = pickle.dumps(message)
-    try:
-        channel.basic_publish(
-            exchange="",
-            routing_key="Stateless",
-            body=body,
-            properties=pika.BasicProperties(delivery_mode=pika.spec.PERSISTENT_DELIVERY_MODE),
-        )
-        print(f"Sent {str(message)}")
-    except pika.exceptions.UnroutableError:
-        print("Message could not be confirmed")
+try:
+    for i, message in enumerate(producer.generate()):
+        body = pickle.dumps(message)
+        try:
+            log_message_transmission(logger, message, publish_queue)
+            send_to_queue(channel, publish_queue, body)
 
-body = pickle.dumps(FinishMessage(reason="Done"))
-channel.basic_publish(
-    exchange="",
-    routing_key="Stateless",
-    body=body,
-    properties=pika.BasicProperties(delivery_mode=pika.spec.PERSISTENT_DELIVERY_MODE),
-)
-
-# Close the channel and the connection
-channel.close()
-connection.close()
+        except pika.exceptions.UnroutableError:
+            print("Message could not be confirmed")
+except KeyboardInterrupt:
+    logger.info(f"Caught interrupt, exiting gracefully...")
+finally:
+    channel.close()
+    connection.close()

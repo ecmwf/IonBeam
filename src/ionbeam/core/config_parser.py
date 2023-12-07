@@ -95,12 +95,21 @@ def parse_config(config_dir: Path, schema=Config, offline=None):
         ├── MARS_keys.yaml
         └── actions.yaml
     """
-    YamlIncludeConstructor.add_to_loader_class(loader_class=SafeLineLoader, base_dir=str(config_dir))
 
     if not config_dir.exists():
         raise ConfigError(f"{config_dir} does not exist!")
 
-    global_config_file = config_dir / "config.yaml"
+    if config_dir.is_dir():
+        global_config_file = config_dir / "config.yaml"
+    else:
+        global_config_file = config_dir
+        config_dir = config_dir.parent
+
+    YamlIncludeConstructor.add_to_loader_class(loader_class=SafeLineLoader, base_dir=str(config_dir))
+
+    logger.warning(f"Configuration Directory: {config_dir}")
+    logger.warning("Global config file: {global_config_file}")
+
     if not global_config_file.exists():
         raise ConfigError(f"Could not find config.yaml in {config_dir}")
 

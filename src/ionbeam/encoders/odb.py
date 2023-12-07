@@ -266,17 +266,19 @@ class ODCEncoder(Encoder):
 
         if self.fdb_schema is not None:
             # Remove everything past the @ in the odb column names
-            kwords = {k.split("@")[0]: output_df[k].iloc[0] for k in output_df.columns}
+            mars_keys = {k: output_df[k].iloc[0] for k in output_df.columns}
 
             # Check the column names and first value against the schema
             logger.debug(f"Generated MARS keys for {msg}")
-            key_matches = list(self.fdb_schema.match(kwords))
+            key_matches = list(self.fdb_schema.match(mars_keys))
 
             for k in key_matches:
                 logger.debug(k.info())
 
             if not all(k.good() for k in key_matches):
                 raise ValueError("Generated ODC file does not match given schema!")
+
+            mars_keys = key_matches
 
         # And encode the supplied data
         # logger.debug(f"Columns before encoding to ODC: {df.columns}")
@@ -348,7 +350,7 @@ class ODCEncoder(Encoder):
             )
 
         output_msg = FileMessage(
-            metadata=self.generate_metadata(msg, filepath=self.output_file, encoded_format="odb"),
+            metadata=self.generate_metadata(msg, filepath=self.output_file, encoded_format="odb", mars_keys=mars_keys),
         )
         yield self.tag_message(output_msg, msg)
 

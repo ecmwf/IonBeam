@@ -60,10 +60,12 @@ def empty_aggregators(actions) -> Iterable[Message]:
                 yield m
 
 
-def log_message_transmission(msg, dest):
+def log_message_transmission(logger, msg, dest):
     "Print a nicely formatted message showing where a message came from and where it got sent."
     prev_action = f"{msg.history[-1].action.name} --->" if getattr(msg, "history", []) else ""
-    logger.info(f"{prev_action} {str(msg)} --> {dest.__class__.__name__}")
+    if not isinstance(dest, str):
+        dest = dest.__class__.__name__
+    logger.info(f"{prev_action} {str(msg)} --> {dest}")
 
 
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, MofNCompleteColumn
@@ -142,7 +144,7 @@ def singleprocess_pipeline(sources, actions, emit_partial: bool):
                 matched = False
                 for dest in actions:
                     if dest.matches(msg):
-                        log_message_transmission(msg, dest)
+                        log_message_transmission(logger, msg, dest)
                         input_messages.extend(dest.process(msg))
                         matched = True
                 if not matched:

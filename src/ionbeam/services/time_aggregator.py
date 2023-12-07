@@ -3,81 +3,53 @@ from pathlib import Path
 from typing import Iterable
 import pickle
 import logging
-import os
-
-from ..core.config_parser import parse_config
 from ..core.bases import Message
+from .common import (
+    arg_parser,
+    get_rabbitMQ_connection,
+    aggregator_queue_name,
+    listen,
+    declare_aggregator_queue,
+    setup_logging,
+    send_to_queue,
+)
+from ..core.singleprocess_pipeline import log_message_transmission
 
+parser = arg_parser("Source")
+args = parser.parse_args()
+config_file = Path("/ionbeam/config/config.pickle")
 
-def aggregator_queue_name(A):
-    return f"{A.__class__.__name__}({', '.join(m.source for m in A.match)})"
+# Get the aggregator instance from the config
+with open(args.config_file, "rb") as f:
+    config = pickle.load(f)
+    aggregator = config["action"]
 
+listen_queue = aggregator_queue_name(aggregator)
+publish_queue = "Stateless"
 
-logger = logging.getLogger()
-handler = logging.StreamHandler()
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+logger = setup_logging(name=listen_queue, verbosity=args.verbose)
 
-logger.info("Loading config file...")
-
-config_file = Path("/ionbeam/config/config.yaml")
-config = parse_config(config_file)
-
-pipeline_dict = {name: getattr(config, name) for name in config.pipeline}
-this_aggregator = pipeline_dict["aggregators"][int(os.environ["TIME_AGGREGATOR_INDEX"])]
-aggregator_queue_name = aggregator_queue_name(this_aggregator)
-
-logger.info(f"queue name: {aggregator_queue_name}")
-
+# Connect to RabbitMQ
 logger.info("Connecting to rabbitMQ...")
-credentials = pika.PlainCredentials("guest", "guest")
-parameters = pika.ConnectionParameters(
-    host="rabbitMQ", port=5673, virtual_host="/", credentials=credentials
-)
+channel, connection = get_rabbitMQ_connection()
 
-connection = pika.BlockingConnection(parameters)
-channel = connection.channel()
-
-channel.queue_declare(
-    queue="Stateless",
-    durable=True,
-    exclusive=False,
-    auto_delete=False,
-)
-
-channel.queue_declare(
-    queue=aggregator_queue_name, durable=True, exclusive=False, auto_delete=False
-)
+# Declare this Aggregator queue (the others are declared in get_rabbitMQ_connection)
+declare_aggregator_queue(channel, listen_queue)
 
 
 def on_message(channel, method_frame, header_frame, body):
     logger.info(f"Got message, tag: {method_frame.delivery_tag}")
 
     message = pickle.loads(body)
-    logger.info(f"Unpickled message: {message}")
-    output_messages = this_aggregator.process(message)
+    output_messages = aggregator.process(message)
 
-    for output_message in output_messages:
-        logger.info("Sending message to output.")
-        channel.basic_publish(
-            "",
-            "Stateless",
-            body=pickle.dumps(output_message),
-            properties=pika.BasicProperties(
-                delivery_mode=pika.spec.PERSISTENT_DELIVERY_MODE
-            ),
-        )
+    for message in output_messages:
+        body = pickle.dumps(message)
+        log_message_transmission(logger, message, publish_queue)
+        send_to_queue(channel, publish_queue, body)
 
     channel.basic_ack(delivery_tag=method_frame.delivery_tag)
 
 
-# Tells rabbitMQ to only give us one message at a time
-channel.basic_qos(prefetch_count=1)
-
-print(f"{aggregator_queue_name} alive, listening on {aggregator_queue_name}")
-channel.basic_consume(aggregator_queue_name, on_message)
-try:
-    channel.start_consuming()
-except KeyboardInterrupt:
-    channel.stop_consuming()
-connection.close()
+logger.info(f"Aggregator listening on {listen_queue} queue")
+listen(connection, channel, logger, queue_name=listen_queue, on_message=on_message)
