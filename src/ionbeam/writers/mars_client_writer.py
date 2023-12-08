@@ -15,6 +15,7 @@ import pandas as pd
 import dataclasses
 
 from ..core.bases import Writer, Message, FileMessage, FinishMessage
+from ..core.aviso import send_aviso_notification
 
 import logging
 
@@ -97,7 +98,7 @@ class MARSWriter(Writer):
             logger.debug(mars_request)
             run_temp_mars_request(file=fp.name)
 
-        # send an aviso notification here
+        response = send_aviso_notification(request)
 
         # TODO: the explicit mars_keys should not be necessary here.
         metadata = self.generate_metadata(message, mars_keys=message.metadata.mars_keys)
