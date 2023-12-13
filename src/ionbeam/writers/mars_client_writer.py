@@ -98,7 +98,9 @@ class MARSWriter(Writer):
             logger.debug(mars_request)
             run_temp_mars_request(file=fp.name)
 
+        # Send a notification to AVISO that we put this data into the DB
         response = send_aviso_notification(request)
+        logger.debug("Aviso response {response}")
 
         # TODO: the explicit mars_keys should not be necessary here.
         metadata = self.generate_metadata(message, mars_keys=message.metadata.mars_keys)
