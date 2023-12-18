@@ -16,75 +16,29 @@ import dataclasses
 
 from ..core.bases import Writer, Message, FileMessage, FinishMessage
 from ..core.aviso import send_aviso_notification
-from .construct_mars_request import construct_mars_request
-
 
 import logging
-
-
-import subprocess as sb
-from tqdm.notebook import tqdm
-import tempfile
-
 
 logger = logging.getLogger(__name__)
 
 
-def write_temp_mars_request(
-    request,
-    file,
-    verb="archive",
-    # quote_keys = {"source", "target", "filter"}
-):
-    keys = []
-    for key, value in request.items():
-        # if key in quote_keys:
-        keys.append(f'{key}="{value}"')
-        # else:
-        #     keys.append(f'{key}={value}')
-
-    keys = ",\n    ".join(keys)
-    rendered = f"""{verb},
-    {keys}"""
-
-    with open(file, "w") as f:
-        f.write(rendered)
-
-    return rendered
-
-
-def run_temp_mars_request(file):
-    try:
-        output = sb.check_output(["mars", "/home/math/temp_request.mars"], stderr=sb.STDOUT)
-    except sb.CalledProcessError as exc:
-        print("Status : FAIL", exc.returncode, exc.output.decode())
-        raise exc
-    # else:
-    #     print("Output: \n{}\n".format(output))
-
-
 @dataclasses.dataclass
-class MARSWriter(Writer):
+class AVISONotifier(Writer):
     def __str__(self):
         return f"{self.__class__.__name__}()"
 
     def init(self, globals):
         super().init(globals)
-        self.metadata = dataclasses.replace(self.metadata, state="written")
+        self.metadata = dataclasses.replace(self.metadata, state="aviso_notified")
 
     def process(self, message: FileMessage | FinishMessage) -> Iterable[Message]:
         if isinstance(message, FinishMessage):
             return
 
-        assert message.metadata.mars_keys is not None
-        assert message.metadata.filepath is not None
-
-        request = construct_mars_request(message)
-
-        with tempfile.NamedTemporaryFile() as fp:
-            mars_request = write_temp_mars_request(request, file=fp.name)
-            logger.debug(mars_request)
-            run_temp_mars_request(file=fp.name)
+        request = {"database": "fdbdev", "class": "rd", "source": message.metadata.filepath}
+        odb_keys = {k.key: k.value for k in message.metadata.mars_keys if not k.reason == "Skipped"}
+        request = odb_keys | request
+        request = {k: mars_value_formatters.get(k, str)(v) for k, v in request.items()}
 
         # Send a notification to AVISO that we put this data into the DB
         response = send_aviso_notification(request)

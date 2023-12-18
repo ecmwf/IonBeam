@@ -9,6 +9,7 @@
 # #
 
 from typing import Iterable, List, Literal
+from pathlib import Path
 
 import pandas as pd
 
@@ -17,12 +18,34 @@ import dataclasses
 from ..core.bases import Writer, Message, FileMessage, FinishMessage
 
 import logging
+import pyfdb
+import findlibs
+import os
+import yaml
 
 logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
+class FB5Config:
+    type: str = "remote"
+    host: str = "localhost"
+    port: int = 7654
+    dataPortStart: int = 40000
+    dataPortCount: int = 100
+    schema: Path | None = None
+
+    def asdict(self):
+        d = dataclasses.asdict(self)
+        d["schema"] = str(d["schema"])
+        return d
+
+
+@dataclasses.dataclass
 class FDBWriter(Writer):
+    FDB5_client_config: FB5Config
+    debug: list[str] = dataclasses.field(default_factory=list)
+
     def __str__(self):
         return f"{self.__class__.__name__}()"
 
@@ -35,6 +58,19 @@ class FDBWriter(Writer):
             return
 
         assert input_message.metadata.filepath is not None
+
+        fdb5_path = findlibs.find("fdb5")
+        logger.debug(f"FDBWriter using fdb5 shared library from {fdb5_path}")
+
+        os.environ["FDB5_CONFIG"] = yaml.dump(self.FDB5_client_config.asdict())
+
+        for lib in self.debug:
+            os.environ[f"{lib.upper()}_DEBUG"] = "1"
+
+        fdb = pyfdb.FDB()
+
+        with open(input_message.metadata.filepath, "rb") as f:
+            fdb.archive(f.read())
 
         metadata = self.generate_metadata(input_message)
         output_msg = FileMessage(metadata=metadata)

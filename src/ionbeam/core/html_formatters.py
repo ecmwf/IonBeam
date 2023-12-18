@@ -3,6 +3,7 @@ import pandas as pd
 import string, random
 import pyodc as odc
 from pathlib import Path
+from typing import BinaryIO
 
 
 def random_id(n):
@@ -101,26 +102,45 @@ def make_section(title, contents, open=False):
             </details>"""
 
 
-def odb_summary(filepath):
-    df = odc.read_odb(filepath, single=True)
-
+def odb_info(filepath: str | BinaryIO) -> dict:
+    "Read an ODB file and generate some useful info about it"
     r = odc.Reader(filepath)
-    codecs = r.frames[0]._column_codecs
+    assert len(r.frames) == 1
+    frame = r.frames[0]
+    codecs = frame._column_codecs
 
-    properties = pd.DataFrame(r.frames[0].properties, index=[0]).transpose().to_html(header=False, notebook=True)
+    # Could do an optimisation here where only load the varying columns into memory
+    # Would require peering into pyodc/codec.py to get the value of each constant codec
+    df = frame.dataframe()
 
-    summary = pd.DataFrame(
-        zip(
-            df.dtypes,
-            df.iloc[0],
-            [df[c].nunique() for c in df],
-            [c.name for c in codecs],
+    varying_columns = [c for c in df if df[c].nunique() > 1]
+
+    return dict(
+        as_dataframe=df[varying_columns],
+        properties=r.frames[0].properties,
+        codecs=codecs,
+        summary=pd.DataFrame(
+            zip(
+                df.dtypes,
+                df.iloc[0],
+                [df[c].nunique() for c in df],
+                [c.name for c in codecs],
+            ),
+            columns=["dtype", "First Entry", "Unique Entries", "ODB codec"],
+            index=df.columns,
         ),
-        columns=["dtype", "First Entry", "Unique Entries", "ODB codec"],
-        index=df.columns,
-    ).to_html(notebook=True)
+    )
 
-    full_file = df.to_html(notebook=True, max_rows=20)
+
+def odb_to_html(filepath: str | Path | BinaryIO):
+    if isinstance(filepath, Path):
+        info = odb_info(str(filepath))
+    else:
+        info = odb_info(filepath)
+
+    properties = pd.DataFrame(info["properties"], index=[0]).transpose().to_html(header=False, notebook=True)
+    summary = info["summary"].to_html(notebook=True)
+    full_file = info["as_dataframe"].to_html(notebook=True, max_rows=20)
 
     return f"""
 
@@ -146,7 +166,7 @@ def summarise_file(filepath: Path):
         return None
     size = human_readable_bytes(filepath.stat().st_size)
     if filepath.suffix == ".odb":
-        return make_section(f"ODB File Data ({size})", odb_summary(filepath))
+        return make_section(f"ODB File Data ({size})", odb_to_html(filepath))
     else:
         with open(filepath, "rb") as f:
             data = f.read(500).decode(errors="replace")
