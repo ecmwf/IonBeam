@@ -81,14 +81,14 @@ class MARSWriter(Writer):
 
         request = construct_mars_request(message)
 
-        with tempfile.NamedTemporaryFile() as fp:
-            mars_request = write_temp_mars_request(request, file=fp.name)
-            logger.debug(mars_request)
-            run_temp_mars_request(file=fp.name)
+        # with tempfile.NamedTemporaryFile() as fp:
+        #     mars_request = write_temp_mars_request(request, file=fp.name)
+        #     logger.debug(mars_request)
+        #     run_temp_mars_request(file=fp.name)
 
         # Send a notification to AVISO that we put this data into the DB
         response = send_aviso_notification(request)
-        logger.debug("Aviso response {response}")
+        # logger.debug("Aviso respose {response}")
 
         # TODO: the explicit mars_keys should not be necessary here.
         metadata = self.generate_metadata(message, mars_keys=message.metadata.mars_keys)

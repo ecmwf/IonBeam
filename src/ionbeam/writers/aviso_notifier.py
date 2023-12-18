@@ -35,14 +35,15 @@ class AVISONotifier(Writer):
         if isinstance(message, FinishMessage):
             return
 
-        request = {"database": "fdbdev", "class": "rd", "source": message.metadata.filepath}
-        odb_keys = {k.key: k.value for k in message.metadata.mars_keys if not k.reason == "Skipped"}
+        request = {"database": "fdbdev", "class": "rd"}
+        odb_keys = {k.key: k.value for k in message.metadata.mars_keys}
         request = odb_keys | request
         request = {k: mars_value_formatters.get(k, str)(v) for k, v in request.items()}
 
         # Send a notification to AVISO that we put this data into the DB
-        response = send_aviso_notification(request)
-        logger.debug("Aviso response {response}")
+        logger.debug("Sending to aviso {request}")
+        # response = send_aviso_notification(request)
+        # logger.debug("Aviso response {response}")
 
         # TODO: the explicit mars_keys should not be necessary here.
         metadata = self.generate_metadata(message, mars_keys=message.metadata.mars_keys)

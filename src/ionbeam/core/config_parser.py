@@ -108,7 +108,7 @@ def parse_config(config_dir: Path, schema=Config, offline=None):
     YamlIncludeConstructor.add_to_loader_class(loader_class=SafeLineLoader, base_dir=str(config_dir))
 
     logger.warning(f"Configuration Directory: {config_dir}")
-    logger.warning("Global config file: {global_config_file}")
+    logger.warning(f"Global config file: {global_config_file}")
 
     if not global_config_file.exists():
         raise ConfigError(f"Could not find config.yaml in {config_dir}")
