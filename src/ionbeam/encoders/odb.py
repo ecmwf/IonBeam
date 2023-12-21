@@ -13,7 +13,7 @@ from typing import Literal, List, Dict, Iterable
 from pathlib import Path
 
 from ..core.bases import TabularMessage, FinishMessage, FileMessage, Encoder
-from ..core.fdb_schema_parser import FDBSchema
+from ..core.mars_keys import FDBSchema
 
 import pandas as pd
 
@@ -21,11 +21,6 @@ import hashlib
 
 from dataclasses import field
 from collections import defaultdict
-
-# try:
-#     import codc as odc
-# except ImportError:
-#     import pyodc as odc
 
 import pyodc as odc
 
@@ -51,22 +46,6 @@ dtype_lookup = {
 def source(msg: TabularMessage) -> pd.Series:
     "populates source@hdr"
     return msg.data.author
-    # return pd.Series([msg.metadata.source for _ in range(len(msg.data))])
-
-    mapping = {
-        "genova": "GENOALL",
-        "jerusalem": "TAULL",
-        "llwa": "LLWA",
-        "barcelona": "UBLL",
-        "hasselt": "UHASSELT",
-        None: "IOT",
-    }
-
-    def author_to_source(author):
-        shortname = author.split("_")[0] if "_living_lab" in author else None
-        return mapping[shortname]
-
-    return pd.Series([author_to_source(a) for a in msg.data.author.values])
 
 
 def decimal_encoded_date(msg: TabularMessage) -> pd.Series:
@@ -172,7 +151,7 @@ class MARS_Key:
                     return -1
                 val = self.by_observation_variable[obsvar]
             case "from_metadata":
-                val = getattr(msg.metadata, self.key, None) or msg.metadata[self.key]
+                val = getattr(msg.metadata, self.key)
             case "from_data":
                 return msg.data[self.key].astype(dtype)
             case "function":
@@ -190,7 +169,7 @@ class MARS_Key:
 class ODCEncoder(Encoder):
     output: str
     MARS_keys: List[MARS_Key]
-    fdb_schema: FDBSchema | None = None
+    fdb_schema: FDBSchema
     one_file_per_granule: bool = True
     seconds: bool = True
     minutes: bool = True
@@ -264,21 +243,16 @@ class ODCEncoder(Encoder):
 
         output_df = self.create_output_df(msg)
 
-        if self.fdb_schema is not None:
-            # Remove everything past the @ in the odb column names
-            mars_keys = {k: output_df[k].iloc[0] for k in output_df.columns}
+        # Parse the odb file into a mars request
+        # Grab the column name and value for every static column in the dataframe
+        mars_request = {k: output_df[k].iloc[0] for k in output_df.columns if output_df[k].nunique() == 1}
+        logger.debug(mars_request)
 
-            # Check the column names and first value against the schema
-            logger.debug(f"Generated MARS keys for {msg}")
-            key_matches = list(self.fdb_schema.match(mars_keys))
+        logger.debug(f"Generated MARS keys for {msg}")
+        mars_request = self.fdb_schema.parse(mars_request)
 
-            for k in key_matches:
-                logger.debug(k.info())
-
-            if not all(k.good() for k in key_matches):
-                raise ValueError("Generated ODC file does not match given schema!")
-
-            mars_keys = key_matches
+        for k, v in mars_request.items():
+            logger.debug(v.info())
 
         # And encode the supplied data
         # logger.debug(f"Columns before encoding to ODC: {df.columns}")
@@ -350,7 +324,9 @@ class ODCEncoder(Encoder):
             )
 
         output_msg = FileMessage(
-            metadata=self.generate_metadata(msg, filepath=self.output_file, encoded_format="odb", mars_keys=mars_keys),
+            metadata=self.generate_metadata(
+                msg, filepath=self.output_file, encoded_format="odb", mars_request=mars_request
+            ),
         )
         yield self.tag_message(output_msg, msg)
 

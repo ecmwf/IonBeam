@@ -41,7 +41,7 @@ class AVISONotifier(Writer):
         request = {k: mars_value_formatters.get(k, str)(v) for k, v in request.items()}
 
         # Send a notification to AVISO that we put this data into the DB
-        logger.debug("Sending to aviso {request}")
+        logger.debug(f"Sending to aviso {request}")
         # response = send_aviso_notification(request)
         # logger.debug("Aviso response {response}")
 

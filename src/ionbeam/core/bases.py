@@ -22,6 +22,7 @@ from .history import (
     CodeSourceInfo,
     describe_code_source,
 )
+from .mars_keys import MARSRequest
 
 
 @dataclasses.dataclass(unsafe_hash=True)
@@ -32,7 +33,7 @@ class MetaData:
     time_slice: pandas.Period | None = None
     encoded_format: str | None = None
     filepath: Path | None = None
-    mars_keys: dict = dataclasses.field(default_factory=dict)
+    mars_request: MARSRequest = dataclasses.field(default_factory=MARSRequest)
     # unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
 
     def __str__(self):

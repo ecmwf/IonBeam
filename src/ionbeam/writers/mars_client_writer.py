@@ -79,15 +79,15 @@ class MARSWriter(Writer):
         assert message.metadata.mars_keys is not None
         assert message.metadata.filepath is not None
 
-        request = construct_mars_request(message)
+        mars_request = construct_mars_request(message)
 
-        # with tempfile.NamedTemporaryFile() as fp:
-        #     mars_request = write_temp_mars_request(request, file=fp.name)
-        #     logger.debug(mars_request)
-        #     run_temp_mars_request(file=fp.name)
+        with tempfile.NamedTemporaryFile() as fp:
+            mars_request_string = write_temp_mars_request(mars_request, file=fp.name)
+            logger.debug(mars_request_string)
+            run_temp_mars_request(file=fp.name)
 
         # Send a notification to AVISO that we put this data into the DB
-        response = send_aviso_notification(request)
+        response = send_aviso_notification(mars_request)
         # logger.debug("Aviso respose {response}")
 
         # TODO: the explicit mars_keys should not be necessary here.

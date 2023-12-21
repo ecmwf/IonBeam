@@ -18,10 +18,10 @@ import dataclasses
 from ..core.bases import Writer, Message, FileMessage, FinishMessage
 
 import logging
-import pyfdb
 import findlibs
 import os
 import yaml
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +67,16 @@ class FDBWriter(Writer):
         for lib in self.debug:
             os.environ[f"{lib.upper()}_DEBUG"] = "1"
 
+        import pyfdb
+
         fdb = pyfdb.FDB()
+        request = input_message.metadata.mars_request.as_strings()
+        logger.debug(f"MARS key for fdb archive: {json.dumps(request, indent=4)}")
 
         with open(input_message.metadata.filepath, "rb") as f:
-            fdb.archive(f.read())
+            fdb.archive(f.read(), request=request)
+
+        logger.debug(input_message.metadata)
 
         metadata = self.generate_metadata(input_message)
         output_msg = FileMessage(metadata=metadata)

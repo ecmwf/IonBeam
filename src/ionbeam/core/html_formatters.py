@@ -212,15 +212,8 @@ def message_to_html(message):
         title = f"Tabular Data ({rows} rows x {columns} columns) ({size})"
         sections.append(make_section(title, dataframe_to_html(message.data)))
 
-    if hasattr(message, "metadata") and getattr(message.metadata, "mars_keys", {}):
-        df = pd.DataFrame(
-            [
-                ("✅" if k.good() else "❌", k.key, k.value, k.key_spec, k.reason, k.odb_table if k.odb_table else "")
-                for k in message.metadata.mars_keys
-            ],
-            columns=["", "Key", "Value", "Schema Entry", "Info", "ODB Table"],
-        )
-        sections.append(make_section("Mars Keys", dataframe_to_html(df)))
+    if hasattr(message, "metadata") and getattr(message.metadata, "mars_request", {}):
+        sections.append(make_section("Mars Request", message.metadata.mars_request._repr_html_()))
 
     if hasattr(message, "metadata") and getattr(message.metadata, "filepath", None) is not None:
         file_section = summarise_file(message.metadata.filepath)
@@ -298,13 +291,7 @@ def action_to_html(action, extra_sections=[]):
     sections.extend(extra_sections)
 
     df = pd.DataFrame(attributes)
-    with pd.option_context("display.max_colwidth", 100):
-        html = df.to_html(
-            index=False,
-            header=False,
-            notebook=True,
-            render_links=True,
-        )
+    html = dataframe_to_html(df, header=False)
 
     sections.insert(0, make_section("Attributes", html, open=True))
 

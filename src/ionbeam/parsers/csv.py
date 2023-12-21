@@ -24,6 +24,8 @@ from ..core.bases import (
 )
 
 from ..core.converters import unit_conversions
+from ..core.html_formatters import make_section, action_to_html, dataframe_to_html
+from dataclasses import asdict
 
 import logging
 
@@ -43,6 +45,16 @@ class CSVParser(Parser):
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.match})"
+
+    def _repr_html_(self):
+        column_html = dataframe_to_html(
+            pd.DataFrame.from_records(asdict(c) for c in self.all_columns),
+            max_rows=200,
+        )
+        extra_sections = [
+            make_section("Columns", column_html, open=False),
+        ]
+        return action_to_html(self, extra_sections=extra_sections)
 
     def init(self, globals):
         super().init(globals)
