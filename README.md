@@ -18,25 +18,27 @@ This project can be deployed in three ways:
 ## Dev Installation
 
 Install from source
+
 ```sh
-$ git clone github.com/ecmwf-projects/IonBeam
-$ cd ionbeam
+git clone github.com/ecmwf-projects/IonBeam
+cd ionbeam
 ```
 
 Create a conda or mamba environment, venv or similar
+
 ```sh
-$ conda env create --name ionbeam ipykernel
-$ conda activate ionbeam
-$ pip install --editable ".[dev]"
+conda env create --name ionbeam ipykernel
+conda activate ionbeam
+pip install --editable ".[dev]"
 ```
 
 Recommended: Install pre-commit hooks that run ruff, black, isort, flake8, etc on the code before you commit
+
 ```sh
 pre-commit install
 ```
 
 Create a `secrets.yaml` file containing the access credentials for the various sources of data, use `example_secrets.yaml` as a template. `secrets.yaml` is in the gitignore to lower the risk that it accidentally gets committed to git.
-
 
 ## Documentation
 
@@ -47,16 +49,17 @@ The documentation will be available at on readthedocs.io once this repo is made 
 [Apache License 2.0](LICENSE) In applying this license, ECMWF does not waive the privileges and immunities
 granted to it by virtue of its status as an intergovernmental organisation nor does it submit to any jurisdiction.
 
-
-
 ## Testing
+
 To run the default battery of smoke tests, just run pytest:
+
 ```sh
 $ pytest
 ```
 
 To run against live APIs use:
 ```sh
+
 $ pytest -m network
 ```
 
