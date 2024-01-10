@@ -76,8 +76,6 @@ class FDBWriter(Writer):
         with open(input_message.metadata.filepath, "rb") as f:
             fdb.archive(f.read(), request=request)
 
-        logger.debug(input_message.metadata)
-
-        metadata = self.generate_metadata(input_message)
+        metadata = self.generate_metadata(input_message, mars_request=input_message.metadata.mars_request)
         output_msg = FileMessage(metadata=metadata)
         yield self.tag_message(output_msg, input_message)

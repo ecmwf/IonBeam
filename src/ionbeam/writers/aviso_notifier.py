@@ -35,10 +35,9 @@ class AVISONotifier(Writer):
         if isinstance(message, FinishMessage):
             return
 
+        logger.debug(f"{message.metadata.mars_request}")
         request = {"database": "fdbdev", "class": "rd"}
-        odb_keys = {k.key: k.value for k in message.metadata.mars_keys}
-        request = odb_keys | request
-        request = {k: mars_value_formatters.get(k, str)(v) for k, v in request.items()}
+        request |= {k.key: k.value for k in message.metadata.mars_request.values()}
 
         # Send a notification to AVISO that we put this data into the DB
         logger.debug(f"Sending to aviso {request}")
@@ -46,8 +45,8 @@ class AVISONotifier(Writer):
         # logger.debug("Aviso response {response}")
 
         # TODO: the explicit mars_keys should not be necessary here.
-        metadata = self.generate_metadata(message, mars_keys=message.metadata.mars_keys)
+        metadata = self.generate_metadata(message, mars_request=message.metadata.mars_request)
         output_msg = FileMessage(metadata=metadata)
 
-        assert output_msg.metadata.mars_keys is not None
+        assert output_msg.metadata.mars_request is not None
         yield self.tag_message(output_msg, message)
