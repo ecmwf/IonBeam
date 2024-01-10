@@ -115,7 +115,7 @@ fdb_schema = pe.compile(
     Values <- "=" String ("/" String)*
 
     # Low level stuff 
-    String   <- ~([a-zA-Z0-9]+)
+    String   <- ~([a-zA-Z0-9_]+)
     EOF  <- !.
     empty <- ""
     """,
