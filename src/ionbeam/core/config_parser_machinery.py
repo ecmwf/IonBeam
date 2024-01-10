@@ -24,7 +24,8 @@ class ConfigMatchError(ConfigError):
 
 class ConfigLineError(ConfigError):
     def __init__(self, context, key, _type, value, message):
-        message = f"""{context.filepath}:{value.get(LINE_KEY, '?')}
+        line_number = value.get(LINE_KEY, "?") if hasattr(value, "get") else "?"
+        message = f"""{context.filepath}:{line_number}
         While parsing key '{key}' with type '{_type}' and value {value} encountered an error:
         {message}"""
         super().__init__(message)
