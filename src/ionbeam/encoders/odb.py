@@ -275,8 +275,8 @@ class ODCEncoder(Encoder):
             kwargs = dict(
                 observation_variable=msg.metadata.observation_variable,
                 source=msg.metadata.source,
-                date=output_df["date"][0],
-                time=output_df["time"][0],
+                date=output_df["date@hdr"][0],
+                time=output_df["time@hdr"][0],
             )
             f = f.format(**kwargs)
 
