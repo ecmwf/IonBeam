@@ -35,14 +35,13 @@ class AVISONotifier(Writer):
         if isinstance(message, FinishMessage):
             return
 
-        logger.debug(f"{message.metadata.mars_request}")
         request = {"database": "fdbdev", "class": "rd"}
-        request |= {k.key: k.value for k in message.metadata.mars_request.values()}
+        request |= message.metadata.mars_request.as_strings()
 
         # Send a notification to AVISO that we put this data into the DB
         logger.debug(f"Sending to aviso {request}")
-        # response = send_aviso_notification(request)
-        # logger.debug("Aviso response {response}")
+        response = send_aviso_notification(request)
+        logger.debug(f"Aviso response {response}")
 
         # TODO: the explicit mars_keys should not be necessary here.
         metadata = self.generate_metadata(message, mars_request=message.metadata.mars_request)

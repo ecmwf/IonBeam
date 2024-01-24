@@ -16,7 +16,6 @@ import dataclasses
 
 from ..core.bases import Writer, Message, FileMessage, FinishMessage
 from ..core.aviso import send_aviso_notification
-from .construct_mars_request import construct_mars_request
 
 
 import logging
@@ -34,14 +33,14 @@ def write_temp_mars_request(
     request,
     file,
     verb="archive",
-    # quote_keys = {"source", "target", "filter"}
+    quote_keys = {"source", "target", "filter"}
 ):
     keys = []
     for key, value in request.items():
-        # if key in quote_keys:
-        keys.append(f'{key}="{value}"')
-        # else:
-        #     keys.append(f'{key}={value}')
+        if key in quote_keys:
+            keys.append(f'{key}="{value}"')
+        else:
+            keys.append(f'{key}={value}')
 
     keys = ",\n    ".join(keys)
     rendered = f"""{verb},
@@ -55,12 +54,12 @@ def write_temp_mars_request(
 
 def run_temp_mars_request(file):
     try:
-        output = sb.check_output(["mars", "/home/math/temp_request.mars"], stderr=sb.STDOUT)
+        output = sb.check_output(["mars", file], stderr=sb.STDOUT)
     except sb.CalledProcessError as exc:
         print("Status : FAIL", exc.returncode, exc.output.decode())
         raise exc
-    # else:
-    #     print("Output: \n{}\n".format(output))
+    else:
+        logger.debug("MARS Archive Output: \n{}\n".format(output))
 
 
 @dataclasses.dataclass
@@ -76,23 +75,22 @@ class MARSWriter(Writer):
         if isinstance(message, FinishMessage):
             return
 
-        assert message.metadata.mars_keys is not None
+        assert message.metadata.mars_request is not None
         assert message.metadata.filepath is not None
-
-        mars_request = construct_mars_request(message)
+        
+        request = {"database": "fdbdev", "class": "rd", "source": str(message.metadata.filepath)}
+        mars_request = request | message.metadata.mars_request.as_strings()
+        
+        logger.info(f"mars_request: {mars_request}")
 
         with tempfile.NamedTemporaryFile() as fp:
             mars_request_string = write_temp_mars_request(mars_request, file=fp.name)
-            logger.debug(mars_request_string)
+            logger.debug(f"mars_request_string: {mars_request_string}")
             run_temp_mars_request(file=fp.name)
 
-        # Send a notification to AVISO that we put this data into the DB
-        response = send_aviso_notification(mars_request)
-        # logger.debug("Aviso respose {response}")
-
         # TODO: the explicit mars_keys should not be necessary here.
-        metadata = self.generate_metadata(message, mars_keys=message.metadata.mars_keys)
+        metadata = self.generate_metadata(message, mars_request=message.metadata.mars_request)
         output_msg = FileMessage(metadata=metadata)
 
-        assert output_msg.metadata.mars_keys is not None
+        assert output_msg.metadata.mars_request is not None
         yield self.tag_message(output_msg, message)
