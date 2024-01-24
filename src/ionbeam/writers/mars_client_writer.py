@@ -24,23 +24,19 @@ import logging
 import subprocess as sb
 from tqdm.notebook import tqdm
 import tempfile
+import sys
 
 
 logger = logging.getLogger(__name__)
 
 
-def write_temp_mars_request(
-    request,
-    file,
-    verb="archive",
-    quote_keys = {"source", "target", "filter"}
-):
+def write_temp_mars_request(request, file, verb="archive", quote_keys={"source", "target", "filter"}):
     keys = []
     for key, value in request.items():
         if key in quote_keys:
             keys.append(f'{key}="{value}"')
         else:
-            keys.append(f'{key}={value}')
+            keys.append(f"{key}={value}")
 
     keys = ",\n    ".join(keys)
     rendered = f"""{verb},
@@ -77,16 +73,17 @@ class MARSWriter(Writer):
 
         assert message.metadata.mars_request is not None
         assert message.metadata.filepath is not None
-        
+
         request = {"database": "fdbdev", "class": "rd", "source": str(message.metadata.filepath)}
         mars_request = request | message.metadata.mars_request.as_strings()
-        
+
         logger.info(f"mars_request: {mars_request}")
 
         with tempfile.NamedTemporaryFile() as fp:
             mars_request_string = write_temp_mars_request(mars_request, file=fp.name)
             logger.debug(f"mars_request_string: {mars_request_string}")
-            run_temp_mars_request(file=fp.name)
+            # run_temp_mars_request(file=fp.name)
+            sys.exit()
 
         # TODO: the explicit mars_keys should not be necessary here.
         metadata = self.generate_metadata(message, mars_request=message.metadata.mars_request)

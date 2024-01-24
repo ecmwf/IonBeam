@@ -36,6 +36,11 @@ meteoname_map = {
 }
 
 
+# author_patterns:
+#     Bologna:
+#         bologna_living_lab_{}: range(1,21)
+
+
 @dataclasses.dataclass
 class MeteoTrackerSource(Source):
     secrets_file: Path
@@ -46,7 +51,7 @@ class MeteoTrackerSource(Source):
     finish_after: int | None = None
     source: str = "meteotracker"
     wkt_bounding_polygon: str | None = None  # Use geojson.io to generate
-    author_filters: List[str] | None = None
+    author_patterns: dict[str, dict[str, str]] = dataclasses.field(default_factory=dict)
 
     def init(self, globals):
         super().init(globals)
@@ -75,20 +80,10 @@ class MeteoTrackerSource(Source):
         point = shapely.geometry.point.Point(lat, lon)
         return self.bounding_polygon.contains(point)
 
-    def author_filter(self, data: pd.DataFrame):
-        if self.author_filters is None:
-            return True
-        author = data["author"].iloc[0]
-        return any(re.match(filter, author) for filter in self.author_filters)
-
     def all_filters(self, path, data: pd.DataFrame):
         # bail out if the author is not one of the living labs
         if data.empty:
             logger.warning(f"{path} contains empty CSV!")
-            return False
-
-        if not self.author_filter(data):
-            # logger.debug(f"Skipping {path} because author is {data['author'].iloc[0]}")
             return False
 
         # bail out if this data is not in the target region
