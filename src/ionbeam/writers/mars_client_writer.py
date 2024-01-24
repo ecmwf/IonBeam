@@ -83,18 +83,10 @@ class MARSWriter(Writer):
         
         logger.info(f"mars_request: {mars_request}")
 
-        # with tempfile.NamedTemporaryFile() as fp:
-        #     mars_request_string = write_temp_mars_request(mars_request, file=fp.name)
-        #     logger.debug(f"mars_request_string: {mars_request_string}")
-        #     run_temp_mars_request(file=fp.name)
-            
-        mars_request_string = write_temp_mars_request(mars_request, file="/home/math/tmp_mars_request")
-        logger.debug(f"mars_request_string: {mars_request_string}")
-        run_temp_mars_request(file="/home/math/tmp_mars_request")
-
-        # Send a notification to AVISO that we put this data into the DB
-        response = send_aviso_notification(mars_request)
-        # logger.debug("Aviso respose {response}")
+        with tempfile.NamedTemporaryFile() as fp:
+            mars_request_string = write_temp_mars_request(mars_request, file=fp.name)
+            logger.debug(f"mars_request_string: {mars_request_string}")
+            run_temp_mars_request(file=fp.name)
 
         # TODO: the explicit mars_keys should not be necessary here.
         metadata = self.generate_metadata(message, mars_request=message.metadata.mars_request)
