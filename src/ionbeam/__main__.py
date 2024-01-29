@@ -17,6 +17,8 @@ import sys
 
 import logging
 from rich.logging import RichHandler
+import dataclasses
+import yaml
 
 if __name__ == "__main__":
     # Stages:
@@ -52,6 +54,11 @@ if __name__ == "__main__":
         help="Run in offline mode.",
     )
     parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="If specified then overwrite data even if it already exists in the database.",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="count",
@@ -73,22 +80,32 @@ if __name__ == "__main__":
         const=1,
         help="If present, limit the number of processed messages to 1 or the given integer",
     )
+    parser.add_argument(
+        "--logfile",
+        type=Path,
+        help="The path to a file to send the logs to.",
+    )
 
     args = parser.parse_args()
+
+    handlers = [RichHandler(markup=True, rich_tracebacks=True)]
+    if args.logfile:
+        handlers.append(logging.FileHandler(args.logfile))
+        
 
     # Set the log level, default is warnings, -v gives info, -vv for debug
     logging.basicConfig(
         level=[logging.WARNING, logging.INFO, logging.DEBUG][min(2, args.verbose)],
         format="%(message)s",
         datefmt="[%X]",
-        handlers=[RichHandler(markup=True, rich_tracebacks=True)],
+        handlers=handlers,
     )
     logger = logging.getLogger("CMDLINE")
 
     from .core.config_parser import parse_config
     from .core.bases import Source, Aggregator
 
-    globals, actions = parse_config(args.config_folder, offline=args.offline)
+    globals, actions = parse_config(args.config_folder, offline=args.offline, overwrite=args.overwrite)
 
     sources, downstream_actions = [], []
     for action in actions:
@@ -102,6 +119,12 @@ if __name__ == "__main__":
     logger.info(f"    Config Path: {globals.globals.config_path}")
     logger.info(f"    Data Path: {globals.globals.data_path}")
     logger.info(f"    Offline: {globals.globals.offline}")
+    logger.info(f"    Overwrite: {globals.globals.overwrite}")
+    logger.info(f"    Ingestion Time Constants:")
+    logger.info(f"         Query Timespan: {tuple(d.isoformat() for d in globals.globals.ingestion_time_constants.query_timespan)}")
+    logger.info(f"         Emit After (Hours): {globals.globals.ingestion_time_constants.emit_after_hours}")
+    logger.info(f"         Granularity: {globals.globals.ingestion_time_constants.granularity}")
+
 
     logger.info("Sources")
     for i, a in enumerate(sources):
