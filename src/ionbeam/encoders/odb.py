@@ -28,6 +28,8 @@ import logging
 
 import warnings
 
+import json
+
 warnings.simplefilter(action="error", category=FutureWarning)
 
 logger = logging.getLogger(__name__)
@@ -171,6 +173,10 @@ class ODCEncoder(Encoder):
     MARS_keys: List[MARS_Key]
     fdb_schema: FDBSchema
     one_file_per_granule: bool = True
+
+    'Columns names to extract and put into the odb properties field'
+    columns_to_metadata: list[str] = dataclasses.field(default_factory=list)
+
     seconds: bool = True
     minutes: bool = True
 
@@ -193,8 +199,9 @@ class ODCEncoder(Encoder):
         mars_keys_to_annotate = defaultdict(list)
         for key in self.MARS_keys:
             if key.fill_method == "from_config":
-                mars_name, mars_type = key.name.split("@")
-                mars_keys_to_annotate[mars_name].append(key)
+                if "@" in key.name: mars_key, mars_type = key.name.split("@")
+                else: mars_key = key.name
+                mars_keys_to_annotate[mars_key].append(key)
 
         # keys should be something like ["obstype", "codetype", "varno"]
         canonical_variables = {c.name: c for c in globals.canonical_variables}
@@ -261,6 +268,8 @@ class ODCEncoder(Encoder):
             "encoded_by": "IonBeam",  # TODO: add git commit hash or version here
             "IonBeam_git_hash": self.globals.code_source.git_hash,
         }
+
+        # copy some data from the message metadata into the odb properties field
         if msg.metadata:
             for key in ["source", "observation_variable"]:
                 val = getattr(msg.metadata, key)
@@ -270,13 +279,27 @@ class ODCEncoder(Encoder):
             if msg.metadata.time_slice is not None:
                 additional_metadata["timeslice"] = str(msg.metadata.time_slice.start_time.isoformat())
 
+        # Copy additional data from the data itself into the properties
+        for key in self.columns_to_metadata:
+            assert msg.data[key].nunique() == 1
+            additional_metadata[key] = msg.data[key].iloc[0]
+
+        additional_metadata["mars_request"] = str(mars_request.as_strings())
+
+        additional_metadata["columns"] = json.dumps({
+            key.name : {
+                "description": key.column_description
+            } 
+            for key in self.MARS_keys
+        })
+
         if self.one_file_per_granule:
             f = "outputs/{source}/odb/{observation_variable}/{date}_{time:04d}.odb"
             kwargs = dict(
                 observation_variable=msg.metadata.observation_variable,
                 source=msg.metadata.source,
-                date=output_df["date@hdr"][0],
-                time=output_df["time@hdr"][0],
+                date=output_df["date"][0],
+                time=output_df["time"][0],
             )
             f = f.format(**kwargs)
 

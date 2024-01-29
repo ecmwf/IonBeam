@@ -90,9 +90,10 @@ class CSVParser(Parser):
 
     def format_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        extra_keys = {k for k in df.columns if k not in self.columns_mapping}
-        if extra_keys:
-            logger.warning(f"Data keys [{','.join(extra_keys)}] do not exist in the config!")
+        # extra_keys = {k for k in df.columns if k not in self.columns_mapping}
+        # if extra_keys:
+        #     print(extra_keys)
+        #     logger.warning(f"Data keys {','.join(extra_keys)} do not exist in the config!")
 
         df.rename(columns=self.columns_mapping, inplace=True)
 

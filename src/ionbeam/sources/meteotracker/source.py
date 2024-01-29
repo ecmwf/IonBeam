@@ -24,38 +24,50 @@ from .meteotracker import MeteoTracker_API, MeteoTracker_API_Error
 
 import shapely
 import yaml
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
-
-meteoname_map = {
-    "genova": "GENOALL",
-    "jerusalem": "TAULL",
-    "llwa": "LLWA",
-    "barcelona": "UBLL",
-    "hasselt": "UHASSELT",
-}
-
-
-# author_patterns:
-#     Bologna:
-#         bologna_living_lab_{}: range(1,21)
 
 
 @dataclasses.dataclass
 class MeteoTrackerSource(Source):
     secrets_file: Path
     cache_directory: Path
+
+    "The time interval to ingest, can be overidden by globals.source_timespan"
     start_date: str
     end_date: str
-    static_metadata_columns: List[InputColumn]
+
+    "How many messages to emit before stopping, useful to debug runs."
     finish_after: int | None = None
+
+    "The value to insert as source"
     source: str = "meteotracker"
+
+    "A bounding polygon represented in WKT (well known text) format."
     wkt_bounding_polygon: str | None = None  # Use geojson.io to generate
+
+    """A list of patterns used to generate author names to check. eg 
+        author_patterns:
+            Bologna:
+                bologna_living_lab_{}: range(1,21)
+            Barcelona:
+                barcelona_living_lab_{}: range(1, 16)
+                Barcelona_living_lab_{}: range(1, 16)
+    """
     author_patterns: dict[str, dict[str, str]] = dataclasses.field(default_factory=dict)
 
     def init(self, globals):
         super().init(globals)
         logger.debug(f"Initialialised MeteoTracker source with {self.start_date=}, {self.end_date=}")
+        
+        # If the timespan of interest is being overridden
+        if self.globals.ingestion_time_constants is not None:
+            self.start_date, self.end_date = self.globals.ingestion_time_constants.query_timespan
+        else:
+            self.start_date = datetime.fromisoformat(self.start_date)
+            self.end_date = datetime.fromisoformat(self.end_date)
+
         self.cache_directory = self.resolve_path(self.cache_directory, type="data")
 
         if self.wkt_bounding_polygon is not None:
@@ -105,10 +117,11 @@ class MeteoTrackerSource(Source):
                 except MeteoTracker_API_Error as e:
                     logger.warning(f"get_session_data failed for session {session.id}\n{e}")
                     continue
-
-                for column in self.static_metadata_columns:
-                    if hasattr(session, column.key):
-                        data[column.name] = getattr(session, column.key)
+                print(session)
+                for field in dataclasses.fields(session):
+                    value = getattr(session, field.name)
+                    if value is None or field.name == "columns": continue
+                    data[field.name] = value
 
                 data.to_csv(path, index=False)
 
@@ -119,6 +132,7 @@ class MeteoTrackerSource(Source):
 
             logger.debug(f"Yielding meteotracker CSV file with columns {data.columns}")
             logger.debug(f"Author = {data['author'].iloc[0]}")
+            logger.debug(f"Living_lab = {data['living_lab'].iloc[0]}")
             yield FileMessage(
                 metadata=self.generate_metadata(
                     filepath=path,
@@ -150,23 +164,28 @@ class MeteoTrackerSource(Source):
     def online_generate_by_author(self) -> Iterable[FileMessage]:
         # Do  API requests in chunks larger than the data granularity, upto 3 days
         self.api = MeteoTracker_API(self.credentials, self.api_headers)
+        timespan = (self.start_date, self.end_date)
 
         # Set up the list of target authors
-        lls = ["bologna", "barcelona", "jerusalem", "hasselt", "llwa"]
-        authors = [f"{name}_living_lab_{n}" for n in range(25) for name in lls]
-        authors.append("CIMA I-Change")
+        authors = []
+        for living_lab, patterns in self.author_patterns.items():
+            for pattern, range_expression in patterns.items():
+                for item in eval(range_expression):
+                    author = pattern.format(item)
+                    authors.append((living_lab, author))
 
         sessions = []
-        for author in authors:
-            logger.debug(f"Querying for {author=}")
+        for living_lab, author in authors:
             try:
-                author_sessions = self.api.query_sessions(author=author, items=1000)
+                author_sessions = self.api.query_sessions(author=author, timespan=timespan, items=1000)
             except MeteoTracker_API_Error as e:
                 logger.warning(f"Query_sessions failed for author {author}\n{e}")
                 continue
             if author_sessions:
                 logger.debug(f"Retrieved {len(author_sessions)} sessions for {author=}")
 
+            for s in author_sessions:
+                s.living_lab = living_lab
             sessions.extend(author_sessions)
 
         logger.debug(f"Sorting sessions oldest to newest, make sure the TimeAggregator knows that!")

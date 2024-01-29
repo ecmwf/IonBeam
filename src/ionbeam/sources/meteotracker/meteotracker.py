@@ -118,6 +118,7 @@ class MT_Session:
     author: str
     end_time: datetime | None
     columns: List[str]
+    living_lab: str | None = None
 
     def __init__(self, **d):
         self.id = SessionId(d["_id"])

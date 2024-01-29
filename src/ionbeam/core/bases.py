@@ -23,6 +23,7 @@ from .history import (
     describe_code_source,
 )
 from .mars_keys import MARSRequest
+from datetime import datetime, timedelta
 
 
 @dataclasses.dataclass(unsafe_hash=True)
@@ -127,18 +128,39 @@ class CanonicalVariable:
     codetype: int | None = None
     varno: int | None = None
     obstype: int | None = None
+    reportype: int | None = None
 
     def __repr__(self):
         return f"CanonicalVariable({self.name})"
 
+@dataclasses.dataclass
+class IngestionTimeConstants:
+    query_timespan: tuple[datetime, datetime]
+    emit_after_hours: int
+    granularity: str
+    time_direction: Literal["forwards", "backwards"] = "forwards"
+
+    def __post_init__(self):
+        def date_eval(s): 
+            try:
+                return eval(s, dict(datetime=datetime, timedelta=timedelta))
+            except SyntaxError as e:
+                raise SyntaxError(f"{s} has a syntax error {e}")
+        def interval_eval(tup): return tuple(sorted(map(date_eval, tup)))
+
+        self.query_timespan = interval_eval(self.query_timespan)
 
 @dataclasses.dataclass
 class Globals:
     canonical_variables: List[CanonicalVariable]
     config_path: Path
     data_path: Path
-    offline: bool
+    offline: bool = False
+    overwrite: bool = False
+    ingestion_time_constants: IngestionTimeConstants | None = None
     code_source: CodeSourceInfo | None = None
+
+
 
 
 @dataclasses.dataclass

@@ -163,10 +163,16 @@ class TimeAggregator(Aggregator):
     (source, observed_variable). The BucketContainer checks when each timeslice is reader to emit.
     """
 
+
+    "How much time a data granule represents."
     granularity: str = "1H"
+
+    "Is data arriving chronologically or the reverse?"
     time_direction: Literal["forwards", "backwards"] = "forwards"
+
+    """Wait this long before emitting a message, this allows for data to
+     be up to this many hours late and still make it into the data granule."""
     emit_after_hours: int = 10
-    stateful: bool = True
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.match}, {self.granularity}, {self.time_direction})"
@@ -182,6 +188,12 @@ class TimeAggregator(Aggregator):
         super().init(globals)
         self.bucket_containers: Dict[tuple, BucketContainer] = {}
         self.metadata = dataclasses.replace(self.metadata, state="time_aggregated")
+
+        if self.globals.ingestion_time_constants is not None:
+            self.granularity = self.globals.ingestion_time_constants.granularity
+            self.emit_after_hours = self.globals.ingestion_time_constants.emit_after_hours
+            self.time_direction = self.globals.ingestion_time_constants.time_direction
+
 
     def emit_message(self, msg, bucket):
         msg = dataclasses.replace(msg, metadata=self.generate_metadata(msg))

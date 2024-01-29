@@ -101,6 +101,9 @@ def is_optional(t):
 def is_list(t):
     return get_origin(t) == list or t == list
 
+def is_dict(t):
+    return get_origin(t) == dict or t == dict
+
 
 def determine_matching_dataclass(context, key, datacls, input_dict):
     "Check if we actaully want to use a subclass of datacls"
@@ -194,6 +197,15 @@ def parse_union(context, key, _type, value):
 
     return parse_field(context, key, _type, value)
 
+def parse_dict(context, key, _type, value):
+    key_type, value_type = get_args(_type)
+    return {
+        parse_field(context, "", key_type, key_value) : parse_field(context, "", value_type, value_value)
+        for key_value, value_value in value.items()
+        if key_value != LINE_KEY
+    }
+
+
 
 def parse_field(context, key, _type, value):
     """Given a data class Field object or a bare type and a value object, try to parse it
@@ -219,6 +231,9 @@ def parse_field(context, key, _type, value):
 
     if is_literal(_type):
         return parse_literal(context, key, _type, value)
+
+    if is_dict(_type):
+        return parse_dict(context, key, _type, value)
 
     try:
         result = _type(value)

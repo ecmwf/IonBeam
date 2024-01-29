@@ -48,14 +48,31 @@ def write_temp_mars_request(request, file, verb="archive", quote_keys={"source",
     return rendered
 
 
-def run_temp_mars_request(file):
-    try:
-        output = sb.check_output(["mars", file], stderr=sb.STDOUT)
-    except sb.CalledProcessError as exc:
-        print("Status : FAIL", exc.returncode, exc.output.decode())
-        raise exc
-    else:
-        logger.debug("MARS Archive Output: \n{}\n".format(output))
+def make_mars_request(verb, request):
+    with tempfile.NamedTemporaryFile() as cmd, tempfile.NamedTemporaryFile() as output:
+        if verb in {"list", "retrieve"}: request = request | dict(target = output.name)
+        
+        mars_request_string = write_temp_mars_request(request, file=cmd.name, verb=verb)
+        # logger.debug(f"mars_request_string: {mars_request_string}")
+    
+        try:
+            stderr = sb.check_output(["mars", cmd.name], stderr=sb.STDOUT, encoding='utf-8') 
+        except sb.CalledProcessError as exc:
+            logger.debug(f"Status : FAIL, retcode: {exc.returncode}, output: {exc.output}")
+            raise CalledProcessError(f"MARS {verb} returned error: {exc.output}")
+            
+        return stderr, output.read().decode("utf-8")
+
+def mars_archive(request, source):
+    stderr, output = make_mars_request('archive', request | {"source" : str(source)})
+    return stderr
+    
+def mars_list(request):
+    request = request | dict(output = "cost")
+    stderr, output = make_mars_request('list', request)
+    entries = next(l for l in output.split("\n") if "Entries" in l)
+    n = int(entries.split(":")[1].strip())
+    return dict(entries = n)
 
 
 @dataclasses.dataclass
@@ -74,16 +91,19 @@ class MARSWriter(Writer):
         assert message.metadata.mars_request is not None
         assert message.metadata.filepath is not None
 
-        request = {"database": "fdbdev", "class": "rd", "source": str(message.metadata.filepath)}
-        mars_request = request | message.metadata.mars_request.as_strings()
+        mars_request = message.metadata.mars_request.as_strings()
+        # logger.info(f"mars_request: {mars_request}")
 
-        logger.info(f"mars_request: {mars_request}")
+        entries = mars_list(mars_request)["entries"]
+        logger.debug(f"Got {entries} entries")
 
-        with tempfile.NamedTemporaryFile() as fp:
-            mars_request_string = write_temp_mars_request(mars_request, file=fp.name)
-            logger.debug(f"mars_request_string: {mars_request_string}")
-            # run_temp_mars_request(file=fp.name)
-            sys.exit()
+        if entries == 0 or self.globals.overwrite:
+            logger.debug(f"Archiving via mars client")
+            mars_archive(mars_request, source = message.metadata.filepath)
+        else:
+            # Cut this message off so that it doesn't overwrite data
+            logger.debug(f"Dropping data because it's already in the database.")
+            return
 
         # TODO: the explicit mars_keys should not be necessary here.
         metadata = self.generate_metadata(message, mars_request=message.metadata.mars_request)
