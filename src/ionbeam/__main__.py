@@ -120,10 +120,11 @@ if __name__ == "__main__":
     logger.info(f"    Data Path: {globals.globals.data_path}")
     logger.info(f"    Offline: {globals.globals.offline}")
     logger.info(f"    Overwrite: {globals.globals.overwrite}")
-    logger.info(f"    Ingestion Time Constants:")
-    logger.info(f"         Query Timespan: {tuple(d.isoformat() for d in globals.globals.ingestion_time_constants.query_timespan)}")
-    logger.info(f"         Emit After (Hours): {globals.globals.ingestion_time_constants.emit_after_hours}")
-    logger.info(f"         Granularity: {globals.globals.ingestion_time_constants.granularity}")
+    if globals.globals.ingestion_time_constants is not None:
+        logger.info(f"    Ingestion Time Constants:")
+        logger.info(f"         Query Timespan: {tuple(d.isoformat() for d in globals.globals.ingestion_time_constants.query_timespan)}")
+        logger.info(f"         Emit After (Hours): {globals.globals.ingestion_time_constants.emit_after_hours}")
+        logger.info(f"         Granularity: {globals.globals.ingestion_time_constants.granularity}")
 
 
     logger.info("Sources")

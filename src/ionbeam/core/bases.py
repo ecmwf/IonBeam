@@ -158,6 +158,7 @@ class Globals:
     offline: bool = False
     overwrite: bool = False
     ingestion_time_constants: IngestionTimeConstants | None = None
+    split_data_columns: bool = True
     code_source: CodeSourceInfo | None = None
 
 

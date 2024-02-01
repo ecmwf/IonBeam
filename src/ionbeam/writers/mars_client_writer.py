@@ -58,8 +58,8 @@ def make_mars_request(verb, request):
         try:
             stderr = sb.check_output(["mars", cmd.name], stderr=sb.STDOUT, encoding='utf-8') 
         except sb.CalledProcessError as exc:
-            logger.debug(f"Status : FAIL, retcode: {exc.returncode}, output: {exc.output}")
-            raise CalledProcessError(f"MARS {verb} returned error: {exc.output}")
+            logger.debug(f"Status : FAIL, retcode: {exc.returncode}, output: {exc.output}", extra={"markup": None})
+            raise ValueError(f"MARS {verb} returned error: {exc.output}")
             
         return stderr, output.read().decode("utf-8")
 

@@ -148,21 +148,37 @@ class CSVParser(Parser):
 
         df = self.format_dataframe(df)
 
-        # Split the data into data frames for each of the value types
-        for variable_column, df in self.split_columns(df):
+        if self.globals.split_data_columns:
+            # Split the data into data frames for each of the value types
+            for variable_column, df in self.split_columns(df):
+                metadata = self.generate_metadata(
+                    message=rawdata,
+                    observation_variable=variable_column.name,
+                    filepath=None,
+                )
+
+                output_msg = TabularMessage(
+                    metadata=metadata,
+                    columns=[c.canonical_variable for c in self.fixed_columns + [variable_column]],
+                    data=df,
+                )
+
+                yield self.tag_message(output_msg, rawdata)
+        else:
             metadata = self.generate_metadata(
                 message=rawdata,
-                observation_variable=variable_column.name,
+                observation_variable=",".join(value_col.name for value_col in self.value_columns),
                 filepath=None,
             )
 
             output_msg = TabularMessage(
                 metadata=metadata,
-                columns=[c.canonical_variable for c in self.fixed_columns + [variable_column]],
+                columns=[c.canonical_variable for c in self.all_columns],
                 data=df,
             )
 
             yield self.tag_message(output_msg, rawdata)
+
 
 
 parser = CSVParser

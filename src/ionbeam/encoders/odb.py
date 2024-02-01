@@ -229,24 +229,37 @@ class ODCEncoder(Encoder):
     def create_output_df(self, msg: TabularMessage) -> pd.DataFrame:
         output_data = {}
         for col in self.MARS_keys:
+
+            # skip observed_value if we're not splitting data into multiple granules
+            if not self.globals.split_data_columns and col.name == "observed_value":
+                continue
+
             try:
                 output_data[col.name] = col.values(msg)
             except ValueError as e:
                 print(col)
                 raise e
+        
+        # Add in all the value columns
+        if not self.globals.split_data_columns:
+            for name in msg.metadata.observation_variable.split(","):
+                output_data[name] = msg.data[name]
+
+        
         return pd.DataFrame(output_data)
 
     def encode(self, msg: TabularMessage | FinishMessage) -> Iterable[FileMessage]:
         if isinstance(msg, FinishMessage):
             return
 
-        obsval_dtype = msg.data[msg.metadata.observation_variable].dtype
-        if str(obsval_dtype).startswith("str") or str(obsval_dtype) == "object":
-            logger.warning(
-                f"Can't output {msg.metadata.observation_variable} \
-                            as observation variable because it has dtype {obsval_dtype}"
-            )
-            return
+        if self.globals.split_data_columns:
+            obsval_dtype = msg.data[msg.metadata.observation_variable].dtype
+            if str(obsval_dtype).startswith("str") or str(obsval_dtype) == "object":
+                logger.warning(
+                    f"Can't output {msg.metadata.observation_variable} \
+                                as observation variable because it has dtype {obsval_dtype}"
+                )
+                return
 
         output_df = self.create_output_df(msg)
 

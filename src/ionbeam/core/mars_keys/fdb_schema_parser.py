@@ -167,7 +167,7 @@ class Key:
         return self.reason in {"Matches", "Skipped"}
 
     def info(self):
-        return f"{'✅' if self else '❌'} {self.key:<12}= {self.value:<12} ({self.key_spec}) {self.reason if not self else ''}"
+        return f"{'✅' if self else '❌'} {self.key:<12}= {str(self.value):<12} ({self.key_spec}) {self.reason if not self else ''}"
 
     def as_string(self):
         return self.key_spec.type.format(self.value)
