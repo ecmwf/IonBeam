@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11"]
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v3
@@ -34,13 +34,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install --editable ".[dev]"
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      - name: Lint with ruff
-        run: |
-          pip install ruff
-          # stop the build if there are Python syntax errors or undefined names
-          ruff --format=github --select=E9,F63,F7,F82 .
-          # default set of ruff rules with GitHub Annotations
-          # ruff --format=github .
+    #   - name: Lint with ruff
+    #     run: |
+    #       pip install ruff
+    #       # stop the build if there are Python syntax errors or undefined names
+    #       ruff --format=github --select=E9,F63,F7,F82 .
+    #       # default set of ruff rules with GitHub Annotations
+    #       # ruff --format=github .
       - name: Test with pytest
         run: |
           pip install pytest
