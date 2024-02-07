@@ -19,92 +19,83 @@ import logging
 from rich.logging import RichHandler
 import dataclasses
 import yaml
+from rich_argparse import RawTextRichHelpFormatter
 
 if __name__ == "__main__":
-    # Stages:
-    # 1. Raw data from sources (--> location && label)
-    # 2. Parsed raw data (into Pandas Dataframes)
-    # 3. Annotated raw data --> expand based on decoded values and on ID
-    #      --> Self-described messages!!!!
-    # 4. Regroup the data
-    # 5. Encode output data
-
-    # n.b. Design these such that they can be driven from a configuration database (i.e.
-    #      the pre-processing configuration can change dynamically.
 
     parser = argparse.ArgumentParser(
-        prog="ECMWF IOT Observation Processor",
-        description="Put IOT data into the FDB",
-        epilog="See https://github.com/ecmwf-projects for more info.",
+        prog="IonBeam",
+        description="Scrape, process, save and generally wrangle IoT data.",
+        epilog="See https://github.com/ecmwf-projects/IonBeam for more info.",
+        formatter_class=RawTextRichHelpFormatter,
     )
-    parser.add_argument(
-        "config_folder",
-        help="Path to the config folder.",
-        type=Path,
-    )
+    # parser.add_argument(
+    #     "config_folder",
+    #     help="Path to the config folder.",
+    #     type=Path,
+    # )
 
     parser.add_argument(
         "--validate-config",
         action="store_true",
         help="Just parse the config and do nothing else.",
     )
-    parser.add_argument(
-        "--offline",
-        action="store_true",
-        help="Run in offline mode.",
-    )
-    parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="If specified then overwrite data even if it already exists in the database.",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        default=0,
-        help="Set the logging level, default is warnings only, -v and -vv give increasing verbosity",
-    )
-    parser.add_argument(
-        "--emit-partial",
-        action="store_true",
-        help="If set, tells the time aggregators to emit messages containing partial information when the program is terminated. By default these are thrown away.",
-    )
+    # parser.add_argument(
+    #     "--offline",
+    #     action="store_true",
+    #     help="Run in offline mode.",
+    # )
+    # parser.add_argument(
+    #     "--overwrite",
+    #     action="store_true",
+    #     help="If specified then overwrite data even if it already exists in the database.",
+    # )
+    # parser.add_argument(
+    #     "-v",
+    #     "--verbose",
+    #     action="count",
+    #     default=0,
+    #     help="Set the logging level, default is warnings only, -v and -vv give increasing verbosity",
+    # )
+    # parser.add_argument(
+    #     "--emit-partial",
+    #     action="store_true",
+    #     help="If set, tells the time aggregators to emit messages containing partial information when the program is terminated. By default these are thrown away.",
+    # )
 
-    parser.add_argument(
-        "--finish-after",
-        metavar="NUMBER",
-        type=int,
-        nargs="?",
-        default=argparse.SUPPRESS,
-        const=1,
-        help="If present, limit the number of processed messages to 1 or the given integer",
-    )
-    parser.add_argument(
-        "--logfile",
-        type=Path,
-        help="The path to a file to send the logs to.",
-    )
+    # parser.add_argument(
+    #     "--finish-after",
+    #     metavar="NUMBER",
+    #     type=int,
+    #     nargs="?",
+    #     default=argparse.SUPPRESS,
+    #     const=1,
+    #     help="If present, limit the number of processed messages to 1 or the given integer",
+    # )
+    # parser.add_argument(
+    #     "--logfile",
+    #     type=Path,
+    #     help="The path to a file to send the logs to.",
+    # )
 
-    args = parser.parse_args()
+    from .core.config_parser import parse_config
+    from .core.bases import Source, Aggregator
 
+    config, actions = parse_config(parser)
+    
     handlers = [RichHandler(markup=True, rich_tracebacks=True)]
-    if args.logfile:
-        handlers.append(logging.FileHandler(args.logfile))
 
     # Set the log level, default is warnings, -v gives info, -vv for debug
     logging.basicConfig(
-        level=[logging.WARNING, logging.INFO, logging.DEBUG][min(2, args.verbose)],
+        level=[logging.WARNING, logging.INFO, logging.DEBUG][min(2, config.verbose)],
         format="%(message)s",
         datefmt="[%X]",
         handlers=handlers,
     )
     logger = logging.getLogger("CMDLINE")
-
-    from .core.config_parser import parse_config
-    from .core.bases import Source, Aggregator
-
-    globals, actions = parse_config(args.config_folder, offline=args.offline, overwrite=args.overwrite)
+    
+    if config.logfile:
+        handlers.append(logging.FileHandler(config.logfile))
 
     sources, downstream_actions = [], []
     for action in actions:

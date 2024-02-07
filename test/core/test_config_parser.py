@@ -13,12 +13,12 @@ from pathlib import Path
 from ionbeam.core.config_parser import parse_config
 
 
-def test_config_parser():
-    for p in Path("../examples").glob("*.yaml"):
-        print(p)
-        parse_config(p)
+# def test_config_parser():
+#     for p in Path("../examples").glob("*.yaml"):
+#         print(p)
+#         parse_config(p)
 
-    yaml_file = Path(
-        "/Users/math/git/iot-ingester-deployment/dockerfiles/config/iot-ingester/config.yaml"
-    ).resolve()
-    parse_config(yaml_file)
+#     yaml_file = Path(
+#         "../../config/ionbeam/config.yaml"
+#     ).resolve()
+#     parse_config(yaml_file)

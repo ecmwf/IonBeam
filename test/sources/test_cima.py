@@ -43,6 +43,7 @@ def do_cima_tests(caplog):
 
     # check if there is a local secrets.yaml file
     secrets_file = "secrets.yaml" if Path("secrets.yaml").exists() else "example_secrets.yaml"
+    secrets_file = "config/example_secrets.yaml"
 
     # Setup the authentication and request a token
     cima_api = CIMA_API(secrets_file)

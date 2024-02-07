@@ -133,33 +133,6 @@ class CanonicalVariable:
     def __repr__(self):
         return f"CanonicalVariable({self.name})"
 
-@dataclasses.dataclass
-class IngestionTimeConstants:
-    query_timespan: tuple[datetime, datetime]
-    emit_after_hours: int
-    granularity: str
-    time_direction: Literal["forwards", "backwards"] = "forwards"
-
-    def __post_init__(self):
-        def date_eval(s): 
-            try:
-                return eval(s, dict(datetime=datetime, timedelta=timedelta))
-            except SyntaxError as e:
-                raise SyntaxError(f"{s} has a syntax error {e}")
-        def interval_eval(tup): return tuple(sorted(map(date_eval, tup)))
-
-        self.query_timespan = interval_eval(self.query_timespan)
-
-@dataclasses.dataclass
-class Globals:
-    canonical_variables: List[CanonicalVariable]
-    config_path: Path
-    data_path: Path
-    offline: bool = False
-    overwrite: bool = False
-    ingestion_time_constants: IngestionTimeConstants | None = None
-    code_source: CodeSourceInfo | None = None
-
 
 
 
@@ -170,7 +143,7 @@ class Action:
     # kw_only is necessary so that classes that inherit from this one can have positional fields
     metadata: MetaData = dataclasses.field(default_factory=MetaData, kw_only=True)
     # code_source: CodeSourceInfo | None = dataclasses.field(default=None, kw_only=True)
-    globals: Globals | None = dataclasses.field(default=None, kw_only=True)
+    globals: Any | None = dataclasses.field(default=None, kw_only=True)
 
     def init(self, globals):
         "Initialise self with access to the global config variables"
