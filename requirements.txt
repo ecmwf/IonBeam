@@ -19,4 +19,4 @@
     pe
     findlibs
     pyfdb @ git+https://github.com/ecmwf/pyfdb@develop
-    aviso @ git+https://github.com/ecmwf/pyfdb@develop
+    aviso @ git+https://github.com/ecmwf/aviso@develop
