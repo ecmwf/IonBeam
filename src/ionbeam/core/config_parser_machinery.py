@@ -149,6 +149,7 @@ def parse_list(context, key, list_type, value):
             f"you must specifiy what type it contains i.e {list_type.__name__}[int].",
         ) from None
 
+    if value is None: return []
     contained_type = args[0]
     return [parse_field(context, f"element {i}", contained_type, v) for i, v in enumerate(value)]
 
@@ -216,31 +217,34 @@ def parse_field(context, key, _type, value):
     can just call the type to construct the object from a string.
 
     """
-    # print(_type, value)
-    if is_dataclass(_type):
-        # possibly use a subclass instead of the base class
-        datacls = determine_matching_dataclass(context, key, _type, value)
-        # print(key, _type, value, datacls)
-        return dataclass_from_dict(context, datacls, value)
-
-    if is_union(_type):
-        return parse_union(context, key, _type, value)
-
-    if is_list(_type):
-        return parse_list(context, key, _type, value)
-
-    if is_literal(_type):
-        return parse_literal(context, key, _type, value)
-
-    if is_dict(_type):
-        return parse_dict(context, key, _type, value)
-
     try:
-        result = _type(value)
-    except Exception as e:
-        raise ConfigLineError(context, key, _type, value, str(e)) from None
+        # print(_type, value)
+        if is_dataclass(_type):
+            # possibly use a subclass instead of the base class
+            datacls = determine_matching_dataclass(context, key, _type, value)
+            # print(key, _type, value, datacls)
+            return dataclass_from_dict(context, datacls, value)
 
-    return result
+        if is_union(_type):
+            return parse_union(context, key, _type, value)
+
+        if is_list(_type):
+            return parse_list(context, key, _type, value)
+
+        if is_literal(_type):
+            return parse_literal(context, key, _type, value)
+
+        if is_dict(_type):
+            return parse_dict(context, key, _type, value)
+
+        try:
+            result = _type(value)
+        except Exception as e:
+            raise ConfigLineError(context, key, _type, value, str(e)) from None
+
+        return result
+    except Exception as e:
+        raise ConfigError(f"While parsing {key=}, {_type=}, {value=}, got exception \n\t\t{e}")
 
 
 @dataclass

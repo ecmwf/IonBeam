@@ -68,6 +68,7 @@ def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
     with open(yaml_file) as f:
         config_dict = yaml.load(f, Loader=SafeLineLoader)
 
+    print("config_dict", config_dict)
     # Parse the yaml file using python dataclasses as a template
     config = parse_config_from_dict(schema, config_dict, filepath=yaml_file)
 

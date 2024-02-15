@@ -14,6 +14,7 @@ from ..core.bases import Source
 
 from .meteotracker.source import MeteoTrackerSource
 from .cima.source import CIMASource
+from .sensor_community import SensorCommunitySource
 from .multi_file import MultiFileSource
 from .watch_directory import WatchDirectorySource
 
