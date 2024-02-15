@@ -30,10 +30,10 @@ logger = logging.getLogger(__name__)
 class FB5Config:
     type: str = "remote"
     host: str = "localhost"
-    port: int = 7654
-    dataPortStart: int = 40000
-    dataPortCount: int = 100
+    port: int = 8000
     schema: Path | None = None
+    engine: str = "remote"
+    store: str = "remote"
 
     def asdict(self):
         d = dataclasses.asdict(self)
