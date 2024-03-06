@@ -101,13 +101,15 @@ class BucketContainer:
 
         # Incoming messages can cover multiple time slices
         # So we have to split them up
-        for period, resampled_data in msg.data.resample(
-            on="time", rule=self.granularity, kind="period", origin="epoch"
-        ):
+        for timestamp, resampled_data in msg.data.resample(on="time", rule=self.granularity, origin="epoch"):
             message_slice = TabularMessage(
                 data=resampled_data,
                 metadata=msg.metadata,
             )
+
+            assert isinstance(timestamp, pd.Timestamp)
+            period = timestamp.to_period(freq=self.granularity)
+
             if period not in self.buckets:
                 self.buckets[period] = TimeSliceBucket(self.source, self.observation_variable, period)
 
@@ -163,7 +165,6 @@ class TimeAggregator(Aggregator):
     (source, observed_variable). The BucketContainer checks when each timeslice is reader to emit.
     """
 
-
     "How much time a data granule represents."
     granularity: str = "1H"
 
@@ -193,7 +194,6 @@ class TimeAggregator(Aggregator):
             self.granularity = self.globals.ingestion_time_constants.granularity
             self.emit_after_hours = self.globals.ingestion_time_constants.emit_after_hours
             self.time_direction = self.globals.ingestion_time_constants.time_direction
-
 
     def emit_message(self, msg, bucket):
         msg = dataclasses.replace(msg, metadata=self.generate_metadata(msg))
@@ -232,7 +232,7 @@ class TimeAggregator(Aggregator):
                 f"Messages has timedelta = {message_timedelta} which is too close to the emit_after_hours setting ({self.emit_after_hours}H)!"
             )
 
-        for period, data_chunk in message.data.resample(self.granularity, on="time", kind="period"):
+        for period, data_chunk in message.data.resample(self.granularity, on="time"):
             if data_chunk.empty:
                 continue
             chunked_message = dataclasses.replace(message, data=data_chunk)
@@ -246,7 +246,6 @@ class TimeAggregator(Aggregator):
             key = (
                 message.metadata.source,
                 message.metadata.observation_variable,
-                # period,
             )
 
             # Find the bucket container that manages this key and give the message to it
