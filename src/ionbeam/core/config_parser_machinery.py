@@ -101,6 +101,7 @@ def is_optional(t):
 def is_list(t):
     return get_origin(t) == list or t == list
 
+
 def is_dict(t):
     return get_origin(t) == dict or t == dict
 
@@ -149,7 +150,8 @@ def parse_list(context, key, list_type, value):
             f"you must specifiy what type it contains i.e {list_type.__name__}[int].",
         ) from None
 
-    if value is None: return []
+    if value is None:
+        return []
     contained_type = args[0]
     return [parse_field(context, f"element {i}", contained_type, v) for i, v in enumerate(value)]
 
@@ -198,14 +200,18 @@ def parse_union(context, key, _type, value):
 
     return parse_field(context, key, _type, value)
 
+
 def parse_dict(context, key, _type, value):
+    # If the type we've been given is just 'dict' with not further info, just return it
+    if len(get_args(_type)) < 2:
+        return value
+
     key_type, value_type = get_args(_type)
     return {
-        parse_field(context, "", key_type, key_value) : parse_field(context, "", value_type, value_value)
+        parse_field(context, "", key_type, key_value): parse_field(context, "", value_type, value_value)
         for key_value, value_value in value.items()
         if key_value != LINE_KEY
     }
-
 
 
 def parse_field(context, key, _type, value):

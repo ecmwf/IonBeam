@@ -27,23 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
-class FB5Config:
-    type: str = "remote"
-    host: str = "localhost"
-    port: int = 8000
-    schema: Path | None = None
-    engine: str = "remote"
-    store: str = "remote"
-
-    def asdict(self):
-        d = dataclasses.asdict(self)
-        d["schema"] = str(d["schema"])
-        return d
-
-
-@dataclasses.dataclass
 class FDBWriter(Writer):
-    FDB5_client_config: FB5Config
+    FDB5_client_config: dict
     debug: list[str] = dataclasses.field(default_factory=list)
 
     def __str__(self):
@@ -62,7 +47,7 @@ class FDBWriter(Writer):
         fdb5_path = findlibs.find("fdb5")
         logger.debug(f"FDBWriter using fdb5 shared library from {fdb5_path}")
 
-        os.environ["FDB5_CONFIG"] = yaml.dump(self.FDB5_client_config.asdict())
+        os.environ["FDB5_CONFIG"] = yaml.dump(self.FDB5_client_config)
 
         for lib in self.debug:
             os.environ[f"{lib.upper()}_DEBUG"] = "1"
