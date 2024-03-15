@@ -34,7 +34,8 @@ def install_metkit_overlays(template, keys):
         raise ValueError(f"Failed to find metkit library")
 
     # Check the path conforms to our expectations
-    assert Path(metkit_path).with_suffix("").parts[-2:] == ('lib', 'libmetkit')
+    if not Path(metkit_path).with_suffix("").parts[-2:] == ('lib', 'libmetkit'):
+        raise ValueError(f"Unexpected metkit location: {metkit_path}")
 
     # Figure out the location of the language.yaml and odb/marsrequest.yaml files
     base = Path(metkit_path).parents[1]
