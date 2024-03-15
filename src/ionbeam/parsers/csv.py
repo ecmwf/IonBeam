@@ -58,19 +58,22 @@ class CSVParser(Parser):
 
     def init(self, globals):
         super().init(globals)
+        # filter out columns we're discarding
+        self.metadata_columns = [c for c in self.metadata_columns if not c.discard]
+        self.value_columns = [c for c in self.value_columns if not c.discard]
+        self.identifying_columns = [c for c in self.identifying_columns if not c.discard]
+        
         self.all_columns = self.value_columns + self.metadata_columns + self.identifying_columns
+
         self.fixed_columns = self.identifying_columns + self.metadata_columns
         self.columns_mapping = {c.key: c.name for c in self.all_columns}
 
         canonical_variables = {c.name: c for c in globals.canonical_variables}
         for col in self.all_columns:
-            # We are explicitly ignoring this input key
-            if col.discard:
-                continue
 
             # Check that preprocessors only create columns with canonical names
             if col.name not in canonical_variables:
-                raise ValueError(f"{col.name} not in canonical names!")
+                raise ValueError(f"{col.name} from {self} config is not in canonical names!")
 
             # Just copy the whole canonical variable object onto it
             col.canonical_variable = canonical_variables[col.name]
@@ -104,7 +107,9 @@ class CSVParser(Parser):
                 # convert any custom nan values to the string "NaN"
                 if self.custom_nans is not None and col.canonical_variable.dtype.startswith("float"):
                     for nan in self.custom_nans:
-                        df[col.name].replace(nan, "NaN", inplace=True)
+                        df.replace(to_replace = {
+                            col.name : {nan : "NaN"}
+                        }, inplace=True)
 
                 try:
                     df[col.name] = df[col.name].astype(col.canonical_variable.dtype, copy=False)
@@ -114,6 +119,12 @@ class CSVParser(Parser):
         # Do unit conversions
         for col in self.all_columns:
             if col.name in df and col.unit != col.canonical_variable.unit:
+
+                if col.canonical_variable.unit is None:
+                    raise ValueError(f"{col.canonical_variable=} unit is None!")
+                if col.unit is None:
+                    raise ValueError(f"{col=} unit is None!")
+                
                 converter = unit_conversions[f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}"]
                 df[col.name] = df[col.name].apply(converter)
 
@@ -121,6 +132,8 @@ class CSVParser(Parser):
 
     def split_columns(self, df: pd.DataFrame):
         for value_col in self.value_columns:
+            if value_col.canonical_variable is None:
+                raise RuntimeError(f"{value_col=} canonical variable is None!")
             if value_col.name in df.columns and value_col.canonical_variable.output:
                 output_cols = self.fixed_columns + [
                     value_col,

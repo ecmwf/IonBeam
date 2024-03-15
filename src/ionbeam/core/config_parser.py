@@ -22,6 +22,7 @@ from yamlinclude import YamlIncludeConstructor
 from .bases import CanonicalVariable, Action, Globals
 from .history import describe_code_source, CodeSourceInfo
 from .config_parser_machinery import parse_config_from_dict, ConfigError
+from .mars_keys import FDBSchema
 
 # # This line is necessary to automatically find all the subclasses of things like "Encoder"
 from .. import sources, parsers, aggregators, quality_assessment, encoders, writers
@@ -123,13 +124,20 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
 
     logger.debug(f"Loaded global config...")
 
-    # Resolve the paths in the global config relative to the config file
-    for name in ["data_path", "config_path"]:
+    # Resolve the paths in the global config relative to the current directory
+    for name in ["data_path", "config_path", "fdb_schema_path", "metkit_language_template"]:
         path = getattr(global_config.globals, name)
         if not path.is_absolute():
             path = (config_dir.parent / path).resolve()
         setattr(global_config.globals, name, path)
         logger.debug(f"Resolved global_config.globals.{name} to {path}")
+
+    # Parse the global fdb schema file
+    # This is used to validate odb files during encoding and before writing to the fdb
+    # It is also used to generate overlays for metkit/odb/marsrequest.yaml and metkit/language.yaml
+    # That is done in lazily FDBWriter
+    with open(global_config.globals.fdb_schema_path) as f:
+        global_config.globals.fdb_schema = FDBSchema(f.read())
 
     # # Figure out the git status clean/dirty and the current git hash
     global_config.globals.code_source = describe_code_source()

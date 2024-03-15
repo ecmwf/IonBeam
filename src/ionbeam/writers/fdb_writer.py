@@ -22,8 +22,61 @@ import findlibs
 import os
 import yaml
 import json
+from jinja2 import Template
+import shutil
 
 logger = logging.getLogger(__name__)
+
+def install_metkit_overlays(template, keys):
+    # Find the location of the metkit library
+    metkit_path = findlibs.find("metkit")
+    if not metkit_path:
+        raise ValueError(f"Failed to find metkit library")
+
+    # Check the path conforms to our expectations
+    assert Path(metkit_path).with_suffix("").parts[-2:] == ('lib', 'libmetkit')
+
+    # Figure out the location of the language.yaml and odb/marsrequest.yaml files
+    base = Path(metkit_path).parents[1]
+    language_path = base / "share/metkit/language.yaml"
+    request_path = base / "share/metkit/odb/marsrequest.yaml"
+    
+    if not language_path.exists() or not request_path.exists():
+        raise ValueError(f"Tried to overide the metkit yaml files can't find one of them at {base}.")
+
+    def backup(src):
+        dst = src.with_suffix(".yaml.original")
+        if not dst.exists():
+            logger.debug(f"Copying backup to {dst}")
+            shutil.copyfile(src, dst)
+        else:
+            logger.debug(f"{src.name} backup exists at {dst}")
+    
+    backup(language_path)
+    backup(request_path)
+    
+    with open(template) as f:
+        template = Template(f.read())  
+
+    existing_keys = yaml.safe_load(template.render(keys_yaml = ""))["_field"].keys()
+    keys_yaml = yaml.dump(
+        {k : {
+                "category": "data",
+                "type": "any"
+            }
+        for k in keys if k not in existing_keys})
+
+    logger.debug(f"Writing language.yaml overlay to {language_path}")
+    with open(language_path, "w") as f:
+        f.write(template.render(keys_yaml = keys_yaml))
+
+    logger.debug(f"Writing marsrequest.yaml overlay to {request_path}")
+
+    with open(request_path, "w") as f:
+        f.write("---\n" + "\n".join(
+            f"{k.upper()}: {k.lower()}"
+            for k in keys
+        ))
 
 
 @dataclasses.dataclass
@@ -37,6 +90,10 @@ class FDBWriter(Writer):
     def init(self, globals):
         super().init(globals)
         self.metadata = dataclasses.replace(self.metadata, state="written")
+        self.metkit_language_template = globals.metkit_language_template
+
+        if "schema" not in self.FDB5_client_config:
+            self.FDB5_client_config["schema"] = str(globals.fdb_schema_path)
 
     def process(self, input_message: FileMessage | FinishMessage) -> Iterable[Message]:
         if isinstance(input_message, FinishMessage):
@@ -58,8 +115,11 @@ class FDBWriter(Writer):
         request = input_message.metadata.mars_request.as_strings()
         logger.debug(f"MARS key for fdb archive: {json.dumps(request, indent=4)}")
 
+        logger.debug(f"Installing metkit overlays")
+        install_metkit_overlays(self.metkit_language_template, request.keys())
+
         with open(input_message.metadata.filepath, "rb") as f:
-            fdb.archive(f.read(), request=request)
+            fdb.archive(f.read())
 
         metadata = self.generate_metadata(input_message, mars_request=input_message.metadata.mars_request)
         output_msg = FileMessage(metadata=metadata)

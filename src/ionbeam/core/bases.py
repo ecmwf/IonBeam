@@ -22,7 +22,7 @@ from .history import (
     CodeSourceInfo,
     describe_code_source,
 )
-from .mars_keys import MARSRequest
+from .mars_keys import MARSRequest, FDBSchema
 from datetime import datetime, timedelta
 
 
@@ -155,11 +155,15 @@ class Globals:
     canonical_variables: List[CanonicalVariable]
     config_path: Path
     data_path: Path
+    fdb_schema_path: Path
+    metkit_language_template: Path
     offline: bool = False
     overwrite: bool = False
     ingestion_time_constants: IngestionTimeConstants | None = None
     split_data_columns: bool = True
     code_source: CodeSourceInfo | None = None
+    fdb_schema: FDBSchema | None = None
+    
 
 
 

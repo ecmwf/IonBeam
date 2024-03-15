@@ -13,7 +13,7 @@ from typing import Literal, List, Dict, Iterable
 from pathlib import Path
 
 from ..core.bases import TabularMessage, FinishMessage, FileMessage, Encoder
-from ..core.mars_keys import FDBSchema
+from ..core.config_parser import ConfigError
 
 import pandas as pd
 
@@ -23,6 +23,7 @@ from dataclasses import field
 from collections import defaultdict
 
 import pyodc as odc
+# import codc as odc
 
 import logging
 
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 dtype_lookup = {
     odc.DataType.INTEGER: "int64",
     odc.DataType.REAL: "float32",
-    odc.DataType.STRING: "object",
+    odc.DataType.STRING: "string",
     odc.DataType.DOUBLE: "float64",
 }
 
@@ -48,6 +49,10 @@ dtype_lookup = {
 def source(msg: TabularMessage) -> pd.Series:
     "populates source@hdr"
     return msg.data.author
+
+def decimal_encoded_month(msg: TabularMessage) -> pd.Series:
+    dt = msg.data.time.dt
+    return 100 * dt.year + dt.month
 
 
 def decimal_encoded_date(msg: TabularMessage) -> pd.Series:
@@ -157,6 +162,8 @@ class MARS_Key:
             case "from_data":
                 return msg.data[self.key].astype(dtype)
             case "function":
+                if self.key not in globals():
+                    raise ConfigError(f"Trying to fill the mars key '{self.name}' using function '{self.key}' but it isn't defined in the source code.")
                 f = globals()[self.key]
                 return f(msg).astype(dtype)
             case _:
@@ -171,10 +178,9 @@ class MARS_Key:
 class ODCEncoder(Encoder):
     output: str
     MARS_keys: List[MARS_Key]
-    fdb_schema: FDBSchema
     one_file_per_granule: bool = True
 
-    'Columns names to extract and put into the odb properties field'
+    "Columns names to extract and put into the odb properties field"
     columns_to_metadata: list[str] = dataclasses.field(default_factory=list)
 
     seconds: bool = True
@@ -187,6 +193,7 @@ class ODCEncoder(Encoder):
         super().init(globals)
 
         self.metadata = dataclasses.replace(self.metadata, state="odc_encoded")
+        self.fdb_schema = globals.fdb_schema
 
         if not self.one_file_per_granule:
             self.output_file = self.resolve_path(self.output_file)
@@ -199,8 +206,10 @@ class ODCEncoder(Encoder):
         mars_keys_to_annotate = defaultdict(list)
         for key in self.MARS_keys:
             if key.fill_method == "from_config":
-                if "@" in key.name: mars_key, mars_type = key.name.split("@")
-                else: mars_key = key.name
+                if "@" in key.name:
+                    mars_key, mars_type = key.name.split("@")
+                else:
+                    mars_key = key.name
                 mars_keys_to_annotate[mars_key].append(key)
 
         # keys should be something like ["obstype", "codetype", "varno"]
@@ -239,13 +248,12 @@ class ODCEncoder(Encoder):
             except ValueError as e:
                 print(col)
                 raise e
-        
+
         # Add in all the value columns
         if not self.globals.split_data_columns:
             for name in msg.metadata.observation_variable.split(","):
                 output_data[name] = msg.data[name]
 
-        
         return pd.DataFrame(output_data)
 
     def encode(self, msg: TabularMessage | FinishMessage) -> Iterable[FileMessage]:
@@ -269,7 +277,7 @@ class ODCEncoder(Encoder):
         logger.debug(mars_request)
 
         logger.debug(f"Generated MARS keys for {msg}")
-        mars_request = self.fdb_schema.parse(mars_request)
+        mars_request, schema_branch = self.fdb_schema.parse(mars_request)
 
         for k, v in mars_request.items():
             logger.debug(v.info())
@@ -297,14 +305,17 @@ class ODCEncoder(Encoder):
             assert msg.data[key].nunique() == 1
             additional_metadata[key] = msg.data[key].iloc[0]
 
-        additional_metadata["mars_request"] = str(mars_request.as_strings())
+        additional_metadata["mars_request"] = json.dumps(mars_request.as_strings())
 
-        additional_metadata["columns"] = json.dumps({
-            key.name : {
-                "description": key.column_description
-            } 
-            for key in self.MARS_keys
-        })
+        additional_metadata["columns"] = json.dumps(
+            {
+                key.name: {
+                    "description": key.column_description,
+                    # "unique_values": str(msg.data[key.name].unique()) if key.name in msg.data else None,
+                }
+                for key in self.MARS_keys
+            }
+        )
 
         if self.one_file_per_granule:
             f = "outputs/{source}/odb/{observation_variable}/{date}_{time:04d}.odb"
@@ -339,7 +350,7 @@ class ODCEncoder(Encoder):
                 # Check that the target ODC dtype is compatible with the current representation
                 # i.e we don't want to try to coerce strings to DataType.REAL
 
-                select_codec(col.name, data, col.dtype, None)
+                codec = select_codec(col.name, data, col.dtype, None)
                 # logger.debug(f"Chose codec {codec} for {col.name}, {data.dtype=}, {col.dtype=}")
             except AssertionError:
                 raise ValueError(

@@ -171,6 +171,13 @@ class Key:
 
     def as_string(self):
         return self.key_spec.type.format(self.value)
+    
+    def as_json(self):
+        return dict(
+            key = self.key,
+            value = self.as_string(),
+            reason = self.reason,
+        )
 
 
 class MARSRequest(dict):
@@ -193,6 +200,9 @@ class MARSRequest(dict):
 
     def as_strings(self):
         return {k: v.as_string() for k, v in self.items()}
+    
+    def as_json(self):
+        return [k.as_json() for k, v in self.items()]
 
 
 class FDBSchema:
@@ -247,7 +257,7 @@ class FDBSchema:
             return Key(key_spec.key, value, key_spec, "Incorrect Value", odb_tables.get(key))
 
     @classmethod
-    def _DFS_match(cls, tree: list, request: dict[str, Any]) -> tuple[bool, list[Key]]:
+    def _DFS_match(cls, tree: list, request: dict[str, Any]) -> tuple[bool | list, list[Key]]:
         """Do a DFS on the schema tree, returning the deepest matching path
         At each stage return whether we matched on this path, and the path itself.
 
@@ -286,21 +296,25 @@ class FDBSchema:
 
             # If this branch matches, terminate the DFS and use this.
             if matched:
-                return matched, branch_path
+                return branch, branch_path
             else:
                 branches.append(branch_path)
 
         # If no branch matches, return the one with the deepest match
         return False, max(branches, key=len)
-
-    def parse(self, request: dict[str, Any]) -> MARSRequest:
+    
+    def matches(self, request: dict[str, Any]):
         request, odb_tables = self.strip_ODB_table_keys(request)
-        matches, path = self._DFS_match(self.schemas, request)
+        return self._DFS_match(self.schemas, request)
 
-        if not matches:
+    def parse(self, request: dict[str, Any]) -> tuple[MARSRequest, list]:
+        request, odb_tables = self.strip_ODB_table_keys(request)
+        schema_branch, path = self._DFS_match(self.schemas, request)
+
+        if not schema_branch:
             raise ValueError("Given request does not match any schema!\n" + "\n".join(k.info() for k in path))
 
-        return MARSRequest({key.key: key for key in path})
+        return MARSRequest({key.key: key for key in path}), schema_branch
 
 
 class FDBSchemaFile(FDBSchema):
