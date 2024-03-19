@@ -14,6 +14,7 @@ from io import StringIO
 from collections import defaultdict
 from datetime import datetime
 import json
+import pyodc
 
 from .fdb_types import FDBType, FDB_type_to_implementation
 
@@ -195,6 +196,9 @@ class MARSRequest(dict):
         )
         return dataframe_to_html(df)
 
+    def __bool__(self):
+        return all(self.values())
+
     def as_dict(self):
         return {k: v.value for k, v in self.items()}
 
@@ -222,7 +226,6 @@ class FDBSchema:
         g = list(m.groups())
         types, schemas = post_process(g)
         types = {key: FDB_type_to_implementation[type] for key, type in types.items()}
-        print(types)
         self.schemas = determine_types(types, schemas)
 
     def __repr__(self):
@@ -315,6 +318,12 @@ class FDBSchema:
             raise ValueError("Given request does not match any schema!\n" + "\n".join(k.info() for k in path))
 
         return MARSRequest({key.key: key for key in path}), schema_branch
+    
+    def request_from_odb(self, fileorbuffer):
+        df = pyodc.read_odb(fileorbuffer, single = True)
+        request = {key : value for key, value in zip(df.columns, df.iloc[0])}
+        match, branch = self.parse(request)
+        return match, branch
 
 
 class FDBSchemaFile(FDBSchema):
