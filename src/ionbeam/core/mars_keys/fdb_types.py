@@ -25,7 +25,7 @@ class FDBType:
             return False
 
     def format(self, s: Any) -> str:
-        return str(s)
+        return str(s).lower()
 
     def parse(self, s: str) -> Any:
         return s
