@@ -242,6 +242,17 @@ class FDBSchema:
             _request[key] = v
             odb_tables[key] = odb_table
         return _request, odb_tables
+    
+    def split_request(self, request: dict[str, Any]) -> tuple[dict, MARSRequest]:
+        """Use the schema to split a request into parts in the schema 
+        and keys values pairs like filter that are really arguments
+        
+        returns arguments, mars_request
+        """
+        _, best_match = self.matches(request)
+        keys = set(k.key for k in best_match)
+        arguments = {k : v for k,v in request.items() if k not in keys}
+        return arguments, MARSRequest({key.key: key for key in best_match})
 
     @classmethod
     def consume_key(cls, key_spec: KeySpec, request: dict[str, Any], odb_tables: dict[str, str] = {}) -> Key:
