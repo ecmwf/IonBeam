@@ -17,8 +17,8 @@ import sys
 
 import logging
 from rich.logging import RichHandler
-import dataclasses
-import yaml
+import pdb
+import traceback
 
 if __name__ == "__main__":
     # Stages:
@@ -86,9 +86,42 @@ if __name__ == "__main__":
         help="The path to a file to send the logs to.",
     )
 
+    parser.add_argument(
+        "--simple-output",
+        action="store_true",
+        help="If set, turns richely formatted text output off. Use this if using breakpoint() in the code.",
+    )
+
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="If set, drops into a debugger on error.",
+    )
+
+    parser.add_argument(
+        "--init-db",
+        action="store_true",
+        help="(Re)initialise the SQL database. THIS WIPES ALL SQL DATA!",
+    )
+
+
     args = parser.parse_args()
 
-    handlers = [RichHandler(markup=True, rich_tracebacks=True)]
+    handlers = []
+
+    if args.simple_output:
+        handlers.append(logging.StreamHandler())
+        prompt = input
+    else:
+       from rich.traceback import install
+       from rich.prompt import Prompt
+       install(show_locals=False)
+
+       handlers.append(RichHandler(markup=True, rich_tracebacks=True))
+
+       # override the input builtin when using fancy output
+       prompt = Prompt.ask
+    
     if args.logfile:
         handlers.append(logging.FileHandler(args.logfile))
 
@@ -104,7 +137,7 @@ if __name__ == "__main__":
     from .core.config_parser import parse_config
     from .core.bases import Source, Aggregator
 
-    globals, actions = parse_config(args.config_folder, offline=args.offline, overwrite=args.overwrite)
+    config, actions = parse_config(args.config_folder, offline=args.offline, overwrite=args.overwrite)
 
     sources, downstream_actions = [], []
     for action in actions:
@@ -114,16 +147,16 @@ if __name__ == "__main__":
             downstream_actions.append(action)
 
     logger.info(f"Globals:")
-    logger.info(f"    Data Path: {globals.globals.data_path}")
-    logger.info(f"    Config Path: {globals.globals.config_path}")
-    logger.info(f"    Data Path: {globals.globals.data_path}")
-    logger.info(f"    Offline: {globals.globals.offline}")
-    logger.info(f"    Overwrite: {globals.globals.overwrite}")
-    if globals.globals.ingestion_time_constants is not None:
+    logger.info(f"    Data Path: {config.globals.data_path}")
+    logger.info(f"    Config Path: {config.globals.config_path}")
+    logger.info(f"    Data Path: {config.globals.data_path}")
+    logger.info(f"    Offline: {config.globals.offline}")
+    logger.info(f"    Overwrite: {config.globals.overwrite}")
+    if config.globals.ingestion_time_constants is not None:
         logger.info(f"    Ingestion Time Constants:")
-        logger.info(f"         Query Timespan: {tuple(d.isoformat() for d in globals.globals.ingestion_time_constants.query_timespan)}")  # fmt: skip
-        logger.info(f"         Emit After (Hours): {globals.globals.ingestion_time_constants.emit_after_hours}")
-        logger.info(f"         Granularity: {globals.globals.ingestion_time_constants.granularity}")
+        logger.info(f"         Query Timespan: {tuple(d.isoformat() for d in config.globals.ingestion_time_constants.query_timespan)}")  # fmt: skip
+        logger.info(f"         Emit After (Hours): {config.globals.ingestion_time_constants.emit_after_hours}")
+        logger.info(f"         Granularity: {config.globals.ingestion_time_constants.granularity}")
 
     logger.info("Sources")
     for i, a in enumerate(sources):
@@ -131,6 +164,18 @@ if __name__ == "__main__":
 
     if args.validate_config:
         sys.exit()
+
+    if args.init_db:
+        logger.warning("Wiping the postgres database!")
+        if prompt("Are you sure you want to wipe the postgres database? y/n: ") != "y": sys.exit()
+        from ionbeam.metadata.db import init_db
+        from sqlalchemy import create_engine, URL
+        sql_engine = create_engine(URL.create(
+            "postgresql+psycopg2", **config.globals.secrets["postgres_database"],
+        ), echo = False)
+        init_db(sql_engine, config.globals.canonical_variables)
+        logger.warning("SQL Database wiped and reinitialised.")
+
 
     if "finish_after" in args:
         logger.warning(f"Telling all sources to finish after emitting {args.finish_after} messages")
@@ -140,6 +185,12 @@ if __name__ == "__main__":
     from .core.singleprocess_pipeline import singleprocess_pipeline
 
     try:
-        singleprocess_pipeline(sources, downstream_actions, emit_partial=args.emit_partial)
-    except Exception:
-        logger.exception("Exception during run:")
+        singleprocess_pipeline(sources, downstream_actions, emit_partial=args.emit_partial, simple_output = args.simple_output or args.debug)
+    except Exception as e:
+        if args.debug:
+            extype, value, tb = sys.exc_info()
+            traceback.print_exc()
+            pdb.post_mortem(tb)
+        else:
+            raise e
+

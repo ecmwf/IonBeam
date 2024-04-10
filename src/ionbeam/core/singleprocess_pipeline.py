@@ -80,8 +80,15 @@ def customProgress():
         TextColumn("{task.completed}"),
     )
 
+class DummyProgress():
+    "A dummy version of the RICH progress object allowing it to be turned off"
+    def __enter__(self, *args, **kwargs): return self
+    def __exit__(self, *args, **kwargs): pass
+    def add_task(self, *args, **kwargs): pass
+    def update(self, *args, **kwargs): pass
 
-def singleprocess_pipeline(sources, actions, emit_partial: bool):
+
+def singleprocess_pipeline(sources, actions, emit_partial: bool, simple_output : bool = False):
     logger.info("Starting single threaded execution...")
 
     source = roundrobin(sources)
@@ -99,7 +106,9 @@ def singleprocess_pipeline(sources, actions, emit_partial: bool):
     total_input_messages = 0
     processed_messages = 0
 
-    with customProgress() as progress:
+    ProgressClass = DummyProgress if simple_output else customProgress 
+
+    with ProgressClass() as progress:
         message_queue_bar = progress.add_task("[red]Input Queue", total=None)
         processed_messages_bar = progress.add_task("[yellow]Actions Run", total=None)
         finished_message_bar = progress.add_task("[green]Finished Messages", total=None)
