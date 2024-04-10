@@ -11,7 +11,6 @@
 from .csv import CSVParser
 from .csv_file_chunker import CSVChunker
 from .generate_metadata import GenerateMetaData
-from .filter import DateFilter
 
 __all__ = [
     "CSVParser",
