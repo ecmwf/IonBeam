@@ -116,9 +116,11 @@ class MT_Session:
     offset_tz: str
     start_time: datetime
     author: str
+    raw_json: dict = dataclasses.field(repr=False)
     end_time: datetime | None
     columns: List[str]
     living_lab: str | None = None
+
 
     def __init__(self, **d):
         self.id = SessionId(d["_id"])
@@ -130,6 +132,7 @@ class MT_Session:
         self.end_time = datetime.fromisoformat(d["endTime"]) if "endTime" in d else None
         self.columns = [k for k in d if isinstance(d[k], dict) and "avgVal" in d[k]]  # filter for nonzero data
         self.author = d["by"]
+        self.raw_json = d
 
 
 @dataclasses.dataclass
