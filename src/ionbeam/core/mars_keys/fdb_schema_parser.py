@@ -71,6 +71,11 @@ class KeySpec:
         if self.flag is None:
             return False
         return "?" in self.flag
+    
+    def is_allable(self):
+        if self.flag is None:
+            return False
+        return "*" in self.flag
 
 
 @dataclass(frozen=True)
@@ -111,7 +116,7 @@ fdb_schema = pe.compile(
     KeySpecs < KeySpec_ws ("," KeySpec_ws)*
     KeySpec_ws < KeySpec
     KeySpec <- key:String (flag:Flag)? (type:Type)? (values:Values)? ([ ]* comment:Comment)?
-    Flag <- ~("?" / "-")
+    Flag <- ~("?" / "-" / "*")
     Type <- ":" [ ]* String
     Values <- "=" String ("/" String)*
 
@@ -165,10 +170,13 @@ class Key:
     odb_table: str | None = None
 
     def __bool__(self):
-        return self.reason in {"Matches", "Skipped"}
+        return self.reason in {"Matches", "Skipped", "Select All"}
+    
+    def emoji(self):
+        return {"Matches" : "✅", "Skipped" : "⏭️", "Select All" : "★"}.get(self.reason, '❌')
 
     def info(self):
-        return f"{'✅' if self else '❌'} {self.key:<12}= {str(self.value):<12} ({self.key_spec}) {self.reason if not self else ''}"
+        return f"{self.emoji()} {self.key:<12}= {str(self.value):<12} ({self.key_spec}) {self.reason if not self else ''}"
 
     def as_string(self):
         return self.key_spec.type.format(self.value)
@@ -185,7 +193,7 @@ class MARSRequest(dict):
     def _repr_html_(self):
         df = pd.DataFrame.from_records(
             dict(
-                Matches="✅" if k else "❌",
+                Matches=k.emoji(),
                 Key=k.key,
                 Value=k.value,
                 Key_spec=k.key_spec,
@@ -215,7 +223,7 @@ class FDBSchema:
     Has methods to validate and convert request dictionaries to a mars request form with validation and type information.
     """
 
-    def __init__(self, string):
+    def __init__(self, string, defaults : dict[str, str] = {}):
         """
         1. Use a PEG parser on a schema string,
         2. Separate the output into schemas and typedefs
@@ -227,9 +235,10 @@ class FDBSchema:
         types, schemas = post_process(g)
         types = {key: FDB_type_to_implementation[type] for key, type in types.items()}
         self.schemas = determine_types(types, schemas)
+        self.defaults = defaults
 
     def __repr__(self):
-        return json.dumps(self.schemas, indent=4, default=repr)
+        return json.dumps(dict(schemas = self.schemas, defaults = self.defaults), indent=4, default=repr)
 
     def strip_ODB_table_keys(self, request: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
         "Filter out at ODB keys of the form 'key@table' from the request and return those separately"
@@ -262,6 +271,8 @@ class FDBSchema:
         except KeyError:
             if key_spec.is_optional():
                 return Key(key_spec.key, "", key_spec, "Skipped", None)
+            if key_spec.is_allable():
+                return Key(key_spec.key, "", key_spec, "Select All", None)
             else:
                 return Key(key_spec.key, "", key_spec, "Key Missing", odb_tables.get(key))
 
@@ -319,11 +330,11 @@ class FDBSchema:
     
     def matches(self, request: dict[str, Any]):
         request, odb_tables = self.strip_ODB_table_keys(request)
+        request = request | self.defaults
         return self._DFS_match(self.schemas, request)
 
     def parse(self, request: dict[str, Any]) -> tuple[MARSRequest, list]:
-        request, odb_tables = self.strip_ODB_table_keys(request)
-        schema_branch, path = self._DFS_match(self.schemas, request)
+        schema_branch, path = self.matches(request)
 
         if not schema_branch:
             raise ValueError("Given request does not match any schema!\n" + "\n".join(k.info() for k in path))
