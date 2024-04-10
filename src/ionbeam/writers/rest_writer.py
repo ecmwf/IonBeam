@@ -32,7 +32,6 @@ import pyodc as odc
 from io import BytesIO
 from dataclasses import dataclass
 import requests
-from IPython.display import display, HTML
 import json
 
 @dataclass
@@ -54,7 +53,7 @@ class IonBeamAPI:
         try:
             return resp.json()
         except json.JSONDecodeError:
-            display(HTML(resp.text))
+            logger.warning(resp.text)
             return resp.text
             
     
