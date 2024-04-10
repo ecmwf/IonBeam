@@ -261,7 +261,11 @@ class ODCEncoder(Encoder):
             return
 
         if self.globals.split_data_columns:
+            # Todo: think more about the case where we're emitting a variable like pressure both as an observation and an id'ing column
+            if isinstance(msg.data[msg.metadata.observation_variable], pd.DataFrame):
+                raise ValueError(f"Data columns conatains duplicated entry! {msg.data[msg.metadata.observation_variable].columns}")
             obsval_dtype = msg.data[msg.metadata.observation_variable].dtype
+    
             if str(obsval_dtype).startswith("str") or str(obsval_dtype) == "object":
                 logger.warning(
                     f"Can't output {msg.metadata.observation_variable} \
