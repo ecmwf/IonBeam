@@ -24,7 +24,7 @@ from .history import (
 )
 from .mars_keys import MARSRequest, FDBSchema
 from datetime import datetime, timedelta
-
+import yaml
 
 @dataclasses.dataclass(unsafe_hash=True)
 class MetaData:
@@ -34,6 +34,7 @@ class MetaData:
     time_slice: pandas.Period | None = None
     encoded_format: str | None = None
     filepath: Path | None = None
+    variables: list[str] | None = None
     mars_request: MARSRequest = dataclasses.field(default_factory=MARSRequest)
     # unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
 
@@ -131,7 +132,7 @@ class CanonicalVariable:
     reportype: int | None = None
 
     def __repr__(self):
-        return f"CanonicalVariable({self.name})"
+        return f"CanonicalVariable(name={self.name!r}, unit={self.unit!r}, desc={self.desc!r})"
 
 @dataclasses.dataclass
 class IngestionTimeConstants:
@@ -142,6 +143,9 @@ class IngestionTimeConstants:
 
     def __post_init__(self):
         def date_eval(s): 
+            try: 
+                return datetime.fromisoformat(s)
+            except: pass
             try:
                 return eval(s, dict(datetime=datetime, timedelta=timedelta))
             except SyntaxError as e:
@@ -155,6 +159,7 @@ class Globals:
     canonical_variables: List[CanonicalVariable]
     config_path: Path
     data_path: Path
+    secrets_file: Path
     fdb_schema_path: Path
     metkit_language_template: Path
     offline: bool = False
@@ -163,8 +168,7 @@ class Globals:
     split_data_columns: bool = True
     code_source: CodeSourceInfo | None = None
     fdb_schema: FDBSchema | None = None
-    
-
+    secrets: dict | None = None
 
 
 
@@ -180,6 +184,10 @@ class Action:
     def init(self, globals):
         "Initialise self with access to the global config variables"
         self.globals = globals
+
+        secrets_file = self.resolve_path(globals.secrets_file, type="config")
+        with open(secrets_file, "r") as f:
+            self.globals.secrets = yaml.safe_load(f)
 
     def _repr_html_(self):
         return action_to_html(self)
