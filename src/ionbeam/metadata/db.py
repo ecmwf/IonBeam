@@ -148,6 +148,7 @@ class Station(Base):
     def as_json(self):
         return dict(
             external_id = self.external_id,
+            platform = self.platform,
             location_point = to_shape(self.location_point).wkt,
             location_bbox = to_shape(self.location_bbox).wkt,
             location_hull = to_shape(self.location_hull).wkt,

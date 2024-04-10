@@ -166,8 +166,9 @@ if __name__ == "__main__":
         sys.exit()
 
     if args.init_db:
-        logger.warning("Wiping the postgres database!")
-        if prompt("Are you sure you want to wipe the postgres database? y/n: ") != "y": sys.exit()
+        host = config.globals.secrets['postgres_database']['host']
+        logger.warning(f"Wiping the postgres database as {host}!")
+        if host != "localhost" and prompt(f"Are you sure you want to wipe the postgres database at {host}? y/n: ") != "y": sys.exit()
         from ionbeam.metadata.db import init_db
         from sqlalchemy import create_engine, URL
         sql_engine = create_engine(URL.create(

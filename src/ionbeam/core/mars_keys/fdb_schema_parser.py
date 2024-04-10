@@ -211,7 +211,7 @@ class MARSRequest(dict):
         return {k: v.value for k, v in self.items()}
 
     def as_strings(self):
-        return {k: v.as_string() for k, v in self.items()}
+        return {k: v.as_string() for k, v in self.items() if v}
     
     def as_json(self):
         return [k.as_json() for k, v in self.items()]
@@ -333,10 +333,10 @@ class FDBSchema:
         request = request | self.defaults
         return self._DFS_match(self.schemas, request)
 
-    def parse(self, request: dict[str, Any]) -> tuple[MARSRequest, list]:
+    def parse(self, request: dict[str, Any], partial = False) -> tuple[MARSRequest, list]:
         schema_branch, path = self.matches(request)
 
-        if not schema_branch:
+        if not schema_branch and not partial:
             raise ValueError("Given request does not match any schema!\n" + "\n".join(k.info() for k in path))
 
         return MARSRequest({key.key: key for key in path}), schema_branch

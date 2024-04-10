@@ -72,6 +72,9 @@ def minutes_with_fractional_seconds(msg: TabularMessage) -> pd.Series:
     dt = msg.data.time.dt
     return dt.minute + dt.second / 60
 
+def datetime(msg: TabularMessage) -> pd.Series:
+    return msg.data.time.dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+
 
 def altitude(msg: TabularMessage) -> pd.Series:
     "populates stalt@hdr"
@@ -98,11 +101,7 @@ def station_id(msg: TabularMessage) -> pd.Series:
     else:
         strings = msg.data["track_id"]
 
-    def f(string):
-        return hashlib.sha256(str(string).encode()).hexdigest()[:8]
-
     return strings
-    return strings.apply(f)
 
 
 def dataset(msg: TabularMessage) -> pd.Series:

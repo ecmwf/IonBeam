@@ -70,7 +70,7 @@ class IonBeamAPI:
         files = {'file': file}
         return self.session.post(f"{self.endpoint}/archive",
                                  files=files, 
-                                 params = dict(marsrequest = json.dumps(request)))
+                                 params = request)
 
 
 @dataclasses.dataclass
@@ -99,7 +99,7 @@ class RESTWriter(Writer):
                 resp = self.api.archive(f, request = request)
                 resp.raise_for_status()
                 logger.debug(resp.json())
-                raise Exception()
+                logger.info(f"Archiving to {self.endpoint}")
 
         metadata = self.generate_metadata(input_message, mars_request=input_message.metadata.mars_request)
         output_msg = FileMessage(metadata=metadata)
