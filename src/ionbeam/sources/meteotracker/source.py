@@ -136,6 +136,7 @@ class MeteoTrackerSource(Source):
             yield FileMessage(
                 metadata=self.generate_metadata(
                     filepath=path,
+                    variables = list(data.columns),
                 ),
             )
 
@@ -209,7 +210,7 @@ class MeteoTrackerSource(Source):
                 data = pd.read_csv(path)
             except UnicodeDecodeError:
                 logger.warning("{path} is not unicode!")
-                continue
+                raise
 
             if not self.all_filters(path, data):
                 continue
@@ -217,6 +218,7 @@ class MeteoTrackerSource(Source):
             yield FileMessage(
                 metadata=self.generate_metadata(
                     filepath=path,
+                    variables = list(data.columns),
                 ),
                 history=[
                     PreviousActionInfo(

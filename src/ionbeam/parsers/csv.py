@@ -161,6 +161,8 @@ class CSVParser(Parser):
 
         df = self.format_dataframe(df)
 
+        assert rawdata.metadata.variables is not None
+
         if self.globals.split_data_columns:
             # Split the data into data frames for each of the value types
             for variable_column, df in self.split_columns(df):
@@ -168,6 +170,7 @@ class CSVParser(Parser):
                     message=rawdata,
                     observation_variable=variable_column.name,
                     filepath=None,
+                    variables = [self.columns_mapping[v] for v in rawdata.metadata.variables if v in self.columns_mapping],
                 )
 
                 output_msg = TabularMessage(
