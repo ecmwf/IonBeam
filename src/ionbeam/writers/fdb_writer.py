@@ -112,17 +112,21 @@ class FDBWriter(Writer):
         for lib in self.debug:
             os.environ[f"{lib.upper()}_DEBUG"] = "1"
 
-        import pyfdb
-
-        fdb = pyfdb.FDB()
         request = input_message.metadata.mars_request.as_strings()
+
         logger.debug(f"MARS key for fdb archive: {json.dumps(request, indent=4)}")
 
         logger.debug(f"Installing metkit overlays")
         install_metkit_overlays(self.metkit_language_template, request.keys())
 
-        with open(input_message.metadata.filepath, "rb") as f:
-            fdb.archive(f.read())
+        import pyfdb # This has to happen late so that it pucks up the above.
+        fdb = pyfdb.FDB()
+
+        if len(list(fdb.list(request))) > 0 and not self.globals.overwrite:
+            logger.debug(f"Dropping data because it's already in the database.")
+        else:
+            with open(input_message.metadata.filepath, "rb") as f:
+                fdb.archive(f.read())
 
         metadata = self.generate_metadata(input_message, mars_request=input_message.metadata.mars_request)
         output_msg = FileMessage(metadata=metadata)
