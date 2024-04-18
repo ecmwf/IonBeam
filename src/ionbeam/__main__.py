@@ -134,7 +134,7 @@ if __name__ == "__main__":
     )
     logger = logging.getLogger("CMDLINE")
 
-    from .core.config_parser import parse_config
+    from .core.config_parser.config_parser import parse_config
     from .core.bases import Source, Aggregator
 
     config, actions = parse_config(args.config_folder, offline=args.offline, overwrite=args.overwrite)

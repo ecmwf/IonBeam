@@ -19,16 +19,15 @@ from collections import defaultdict
 import yaml
 from yamlinclude import YamlIncludeConstructor
 
-from .bases import CanonicalVariable, Action, Globals
-from .history import describe_code_source, CodeSourceInfo
+from ..bases import CanonicalVariable, Action, Globals
+from ..history import describe_code_source, CodeSourceInfo
 from .config_parser_machinery import parse_config_from_dict, ConfigError
-from .mars_keys import FDBSchema
+from ..mars_keys import FDBSchema
 
 # # This line is necessary to automatically find all the subclasses of things like "Encoder"
-from .. import sources, parsers, aggregators, quality_assessment, encoders, writers
+from ... import sources, parsers, aggregators, quality_assessment, encoders, writers
 
 logger = logging.getLogger(__name__)
-
 
 # Set up the yaml parser to include line numbers with the key "__line__"
 class SafeLineLoader(yaml.SafeLoader):
@@ -106,7 +105,9 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
         global_config_file = config_dir
         config_dir = config_dir.parent
 
+
     YamlIncludeConstructor.add_to_loader_class(loader_class=SafeLineLoader, base_dir=str(config_dir))
+    
 
     logger.warning(f"Configuration Directory: {config_dir}")
     logger.warning(f"Global config file: {global_config_file}")
@@ -120,32 +121,36 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
         # merge config from the command line into the global config keys
         data["globals"] |= overrides
 
-        global_config = parse_config_from_dict(Config, data, filepath=global_config_file)
+        config = parse_config_from_dict(Config, data, filepath=global_config_file)
 
     logger.debug(f"Loaded global config...")
+    
+    if config.globals.config_path is None:
+        config.globals.config_path = config_dir
+
 
     # Resolve the paths in the global config relative to the current directory
-    for name in ["data_path", "config_path", "fdb_schema_path", "metkit_language_template"]:
-        path = getattr(global_config.globals, name)
+    for name in ["data_path", "fdb_schema_path", "metkit_language_template"]:
+        path = getattr(config.globals, name)
         if not path.is_absolute():
             path = (config_dir.parent / path).resolve()
-        setattr(global_config.globals, name, path)
-        logger.debug(f"Resolved global_config.globals.{name} to {path}")
+        setattr(config.globals, name, path)
+        logger.debug(f"Resolved config.globals.{name} to {path}")
 
     # Parse the global fdb schema file
     # This is used to validate odb files during encoding and before writing to the fdb
     # It is also used to generate overlays for metkit/odb/marsrequest.yaml and metkit/language.yaml
     # That is done in lazily FDBWriter
-    with open(global_config.globals.fdb_schema_path) as f:
-        global_config.globals.fdb_schema = FDBSchema(f.read())
+    with open(config.globals.fdb_schema_path) as f:
+        config.globals.fdb_schema = FDBSchema(f.read())
 
     # # Figure out the git status clean/dirty and the current git hash
-    global_config.globals.code_source = describe_code_source()
-    logger.debug(f"Checked repository source state: {global_config.globals.code_source}")
+    config.globals.code_source = describe_code_source()
+    logger.debug(f"Checked repository source state: {config.globals.code_source}")
 
     # Loop over one level of subdirectories and read in the actions from each one
     action_source_files = {
-        source_name: config_dir / source_name / "actions.yaml" for source_name in global_config.sources
+        source_name: config_dir / source_name / "actions.yaml" for source_name in config.sources
     }
     action_source_files["base"] = config_dir / "actions.yaml"
 
@@ -154,9 +159,9 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
     for name, file in action_source_files.items():
         assert file.exists()
         logger.debug(f"Parsing {file}")
-        source = parse_sub_config(file, globals=global_config.globals, schema=SubConfig)
+        source = parse_sub_config(file, globals=config.globals, schema=SubConfig)
         sources[name] = source
         actions.extend(source.actions)
 
-    global_config.sources = sources
-    return global_config, actions
+    config.sources = sources
+    return config, actions

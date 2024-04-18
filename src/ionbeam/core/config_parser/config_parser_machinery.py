@@ -4,22 +4,13 @@ from dataclasses import dataclass, field, fields, asdict, is_dataclass
 from typing import Union, get_origin, get_args, List
 import typing
 from pathlib import Path
+from .common import ConfigError, ConfigMatchError
 
 # TYPE_KEY is a special key that determines which class or type to pick in ambiguous cases.
 # Case 1: Unions: like "str | int"
 # Case 2: is the type specified is a class and name is given, the subclasses will be searched for one that matches.
 TYPE_KEY = "class"
 LINE_KEY = "__line__"  # special key that tells us what line we're on
-
-
-class ConfigError(Exception):
-    "Generic error from the config parser."
-    pass
-
-
-class ConfigMatchError(ConfigError):
-    "Raised when the yaml data keys do not match the specification from the python dataclasses."
-    pass
 
 
 class ConfigLineError(ConfigError):
