@@ -157,11 +157,11 @@ class IngestionTimeConstants:
 @dataclasses.dataclass
 class Globals:
     canonical_variables: List[CanonicalVariable]
-    config_path: Path
     data_path: Path
-    secrets_file: Path
-    fdb_schema_path: Path
     metkit_language_template: Path
+    fdb_schema_path: Path = Path("fdb_schema")
+    secrets_file: Path = Path("secrets.yaml")
+    config_path: Path | None = None
     offline: bool = False
     overwrite: bool = False
     ingestion_time_constants: IngestionTimeConstants | None = None
