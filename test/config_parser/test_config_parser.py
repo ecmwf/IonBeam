@@ -18,7 +18,7 @@ def test_config_parser():
         print(p)
         parse_config(p)
 
-    yaml_file = Path(
-        "/Users/math/git/iot-ingester-deployment/dockerfiles/config/iot-ingester/config.yaml"
-    ).resolve()
+    yaml_file = (Path(__file__) / "../../../test_data/config/ionbeam").resolve()
     parse_config(yaml_file)
+
+/Users/math/git/IonBeam-Deployment/docker/IonBeam/test/test_data/config/ionbeam

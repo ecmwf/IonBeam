@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class MultiFileSource(Source):
-    paths: List[str]
+    paths: List[str] = dataclasses.field(default_factory=list)
     basepath: Path = Path(".")
     finish_after: int | None = None
 

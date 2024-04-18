@@ -34,11 +34,25 @@ logger = logging.getLogger(__name__)
 # @todo - Processing of the various different types should be based on this class, or on derived types
 #         built in a factory. The work done in CSVParser is a bit yucky...
 
+# TODO: split the functionality of this up into:
+#     - parse CSV files 
+#     - rename columns
+#     - split output into one message per variable
 
 @dataclasses.dataclass
 class CSVParser(Parser):
-    identifying_columns: List[InputColumn]
-    value_columns: List[InputColumn]
+    """
+    Parse CSV files, rename their columns and split them into multiple messages based on observation variable.
+
+    Args:
+        identifying_columns: A list of columns that represent identifying information like lat, lon, altitude, time
+        value_columns: A list of columns that represent measured values
+        metadata_columns: A list of columns that represent metadata like author or station_id
+        separator: The separator character to use.
+        custom_nans: A list of custom NaN values to use.
+    """
+    identifying_columns: List[InputColumn] = dataclasses.field(default_factory=list)
+    value_columns: List[InputColumn] = dataclasses.field(default_factory=list)
     metadata_columns: List[InputColumn] = dataclasses.field(default_factory=list)
     separator: str = ","
     custom_nans: List[str] | None = None

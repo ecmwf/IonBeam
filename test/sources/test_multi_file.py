@@ -17,7 +17,7 @@ from ionbeam.sources.multi_file import MultiFileSource
 
 examples_dir = Path(__file__).parents[2] / "examples"
 
-config = {"name": "multi-file", "basepath": examples_dir, "source": "test_datasource"}
+config = {"name": "multi-file", "basepath": examples_dir}
 
 test_paths = [
     ("test_data/file1", {"test_data/file1"}),  # a file

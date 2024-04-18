@@ -1,0 +1,232 @@
+# This file will contain a list of our canonical variables various metadata associated with them
+
+# This is our canonical name for each variable
+# Where possible I have used the same keys as defined by the WMO, see WMO_variables.yaml
+# When that's not possible we need to define the key, unit and definition
+# Possibly other variables too
+
+# for dtype use object aliases from https://pandas.pydata.org/docs/user_guide/basics.html#basics-dtypes
+# default dtype is float64
+
+- name: time
+  dtype: datetime64[ns, UTC]
+  desc: The time that the observation was made.
+
+- name: offset_tz
+  desc: Uncertain what this means in the Meteotracker data.
+  dtype: object
+
+- name: lat
+  unit: "°"
+  CRS: WGS84
+  desc: "The lattitude of the observation, referenced to WGS84 (EPSG: 4326)"
+
+- name: lon
+  unit: "°"
+  CRS: WGS84
+  desc: "The longitude of the observation, referenced to WGS84 (EPSG: 4326)"
+
+- name: altitude
+  unit: m
+  desc: "The altitude of the observation, referenced to WGS84 (EPSG: 4326)"
+
+- name: author
+  dtype: object
+  desc: The author field from the Meteotracker data
+
+- name: track_id
+  desc: A unique identifer for a single recorded track from a mobile sensor.
+  dtype: object
+
+- name: station_id
+  desc: A unique identifer for a stationary sensor.
+  dtype: object
+
+- name: sensor_type
+  dtype: object
+
+- name: location
+  dtype: int
+
+- name: observation_id
+  desc: A unique identifer for a stationary sensor.
+  dtype: object
+
+- name: air_temperature_near_surface
+  output: true
+  unit: K
+  codetype: 35 # Land TEMP
+  varno: 39 # 2m temperature (K)
+  obstype: 5 # TEMP
+  reportype: 1
+
+- name: relative_humidity_near_surface
+  output: true
+  unit: "%"
+  WMO: true # indicates this exact name is defined by the WMO
+  codetype: 14 # Automatic Land SYNOP
+  varno: 58 # 2m rel. humidity
+  obstype: 1 # SYNOP
+  reportype: 2
+
+- name: humidity_index
+  output: true
+  unit: K
+  reportype: 3
+
+- name: internal_temperature
+  output: true
+  unit: K
+  desc: The internal temperature of the sensor.
+  reportype: 4
+
+- name: vertical_temperature_gradient
+  output: true
+  desc: 
+  unit: "°C/100m"
+  reportype: 5
+
+- name: air_pressure_near_surface
+  output: true
+  unit: Pa
+  WMO: False #the WMO use hPa as the unit
+  reportype: 6
+
+- name: pressure_sealevel
+  unit: Pa
+  reportype: 7
+
+- name: co2
+  output: true
+  unit: ppm
+  WMO: true
+  reportype: 8
+
+- name: wind_gust
+  output: true
+  unit: m.s-1 
+  WMO: true
+  reportype: 9
+
+- name: wind_gust_direction
+  output: true
+  unit: "°"
+  reportype: 10
+
+- name: dew_point_temperature
+  output: true
+  unit: K
+  WMO: true
+  reportype: 11
+
+- name: wind_direction_near_surface
+  output: true
+  unit: "°"
+  WMO: true
+  reportype: 12
+
+- name: wind_speed_near_surface
+  output: true
+  unit: "m/s"
+  WMO: true
+  reportype: 13
+
+- name: rain_gauge
+  output: true
+  unit: "mm"
+  reportype: 14
+
+- name: wind_direction
+  output: true
+  unit: "Degrees"
+  reportype: 15
+
+- name: anemometer
+  output: true
+  unit: "m/s"
+  reportype: 16
+
+
+- name: radiometer
+  unit: "W/m^2"
+- name: battery_level
+  unit: "V"
+  reportype: 17
+
+
+- name: thermometer_min
+  output: true
+  unit: K
+  reportype: 18
+
+- name: thermometer_max
+  output: true
+  unit: K
+  reportype: 19
+
+- name: signal_strength
+  unit: "CSQ"
+
+- name: altitude
+  unit: m
+
+- name: solar_radiation_index
+  unit: 1
+
+- name: bluetooth_RSSI
+  unit: dBm
+
+- name: carbon_dioxide
+  unit: ppm
+
+- name: pm1.0
+  unit: "μg/m3"
+
+- name: pm2.5
+  unit: "μg/m3"
+
+- name: pm10
+  unit: "μg/m3"
+
+- name: mass_concentration_PM1.0
+  unit: "μg/m3"
+
+- name: mass_concentration_PM2.5
+  unit: "μg/m3"
+
+- name: mass_concentration_PM4.0
+  unit: "μg/m3"
+
+- name: mass_concentration_PM10
+  unit: "μg/m3"
+
+- name: number_concentration_PM0.5
+  unit: "#/cm3"
+
+- name: number_concentration_PM1.0
+  unit: "#/cm3"
+
+- name: number_concentration_PM2.5
+  unit: "#/cm3"
+
+- name: number_concentration_PM4.0
+  unit: "#/cm3"
+
+- name: number_concentration_PM10
+  unit: "#/cm3"
+
+- name: typical_particle_size
+  unit: "μm"
+
+- name: EPA_Air_Quality
+  unit: 1
+
+- name: Fast_Air_Quality
+  unit: 1
+
+- name: ozone
+  unit: "ppb"
+
+- name: potential_temperature
+  unit: K
+

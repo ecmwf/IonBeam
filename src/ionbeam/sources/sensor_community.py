@@ -36,10 +36,10 @@ class month_page:
 
 @dataclasses.dataclass
 class SensorCommunitySource(Source):
-    cache_file: Path
-    cache_directory: Path
-    start_date: str
-    end_date: str
+    secrets_file: Path = Path("secrets.yaml")
+    cache_directory: Path = Path("inputs/sensor.community")
+    start_date: str = "2022-01-01"
+    end_date: str = "2023-11-30"
     finish_after: int | None = None
     base_url: str = "https://archive.sensor.community/"
 

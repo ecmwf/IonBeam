@@ -13,7 +13,7 @@ from typing import Literal, List, Dict, Iterable
 from pathlib import Path
 
 from ..core.bases import TabularMessage, FinishMessage, FileMessage, Encoder
-from ..core.config_parser import ConfigError
+from ..core.config_parser.config_parser import ConfigError
 
 import pandas as pd
 
@@ -175,8 +175,15 @@ class MARS_Key:
 
 @dataclasses.dataclass
 class ODCEncoder(Encoder):
-    output: str
-    MARS_keys: List[MARS_Key]
+    """
+    Encode data to ODB files.
+
+    Args:
+        output: A format string for the output path for each file.
+        MARS_keys: Determines the output columns
+    """
+    output: str = "outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb"
+    MARS_keys: List[MARS_Key] = dataclasses.field(default_factory=list)
     one_file_per_granule: bool = True
 
     "Columns names to extract and put into the odb properties field"

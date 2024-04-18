@@ -24,12 +24,12 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class CIMASource(Source):
-    secrets_file: Path
-    cache_directory: Path
-    start_date: str
-    end_date: str
-    frequency: str
-    static_metadata_columns: List[InputColumn]
+    secrets_file: Path = Path("secrets.yaml")
+    cache_directory: Path = Path("inputs/acronet")
+    start_date: str = "2022-01-01"
+    end_date: str = "2023-11-30"
+    frequency: str = "3D"
+    static_metadata_columns: List[InputColumn] = dataclasses.field(default_factory = list)
     finish_after: int | None = None
 
     def __str__(self):

@@ -31,12 +31,12 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class MeteoTrackerSource(Source):
-    secrets_file: Path
-    cache_directory: Path
+    secrets_file: Path = Path("secrets.yaml")
+    cache_directory: Path = Path("inputs/meteotracker")
 
     "The time interval to ingest, can be overidden by globals.source_timespan"
-    start_date: str
-    end_date: str
+    start_date: str = "2022-01-01"
+    end_date: str = "2023-11-30"
 
     "How many messages to emit before stopping, useful to debug runs."
     finish_after: int | None = None

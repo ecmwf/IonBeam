@@ -31,7 +31,7 @@ class WatchDirectorySource(PatternMatchingEventHandler, Source):
         :param case_sensitive: Specify if pattern matching is case sensitive
     """
 
-    paths: List[str]
+    paths: List[str] = dataclasses.field(default_factory=list)
     patterns: str | List[str] | None = None
     include_dirname: bool = False
     ignore_patterns: List[str] | None = None

@@ -1,0 +1,43 @@
+globals:
+  
+  # A list of observables with name, unit and other metadata that the incoming datastreams get mapped to.
+  canonical_variables: !include canonical_variables.yaml
+
+  # Where to look for other config files (TODO: is this necessary?)
+  config_path: ./ionbeam/
+
+  # Where to look for input data
+  data_path: ../data/
+
+  secrets_file: secrets.yaml
+
+  # Whether sources should attempt to access external services or just use locally cached data
+  # Can be overridden at the command line
+  offline: false
+
+  overwrite: false
+
+ # Global constants that override things in the sources and timeaggregator
+  ingestion_time_constants:
+    query_timespan: 
+      # - datetime.now() - timedelta(hours = 3)
+      # - datetime.now()
+      - "2022-01-01"
+      - "2025-01-01"
+    
+    # How old a data granule must be before the aggregator considers it to be "complete"
+    # This allows for late data to arrive
+    emit_after_hours: 1 
+
+    # How big a data granule should be
+    granularity: 1h
+
+    # In what direction the time aggregator expects data to arrive. 
+    time_direction: forwards
+
+  
+  fdb_schema_path: ionbeam/fdb_schema
+  metkit_language_template: metkit/language.yaml.template
+
+sources:
+  - test_source_1
