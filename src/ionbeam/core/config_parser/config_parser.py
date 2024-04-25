@@ -130,7 +130,7 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
 
 
     # Resolve the paths in the global config relative to the current directory
-    for name in ["data_path", "fdb_schema_path", "metkit_language_template"]:
+    for name in ["data_path", "fdb_schema_path", "metkit_language_template", "secrets_file"]:
         path = getattr(config.globals, name)
         if not path.is_absolute():
             path = (config_dir.parent / path).resolve()

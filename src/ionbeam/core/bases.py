@@ -36,7 +36,7 @@ class MetaData:
     filepath: Path | None = None
     variables: list[str] | None = None
     mars_request: MARSRequest = dataclasses.field(default_factory=MARSRequest)
-    # unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
+    unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
 
     def __str__(self):
         return f"{self.__class__.__name__}(source = {self.source}, variable = {self.observation_variable})"

@@ -17,6 +17,7 @@ from .cima.source import CIMASource
 from .sensor_community import SensorCommunitySource
 from .multi_file import MultiFileSource
 from .watch_directory import WatchDirectorySource
+from .smart_citizen_kit import SmartCitizenKitSource
 
 __all__ = [
     "MeteoTrackerSource",
