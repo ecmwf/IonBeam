@@ -23,10 +23,11 @@ class GenerateMetaData(Parser):
 
     def init(self, globals):
         super().init(globals)
-
         self.sql_engine = create_engine(URL.create(
             "postgresql+psycopg2",
             **self.globals.secrets["postgres_database"],
+            host = self.globals.postgres_database["host"],
+            port = self.globals.postgres_database["port"],
         ), echo = False)
 
 
@@ -35,7 +36,8 @@ class GenerateMetaData(Parser):
                 return
             
             with Session(self.sql_engine) as db_session:
-                mt.add_meteotracker_track_to_metadata_store(db_session, msg)
+                already_there, track = mt.add_meteotracker_track_to_metadata_store(db_session, msg)
+
 
             output_msg = TabularMessage(
                 metadata=self.generate_metadata(

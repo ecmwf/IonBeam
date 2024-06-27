@@ -104,6 +104,17 @@ if __name__ == "__main__":
         help="(Re)initialise the SQL database. THIS WIPES ALL SQL DATA!",
     )
 
+    parser.add_argument(
+        "--environment",
+        "-e",
+        help="Which environment to use, local, dev or test",
+    )
+
+    parser.add_argument(
+        "--namespace",
+        help="Which namespace to us for the postgres database, defaults to the environment name.",
+    )
+
 
     args = parser.parse_args()
 
@@ -137,7 +148,11 @@ if __name__ == "__main__":
     from .core.config_parser.config_parser import parse_config
     from .core.bases import Source, Aggregator
 
-    config, actions = parse_config(args.config_folder, offline=args.offline, overwrite=args.overwrite)
+    config, actions = parse_config(args.config_folder,
+                                    offline=args.offline,
+                                    overwrite=args.overwrite,
+                                    environment=args.environment,
+                                    namespace=args.namespace,)
 
     sources, downstream_actions = [], []
     for action in actions:

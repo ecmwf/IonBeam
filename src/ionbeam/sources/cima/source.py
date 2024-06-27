@@ -10,42 +10,43 @@
 
 import logging
 import pandas as pd
-from typing import Literal, List
+from typing import Literal, List, Iterable
 from pathlib import Path
+from datetime import datetime
 
 import dataclasses
 
-from ...core.bases import FileMessage, Source, MetaData, InputColumn
+from ...core.bases import TabularMessage, Source, MetaData, InputColumn
+from ..API_sources_base import RESTSource
 
 from .cima import CIMA_API
 
 logger = logging.getLogger(__name__)
 
-
 @dataclasses.dataclass
-class CIMASource(Source):
-    secrets_file: Path = Path("secrets.yaml")
-    cache_directory: Path = Path("inputs/acronet")
-    start_date: str = "2022-01-01"
-    end_date: str = "2023-11-30"
-    frequency: str = "3D"
-    static_metadata_columns: List[InputColumn] = dataclasses.field(default_factory = list)
-    finish_after: int | None = None
-
-    def __str__(self):
-        cls = self.__class__.__name__
-        return f"{cls}({self.start_date} - {self.end_date})"
+class AcronetSource(RESTSource):
+    """
+    """
+    cache_directory: Path = Path(f"inputs/acronet")
+    endpoint = "https://webdrops.cimafoundation.org/app/"
+    # endpoints_url = "https://testauth.cimafoundation.org/auth/realms/webdrops/.well-known/openid-configuration"
+    cache_version = 3 # increment this to invalidate the cache
 
     def init(self, globals):
         super().init(globals)
-        logger.debug(f"Initialialised CIMA source with {self.start_date=}, {self.end_date=}, {self.finish_after=}")
-        self.secrets_file = self.resolve_path(self.secrets_file, type="config")
-        self.cache_directory = self.resolve_path(self.cache_directory, type="data")
+        self.api = CIMA_API(globals.secrets["ACRONET"],
+                            cache_file=Path(self.cache_directory) / "cache.pickle",
+                            headers = globals.secrets["headers"],)
 
-    def generate(self):
-        # Do  API requests in chunks larger than the data granularity, upto 3 days
-        self.api = CIMA_API(self.secrets_file, cache_file=Path(self.cache_directory) / "cache.pickle")
-        dates = pd.date_range(start=self.start_date, end=self.end_date, freq=self.frequency)
+
+    def get_chunks(self, start_date : datetime, end_date: datetime) -> Iterable[dict]:
+        """
+        Return an iterable of objects representing chunks of data we should download from the API
+        """
+        # The maximum number of days we can request is 3
+        dates = pd.date_range(start=self.start_date, end=self.end_date, freq="3D")
+        
+        # Ensure the last date is included
         if dates[-1] != self.end_date:
             dates = pd.DatetimeIndex(
                 dates.union(
@@ -55,37 +56,43 @@ class CIMASource(Source):
                 )
             )
 
+        # Convert to ranges
         date_ranges = list(zip(dates[:-1], dates[1:]))
 
-        emitted_messages = 0
-        for s, e in date_ranges:
+        for start, end in date_ranges:
             for station in self.api.stations.values():
-                filename = f"CIMA_{station.id}_{s.isoformat()}_{e.isoformat()}.csv"
-                path = Path(self.cache_directory) / filename
-
-                if not path.exists():
-                    data = self.api.get_data_by_station(
-                        station_name=station.name,
-                        start_date=s,
-                        end_date=e,
-                        aggregation_time_seconds=60,
-                    )
-
-                    for column in self.static_metadata_columns:
-                        if hasattr(station, column.key):
-                            data[column.name] = getattr(station, column.key)
-
-                    data.to_csv(path, index=True, index_label="time")
-                    logger.debug(f"Yielding meteotracker CSV file with columns {data.columns}")
-
-                yield FileMessage(
-                    metadata=self.generate_metadata(
-                        filepath=path,
-                    ),
+                yield dict(
+                    key = f"{station.id}_{start.isoformat()}_{end.isoformat()}.pickle",
+                    station = station,
+                    start = start,
+                    end = end,
                 )
-                emitted_messages += 1
-                if self.finish_after is not None and emitted_messages >= self.finish_after:
-                    return
 
+    def download_chunk(self, chunk: dict):
+            station = chunk["station"]
+            try:
+                data = self.load_data_from_cache(chunk["key"])
+            except KeyError:
+                data = self.api.get_data_by_station(
+                    station_name=station.name,
+                    start_date=chunk["start"],
+                    end_date=chunk["end"],
+                    aggregation_time_seconds=60,
+                )
+                self.save_data_to_cache(data, chunk["key"])
 
-source = CIMASource
+            # Copy data in from the station object
+            for column in self.copy_metadata_to_columns:
+                if hasattr(station, column.key):
+                    data[column.name] = getattr(station, column.key)
+            
+            data["author"] = "Acronet"
+            
+
+            yield TabularMessage(
+                metadata=self.generate_metadata(
+                    variables = list(data.columns),
+                    unstructured = dict(station = station)
+                ),
+                data = data
+            )

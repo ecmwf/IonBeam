@@ -9,7 +9,7 @@
 # #
 
 import dataclasses
-from typing import Iterable, Callable, List, Literal, TypeVar, Any
+from typing import Iterable, Callable, List, Literal, TypeVar, Any, Annotated
 import re
 import pandas
 from pathlib import Path
@@ -25,9 +25,11 @@ from .history import (
 from .mars_keys import MARSRequest, FDBSchema
 from datetime import datetime, timedelta
 import yaml
+import uuid
 
 @dataclasses.dataclass(unsafe_hash=True)
 class MetaData:
+    source_action_id: uuid.UUID | None = None
     state: str | None = None
     source: None | str = None
     observation_variable: None | str = None
@@ -159,6 +161,7 @@ class Globals:
     canonical_variables: List[CanonicalVariable]
     data_path: Path
     metkit_language_template: Path
+    environment: str = "local"
     fdb_schema_path: Path = Path("fdb_schema")
     secrets_file: Path = Path("secrets.yaml")
     config_path: Path | None = None
@@ -167,8 +170,14 @@ class Globals:
     ingestion_time_constants: IngestionTimeConstants | None = None
     split_data_columns: bool = True
     code_source: CodeSourceInfo | None = None
-    fdb_schema: FDBSchema | None = None
+    fdb_schema: Annotated[FDBSchema, "post_init"] = dataclasses.field(kw_only=True)
     secrets: dict | None = None
+    api_hostname: str | None = None
+    postgres_database: dict | None = None
+    namespace: str | None = None
+
+    # When a class hasn't been instantiated yet use a string, see https://peps.python.org/pep-0484/#forward-references
+    actions: dict[uuid.UUID, "Action"] = dataclasses.field(default_factory=dict)
 
 
 
@@ -179,15 +188,14 @@ class Action:
     # kw_only is necessary so that classes that inherit from this one can have positional fields
     metadata: MetaData = dataclasses.field(default_factory=MetaData, kw_only=True)
     # code_source: CodeSourceInfo | None = dataclasses.field(default=None, kw_only=True)
-    globals: Globals | None = dataclasses.field(default=None, kw_only=True)
+    id: uuid.UUID = dataclasses.field(default_factory=uuid.uuid4, kw_only=True)
+    globals: Annotated[Globals, "post_init"] = dataclasses.field(kw_only=True)
 
-    def init(self, globals):
+    def init(self, globals : Globals):
         "Initialise self with access to the global config variables"
         self.globals = globals
-
-        secrets_file = self.resolve_path(globals.secrets_file, type="config")
-        with open(secrets_file, "r") as f:
-            self.globals.secrets = yaml.safe_load(f)
+        self.globals.actions[self.id] = self
+        self.metadata.source_action_id = self.id
 
     def _repr_html_(self):
         return action_to_html(self)
@@ -274,6 +282,10 @@ class Match:
     Match fields may be strings or regex.
     """
 
+    
+    source_action_id: uuid.UUID | None = None
+    "only match on messages coming from Actions with this id"
+
     state: str | None = None
     "The state of the message"
     filepath: str | None = None
@@ -310,11 +322,21 @@ class Match:
 @dataclasses.dataclass
 class Processor(Action):
     "An Action which accepts and returns messages"
-    match: List[Match]
+    # UUID is the fast path that just matches instantly with a single previous action
+    match: List[Match] | None = dataclasses.field(default=None, kw_only=True)
 
     def matches(self, message: Message) -> bool:
         if isinstance(message, FinishMessage):
             return True
+        
+        assert(isinstance(message, DataMessage))
+        assert(self.match is not None)
+        
+        # Fast path for just matching an message from a particular action
+        if isinstance(self.match, uuid.UUID):
+            return message.metadata.source_action_id == self.match
+
+        # Slow path for matching on multiple fields
         return any(matcher.matches(message) for matcher in self.match)
 
     def process(self, msg: Message) -> Iterable[Message]:
@@ -326,12 +348,11 @@ class Parser(Processor):
     """
     An action which takes raw input messages and outputs parsed ones.
     Changes message.metadata.state from raw to parsed.
-
     """
 
     def init(self, globals):
         super().init(globals)
-        # Set the dafault value of parsed but let it be overridden
+        # Set the default value of parsed but let it be overridden
         self.metadata = dataclasses.replace(self.metadata, state="parsed")
 
 

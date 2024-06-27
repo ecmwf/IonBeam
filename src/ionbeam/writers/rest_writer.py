@@ -75,14 +75,17 @@ class IonBeamAPI:
 
 @dataclasses.dataclass
 class RESTWriter(Writer):
-    endpoint: str
 
     def __str__(self):
         return f"{self.__class__.__name__}()"
 
     def init(self, globals):
         super().init(globals)
-        self.api = IonBeamAPI(endpoint = self.endpoint, auth_token = self.globals.secrets["polytope"]["user_key"])
+        assert self.globals is not None
+        assert self.globals.secrets is not None
+        assert self.globals.api_hostname is not None
+        self.api = IonBeamAPI(endpoint = self.globals.api_hostname, auth_token = self.globals.secrets["polytope"]["user_key"])
+        
 
     def process(self, input_message: FileMessage | FinishMessage) -> Iterable[Message]:
         if isinstance(input_message, FinishMessage):
@@ -91,7 +94,7 @@ class RESTWriter(Writer):
         assert input_message.metadata.filepath is not None
 
         request = input_message.metadata.mars_request.as_strings()
-
+        
         if len(self.api.list(request)) > 0 and not self.globals.overwrite:
             logger.debug(f"Dropping data because it's already in the database.")
         else:
@@ -99,7 +102,7 @@ class RESTWriter(Writer):
                 resp = self.api.archive(f, request = request)
                 resp.raise_for_status()
                 logger.debug(resp.json())
-                logger.info(f"Archiving to {self.endpoint}")
+                logger.info(f"Archiving to {self.globals.api_hostname}")
 
         metadata = self.generate_metadata(input_message, mars_request=input_message.metadata.mars_request)
         output_msg = FileMessage(metadata=metadata)

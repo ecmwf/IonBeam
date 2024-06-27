@@ -98,12 +98,9 @@ class FDBWriter(Writer):
         if "schema" not in self.FDB5_client_config:
             self.FDB5_client_config["schema"] = str(globals.fdb_schema_path)
 
-    def process(self, input_message: FileMessage | FinishMessage) -> Iterable[Message]:
-        if isinstance(input_message, FinishMessage):
-            return
+        self.fdb_client = self.configure_fdb_client()
 
-        assert input_message.metadata.filepath is not None
-
+    def configure_fdb_client(self):
         fdb5_path = findlibs.find("fdb5")
         logger.debug(f"FDBWriter using fdb5 shared library from {fdb5_path}")
 
@@ -112,15 +109,19 @@ class FDBWriter(Writer):
         for lib in self.debug:
             os.environ[f"{lib.upper()}_DEBUG"] = "1"
 
-        request = input_message.metadata.mars_request.as_strings()
-
-        logger.debug(f"MARS key for fdb archive: {json.dumps(request, indent=4)}")
-
         logger.debug(f"Installing metkit overlays")
-        install_metkit_overlays(self.metkit_language_template, request.keys())
+        install_metkit_overlays(self.metkit_language_template, ["platform", "observation_variable"])
 
         import pyfdb # This has to happen late so that it pucks up the above.
-        fdb = pyfdb.FDB()
+        
+        return pyfdb.FDB()
+
+    def process(self, input_message: FileMessage | FinishMessage) -> Iterable[Message]:
+        if isinstance(input_message, FinishMessage):
+            return
+
+        assert input_message.metadata.filepath is not None
+        fdb = self.configure_fdb_client()
 
         if len(list(fdb.list(request))) > 0 and not self.globals.overwrite:
             logger.debug(f"Dropping data because it's already in the database.")

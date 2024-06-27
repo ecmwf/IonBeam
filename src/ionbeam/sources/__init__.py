@@ -13,7 +13,7 @@ from ..core.plugins import find_plugin
 from ..core.bases import Source
 
 from .meteotracker.source import MeteoTrackerSource
-from .cima.source import CIMASource
+from .cima.source import AcronetSource
 from .sensor_community import SensorCommunitySource
 from .multi_file import MultiFileSource
 from .watch_directory import WatchDirectorySource
@@ -22,7 +22,7 @@ from .smart_citizen_kit import SmartCitizenKitSource
 __all__ = [
     "MeteoTrackerSource",
     "MeteoTrackerOfflineSource",
-    "CIMASource",
+    "AcronetSource",
     "MultiFileSource",
     "WatchDirectorySource",
 ]

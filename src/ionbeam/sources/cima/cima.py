@@ -56,13 +56,15 @@ class CIMA_API:
 
     def __init__(
         self,
-        credentials_file: str,
+        credentials: dict[str, str],
         logLevel: int | None = None,
         cache_file: Path | None = None,
+        headers: dict[str, str] = {},
     ):
         self.logger = logging.getLogger(__name__)
 
-        self.cache_file = cache_file
+        assert cache_file is not None
+        self.cache_file = Path(cache_file)
         logger.info(f"Looking for cache file at {cache_file}")
         try:
             with cache_file.open("rb") as f:
@@ -74,10 +76,8 @@ class CIMA_API:
         except (OSError, KeyError, AttributeError):
             self.cache = {}
 
-        with open(credentials_file, "r") as f:
-            parsed_yaml = yaml.safe_load(f)
-            secrets_yaml_headers = parsed_yaml["headers"]
-            self.credentials = Credentials(**parsed_yaml["CIMA_API"])
+
+        self.credentials = Credentials(**credentials)
 
         # We can get a list of useful endpoints by GET'ing config_url
         if "endpoints" not in self.cache:
@@ -99,7 +99,7 @@ class CIMA_API:
 
         # OAuth2Session is a subclass of requests.Session so see that documentation for generic usage
         # Update the headers for all our requests so that
-        self.oauth.headers.update(secrets_yaml_headers)
+        self.oauth.headers.update(headers)
 
         # self.logger.debug(f"Token: {self.oauth.token}")
 
@@ -318,7 +318,6 @@ class CIMA_API:
                     ]
                 )
             )
-        self.logger.debug(f"This date range will require {len(dates) - 1} API requests")
 
         # might be better to use a pre-allocated numpy array here
         columns: Dict[SensorName | str, List[List[float]]] = {
@@ -348,7 +347,7 @@ class CIMA_API:
             {
                 f"{sensor_name} [{sensor_unit}]": flattened_columns[sensor_name],
             },
-            index=pd.to_datetime(flattened_columns["time_index"], format="%Y%m%d%H%M"),
+            index=pd.to_datetime(flattened_columns["time_index"], format="%Y%m%d%H%M", utc=True),
         )
         return df
 
@@ -378,7 +377,6 @@ class CIMA_API:
         if not self.oauth.token:
             self.authenticate()
 
-        self.logger.debug(f"This date range will require {len(dates) - 1} API requests")
 
         # might be better to use a pre-allocated numpy array here
         columns: Dict[SensorName | str, List[List[float]]] = {sensor_name: [] for sensor_name in station_info.sensors}
@@ -416,7 +414,8 @@ class CIMA_API:
                 f"{sensor_name} [{sensor_info.unit}]": flattened_columns[sensor_name]
                 for sensor_name, sensor_info in station_info.sensors.items()
             },
-            index=pd.to_datetime(flattened_columns["time_index"], format="%Y%m%d%H%M"),
+            index=pd.to_datetime(flattened_columns["time_index"], format="%Y%m%d%H%M", utc = True),
         )
         df.replace(to_replace=-9998.0, value=np.nan, inplace=True)
+        df.reset_index(names = ["time"], inplace=True)
         return df

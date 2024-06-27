@@ -1,6 +1,7 @@
 from functools import cache
 import dataclasses
-from dataclasses import dataclass, field, fields, asdict, is_dataclass
+from dataclasses import dataclass, field, Field
+import dataclasses # So we can override is_dataclass and fields with a custom implementation
 from typing import Union, get_origin, get_args, List
 import typing
 from pathlib import Path
@@ -11,6 +12,12 @@ from .common import ConfigError, ConfigMatchError
 # Case 2: is the type specified is a class and name is given, the subclasses will be searched for one that matches.
 TYPE_KEY = "class"
 LINE_KEY = "__line__"  # special key that tells us what line we're on
+
+@dataclass
+class MissingOverlay:
+    pass
+
+MISSING_OVERLAY = MissingOverlay()  # special object to indicate that a field is missing in an overlay
 
 
 class ConfigLineError(ConfigError):
@@ -30,14 +37,20 @@ def has_default(field):
 def check_matching(context, datacls, input_dict):
     """Checks if the given dataclass and input contain the same keys,
     otherwise raises and informative error message"""
-    # optional_keys = {field.name for field in fields(datacls) if is_optional(field.type)}
     default_keys = {field.name for field in fields(datacls) if has_default(field)}
 
     ignored_keys = {TYPE_KEY, LINE_KEY} | default_keys
-    datacls_keys = {field.name for field in fields(datacls)}
+    datacls_keys = {field.name for field in fields(datacls) if not is_post_init_field(field)}
     input_keys = set(input_dict.keys())
 
-    if set.symmetric_difference(input_keys, datacls_keys) - ignored_keys:
+    if context.overlay:
+        # Only complain about extra keys
+        diff = set.difference(input_keys, datacls_keys)
+    else:
+        # Complain about both missing keys and extra keys, hence symmetric difference
+        diff = set.symmetric_difference(input_keys, datacls_keys)
+
+    if diff - ignored_keys:
         raise ConfigMatchError(
             f"""Invalid config yaml entry
         {context.filepath}:{input_dict.get(LINE_KEY, '?')}
@@ -50,6 +63,31 @@ def check_matching(context, datacls, input_dict):
         {input_dict}
         """
         )
+    
+def to_bare_types(type_object: type):
+  # For a given `X[Y, Z, ...]`:
+  # * `get_origin` returns `X`
+  # * `get_args` return `(Y, Z, ...)`
+  # For non-supported type objects, the return values are
+  # `None` and `()` correspondingly.
+  origin, args = get_origin(type_object), get_args(type_object)
+    
+  if origin is None:
+    return type_object
+    
+  if origin is typing.Annotated:
+    bare_type = get_args(type_object)[0]
+    return to_bare_types(bare_type)
+
+  return origin
+
+# Custom versions of dataclassses.is_dataclass and dataclasses.fields that handle Annotated dataclass types
+def is_dataclass(t):
+    return dataclasses.is_dataclass(to_bare_types(t))
+
+def fields(t):
+    return dataclasses.fields(to_bare_types(t))
+
 
 
 @dataclass
@@ -96,6 +134,12 @@ def is_list(t):
 def is_dict(t):
     return get_origin(t) == dict or t == dict
 
+def is_overlay_dataclass(t):
+    return "overlay" in getattr(t, "__metadata__", ())
+
+def is_post_init_field(f : Field):
+    return "post_init" in getattr(f.type, "__metadata__", ())
+
 
 def determine_matching_dataclass(context, key, datacls, input_dict):
     "Check if we actaully want to use a subclass of datacls"
@@ -112,7 +156,6 @@ def determine_matching_dataclass(context, key, datacls, input_dict):
     if TYPE_KEY in input_dict:
         subclasses = context.subclasses.get(datacls)
         cls_name = input_dict[TYPE_KEY]
-        # print(subclasses, cls_name)
         try:
             return subclasses[cls_name]
         except KeyError:
@@ -248,21 +291,51 @@ def parse_field(context, key, _type, value):
 class Context:
     filepath: Path | str
     subclasses: Subclasses = field(default_factory=Subclasses)
+    overlay: bool = False # If we're in an overlay, ignore all missing keys and set values to None
 
 
 def dataclass_from_dict(context, datacls, input_dict):
     "Given a JSON/YAML like dict of nested dicts/lists, parse it to datacls"
+    # If at any point we encounter a type with an "overlay" annotation
+    # Then from this point forward down the tre we will ignore missing keys
+    if is_overlay_dataclass(datacls):
+        context.overlay = True
+
+    # Possibly match a subclass of datacls
+    datacls = determine_matching_dataclass(context, None, datacls, input_dict)
+
+    # Err if any keys are missing, there are extra keys etc
     check_matching(context, datacls, input_dict)
-
+    
     kwargs = {
-        field.name: parse_field(context, field.name, field.type, input_dict[field.name])
-        for field in fields(datacls)
-        if field.name in input_dict
-    }
+            field.name: parse_field(context, field.name, field.type, input_dict[field.name])
+                        if field.name in input_dict else MISSING_OVERLAY # If the field is missing and it's an overlay, set it to None
+            for field in fields(datacls)
+            if field.name in input_dict or context.overlay # If it's not an overlay, skip this field
+        }
+    
+    # initialise all the post_init fields to None, leaving it up to the caller to deal with them
+    post_init_fields = {field.name : None for field in fields(datacls) 
+                        if is_post_init_field(field) and not field.name in kwargs}
 
-    return datacls(**kwargs)
+    return datacls(**kwargs, **post_init_fields)
 
 
 def parse_config_from_dict(datacls, input_dict, filepath: Path | str | None = None):
     context = Context(filepath or "???")
     return dataclass_from_dict(context, datacls, input_dict)
+
+def parse_subclass_from_dict(cls, input_dict):
+    context = Context("N/A")
+    return dataclass_from_dict(context, cls, input_dict)
+
+
+def merge_overlay(object, overlay):
+    if not is_dataclass(object):
+        return overlay if overlay is not MISSING_OVERLAY else object
+    
+    for field in fields(object):
+        merged = merge_overlay(getattr(object, field.name), getattr(overlay, field.name, MISSING_OVERLAY))
+        setattr(object, field.name, merged)
+
+    return object

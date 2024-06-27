@@ -8,7 +8,5 @@
 # # does it submit to any jurisdiction.
 # #
 
-from .source import CIMASource
-
-# Expose the Source object at ionbeam.sources.cima.source so that load_source can find it
-source = CIMASource
+from .source import AcronetSource
+from .cima import CIMA_API, CIMA_API_Error

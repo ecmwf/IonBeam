@@ -34,10 +34,6 @@ class MeteoTrackerSource(Source):
     secrets_file: Path = Path("secrets.yaml")
     cache_directory: Path = Path("inputs/meteotracker")
 
-    "The time interval to ingest, can be overidden by globals.source_timespan"
-    start_date: str = "2022-01-01"
-    end_date: str = "2023-11-30"
-
     "How many messages to emit before stopping, useful to debug runs."
     finish_after: int | None = None
 
@@ -59,27 +55,23 @@ class MeteoTrackerSource(Source):
 
     def init(self, globals):
         super().init(globals)
-        logger.debug(f"Initialialised MeteoTracker source with {self.start_date=}, {self.end_date=}")
-        
-        # If the timespan of interest is being overridden
-        if self.globals.ingestion_time_constants is not None:
-            self.start_date, self.end_date = self.globals.ingestion_time_constants.query_timespan
-        else:
-            self.start_date = datetime.fromisoformat(self.start_date)
-            self.end_date = datetime.fromisoformat(self.end_date)
 
+        assert(self.globals is not None)
+        assert(self.globals.ingestion_time_constants is not None)
+        assert(self.globals.secrets is not None)
+        
+        self.start_date, self.end_date = self.globals.ingestion_time_constants.query_timespan
         self.cache_directory = self.resolve_path(self.cache_directory, type="data")
 
         if self.wkt_bounding_polygon is not None:
             self.bounding_polygon = shapely.from_wkt(self.wkt_bounding_polygon)
 
-        secrets_file = self.resolve_path(self.secrets_file, type="config")
-        with open(secrets_file, "r") as f:
-            parsed_yaml = yaml.safe_load(f)
-            self.api_headers = parsed_yaml["headers"]
-            self.credentials = parsed_yaml["MeteoTracker_API"]
 
-        logger.debug(f"cache_directory: {self.cache_directory}")
+        self.api_headers = self.globals.secrets["headers"]
+        self.credentials = self.globals.secrets["MeteoTracker_API"]
+
+        logger.debug(f"MeteoTracker cache_directory: {self.cache_directory}")
+        logger.debug(f"Initialialised MeteoTracker source with {self.start_date=}, {self.end_date=}")
 
     def __str__(self):
         cls = self.__class__.__name__

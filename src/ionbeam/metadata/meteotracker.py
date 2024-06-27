@@ -59,7 +59,7 @@ def add_meteotracker_track_to_metadata_store(db_session, message):
     track = db_session.query(db.Station).where(db.Station.external_id == id).one_or_none()
     if track:
         logger.info(f"Track with external_id == {id} already in the database")
-        return track
+        return True, track
 
     # We don't actually know anything about the meteotracker sensors so make a dummy one for each distinct set of sensors
     assert message.metadata.variables is not None, f"Need to populate the variables metadata key for source = {message.metadata.source}!"
@@ -85,4 +85,4 @@ def add_meteotracker_track_to_metadata_store(db_session, message):
     db_session.add(track)
     db_session.commit()
 
-    return track
+    return False, track

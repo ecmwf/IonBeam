@@ -11,18 +11,20 @@
 import logging
 
 from dataclasses import dataclass, field
-from typing import List, Literal
+from typing import List, Literal, Annotated
 from pathlib import Path
 from collections import defaultdict
+import itertools as it
 
 # yamlinclude allows us to include one yaml file from another
 import yaml
 from yamlinclude import YamlIncludeConstructor
 
-from ..bases import CanonicalVariable, Action, Globals
+from ..bases import CanonicalVariable, Action, Globals, Match
 from ..history import describe_code_source, CodeSourceInfo
-from .config_parser_machinery import parse_config_from_dict, ConfigError
+from .config_parser_machinery import parse_config_from_dict, ConfigError, merge_overlay
 from ..mars_keys import FDBSchema
+from ...metadata.db import create_namespaced_engine
 
 # # This line is necessary to automatically find all the subclasses of things like "Encoder"
 from ... import sources, parsers, aggregators, quality_assessment, encoders, writers
@@ -49,7 +51,7 @@ class SubConfig:
 class Config:
     globals: Globals
     sources: List[str]
-
+    environments: dict[str, Annotated[Globals, "overlay"]]
 
 def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
     """
@@ -75,27 +77,15 @@ def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
     for action in config.actions:
         action.init(globals)
 
+    # For actions where match has not been specified,
+    # we will match with the previous action by default
+    for prev_action, action in it.pairwise(config.actions):
+        if action.match is None:
+            action.match = prev_action.id
+
     return config
 
-
-def parse_config(config_dir: Path, schema=Config, **overrides):
-    """
-    Config directory has the structure:
-    .
-    ├── config.yaml - Top level config
-    ├── canonical_variables.yaml - A list of all known variables with metadata
-    ├── secrets.yaml - not checked into source control
-    ├── acronet - a set of folders for each logically distinct source of data.
-    │   ├── MARS_keys.yaml - Info on how to create a MARS key for this source
-    │   └── actions.yaml - the actions that define the pipeline for this source
-    ├── meteotracker
-    │   ├── MARS_keys.yaml
-    │   └── actions.yaml
-    └── sensor.community
-        ├── MARS_keys.yaml
-        └── actions.yaml
-    """
-
+def parse_globals(config_dir: Path, **overrides):
     if not config_dir.exists():
         raise ConfigError(f"{config_dir} does not exist!")
 
@@ -123,6 +113,16 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
 
         config = parse_config_from_dict(Config, data, filepath=global_config_file)
 
+
+    # Based on the environment =dev/test/prod/local merge config into globals
+    env = config.globals.environment
+    config.globals = merge_overlay(config.globals, config.environments[env])
+
+    # Set up the namespace, this affects both fdb and postgres
+    # any data or tables in different namespaces are kept silo'd off
+    # This is useful for experiments or the dev/test/local split
+    config.globals.namespace = getattr(config.globals, "namespace", env)
+
     logger.debug(f"Loaded global config...")
     
     if config.globals.config_path is None:
@@ -137,6 +137,18 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
         setattr(config.globals, name, path)
         logger.debug(f"Resolved config.globals.{name} to {path}")
 
+    # Load in the secrets file
+    with open(config.globals.secrets_file, "r") as f:
+        config.globals.secrets = yaml.safe_load(f)
+
+    # Set up the global sql engine with a namespace and secrets
+    config.globals.sql_engine = create_namespaced_engine(
+            config.globals.namespace, 
+            **config.globals.secrets["postgres_database"],
+            host = config.globals.postgres_database["host"],
+            port = config.globals.postgres_database["port"],
+        )
+
     # Parse the global fdb schema file
     # This is used to validate odb files during encoding and before writing to the fdb
     # It is also used to generate overlays for metkit/odb/marsrequest.yaml and metkit/language.yaml
@@ -147,6 +159,28 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
     # # Figure out the git status clean/dirty and the current git hash
     config.globals.code_source = describe_code_source()
     logger.debug(f"Checked repository source state: {config.globals.code_source}")
+
+    return config
+
+def parse_config(config_dir: Path, schema=Config, **overrides):
+    """
+    Config directory has the structure:
+    .
+    ├── config.yaml - Top level config
+    ├── canonical_variables.yaml - A list of all known variables with metadata
+    ├── secrets.yaml - not checked into source control
+    ├── acronet - a set of folders for each logically distinct source of data.
+    │   ├── MARS_keys.yaml - Info on how to create a MARS key for this source
+    │   └── actions.yaml - the actions that define the pipeline for this source
+    ├── meteotracker
+    │   ├── MARS_keys.yaml
+    │   └── actions.yaml
+    └── sensor.community
+        ├── MARS_keys.yaml
+        └── actions.yaml
+    """
+
+    config = parse_globals(config_dir, **overrides)
 
     # Loop over one level of subdirectories and read in the actions from each one
     action_source_files = {
@@ -165,3 +199,24 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
 
     config.sources = sources
     return config, actions
+
+def parse_single_action(config_dir: Path, action_input : Path | str | dict, **overrides):
+    config = parse_globals(config_dir, **overrides)
+
+    if isinstance(action_input, Path):
+        YamlIncludeConstructor.add_to_loader_class(loader_class=SafeLineLoader, base_dir=str(action_input.parent))
+        with open(action_input) as f:
+            action_dict = yaml.load(f, Loader=SafeLineLoader)
+    
+    elif isinstance(action_input, str):
+        action_dict = yaml.safe_load(action_input)
+
+    else:
+        action_dict = action_input
+
+    action = parse_config_from_dict(Action, action_dict)
+
+    action.init(config.globals)
+
+    return action
+    

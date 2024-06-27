@@ -45,7 +45,6 @@ class TimeSliceBucket:
     messages: List[TabularMessage] = field(default_factory=list)
 
     def add_message(self, msg: TabularMessage) -> None:
-        assert msg.metadata.source == self.source
         assert msg.metadata.observation_variable == self.observation_variable
 
         # For some reason pd.Period objects are timezone naive,
@@ -96,7 +95,6 @@ class BucketContainer:
 
     def add_message(self, msg: TabularMessage) -> None:
         "Take an incoming message, split it up into 1H granules and the store it internally"
-        assert msg.metadata.source == self.source
         assert msg.metadata.observation_variable == self.observation_variable
 
         # Incoming messages can cover multiple time slices
@@ -108,7 +106,8 @@ class BucketContainer:
             )
 
             assert isinstance(timestamp, pd.Timestamp)
-            period = timestamp.to_period(freq=self.granularity)
+            # remove the timezone info from the timestamp to suppress the warning
+            period = timestamp.tz_localize(None).to_period(freq=self.granularity)
 
             if period not in self.buckets:
                 self.buckets[period] = TimeSliceBucket(self.source, self.observation_variable, period)
@@ -232,7 +231,11 @@ class TimeAggregator(Aggregator):
                 f"Messages has timedelta = {message_timedelta} which is too close to the emit_after_hours setting ({self.emit_after_hours}H)!"
             )
 
-        for period, data_chunk in message.data.resample(self.granularity, on="time"):
+
+        # convert timezone to utc and convert to time naive
+        # message.data.time = message.data.time.dt.tz_convert("UTC").dt.tz_localize(None)
+        # for period, data_chunk in message.data.resample(self.granularity, on="time"):
+        for period, data_chunk in message.data.groupby(message.data.time.dt.hour):
             if data_chunk.empty:
                 continue
             chunked_message = dataclasses.replace(message, data=data_chunk)

@@ -1,5 +1,5 @@
 from typing import List
-from sqlalchemy import ForeignKey, Table, Column
+from sqlalchemy import ForeignKey, Table, Column, event, create_engine, URL, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, Session
 from sqlalchemy.types import JSON
 from sqlalchemy_utils import UUIDType, URLType
@@ -159,8 +159,21 @@ class Station(Base):
         )
     
 
-def init_db(db_engine, canonical_variables):
+class IngestedChunk(Base):
+    __tablename__ = "ingested_chunk"
+    id = mapped_column(UUIDType, primary_key=True, default=uuid.uuid4)
+    source: Mapped[str]
+    cache_key: Mapped[str]
+
+def init_db(globals):
     "Create or recreate the database schema"
+
+    logger.warning(f"Creating Postgres schema {globals.namespace} if it doens't exist")
+    with Session(globals.sql_engine) as session:
+        # Create a postgres schema for this namespace
+        session.execute(text(f"CREATE SCHEMA IF NOT EXISTS {globals.namespace}"))
+
+    db_engine = globals.sql_engine
 
     # Clear out all the tables and recreate them
     logger.warning("Deleting all SQL tables")
@@ -171,7 +184,7 @@ def init_db(db_engine, canonical_variables):
     with Session(db_engine) as session:
         
         # Populate the properties table from the config
-        for variable in canonical_variables:
+        for variable in globals.canonical_variables:
             property = session.query(Property).where(Property.key == variable.name).one_or_none()
             if not property:
                 p = Property(
@@ -183,10 +196,21 @@ def init_db(db_engine, canonical_variables):
                 session.add(p)
 
         # Prepopulate some authors
-        for source in ["Sensor.Community", "Meteotracker", "Acronet"]:
+        for source in ["Sensor.Community", "Meteotracker", "Acronet", "SmartCitizenKit"]:
             author = session.query(Author).where(Author.name == source).one_or_none()
             if not author:
                 logger.info(f"Adding {source!r} to Authors table")
                 session.add(Author(name = source, description = ""))
 
         session.commit()
+
+def create_namespaced_engine(namespace, **kwargs):
+    engine = create_engine(URL.create(
+        "postgresql+psycopg2", **kwargs), echo = False)
+    
+    @event.listens_for(engine, "connect")
+    def set_schema(dbapi_connection, connection_record):
+        with dbapi_connection.cursor() as cursor:
+            cursor.execute(f"SET search_path TO {namespace}")
+
+    return engine
