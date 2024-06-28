@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 class API_Error(Exception): pass
 
+def recursive_get(dictionary, query):
+    if dictionary is None or len(query) == 0: return dictionary
+    first, *rest = query
+    new_dictionary = dictionary.get(first, None)
+    return recursive_get(new_dictionary, rest)
+
 @dataclasses.dataclass
 class APISource(Source):
     """
@@ -83,7 +89,8 @@ class APISource(Source):
         return d["data"]
         
     def save_data_to_cache(self, data : Any, cache_key : str):
-        path = Path(self.cache_directory) / cache_key        
+        path = Path(self.cache_directory) / cache_key
+        path.parent.mkdir(parents = True, exist_ok = True)        
         with open(path, "wb") as f:
             pickle.dump(dict(
                 version = self.cache_version,
@@ -107,14 +114,6 @@ class APISource(Source):
 
         for chunk in self.get_chunks(self.start_date, self.end_date):
             cache_key = chunk["key"]
-
-            # Check if this chunk has already been ingested
-            # by querying the database
-            # if self.query_chunk_ingested(cache_key):
-            #     logger.debug(f"Skipping {cache_key} as it's already been ingested.")
-            #     continue
-
-            logger.debug(f"Downloading {cache_key} from cache.")
             try:
                 messages = self.download_chunk(chunk)
             except API_Error as e:
@@ -123,6 +122,9 @@ class APISource(Source):
 
             # Yield the messages until we reach the limit or the end of the data
             for message in messages:
+                for column in self.copy_metadata_to_columns:
+                    message.data[column.name] = recursive_get(message.metadata.unstructured, column.key.split(".")) 
+
                 yield message
                 emitted_messages += 1
                 if self.finish_after is not None and emitted_messages >= self.finish_after:

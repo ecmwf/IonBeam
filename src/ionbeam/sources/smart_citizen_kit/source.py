@@ -40,8 +40,8 @@ class SmartCitizenKitSource(RESTSource):
     def get_device(self, device_id):
         return self.get(f"/devices/{device_id}")
     
-    # def get_sensor(self, sensor_id):
-    #     return self.get(f"/sensors/{sensor_id}")
+    def get_sensor(self, sensor_id):
+        return self.get(f"/sensors/{sensor_id}")
 
     # def get_sensors(self, device_id):
     #     sensors = self.get_device(device_id)["data"]["sensors"]
@@ -60,12 +60,7 @@ class SmartCitizenKitSource(RESTSource):
                     })
 
 
-    def get_chunks(self, start_date : datetime, end_date: datetime) -> Iterable[dict]:
-        """
-        Return an iterable of objects representing chunks of data we should download from the API
-        In this case (device_id, sensor_id) tuples
-        """
-
+    def get_ICHANGE_devices(self):
         tags = ["Barcelona", "I-CHANGE"]
         devices = []
         for tag in tags:
@@ -80,6 +75,14 @@ class SmartCitizenKitSource(RESTSource):
             devices.extend(user_devices)
         
         logger.debug(f"Found {len(devices)} devices overall for I-CHANGE.")
+        return devices
+
+    def get_chunks(self, start_date : datetime, end_date: datetime) -> Iterable[dict]:
+        """
+        Return an iterable of objects representing chunks of data we should download from the API
+        In this case (device_id, sensor_id) tuples
+        """
+        devices = self.get_ICHANGE_devices()
         
         def filter_by_dates(device):
             if device['last_reading_at'] is None or device['created_at'] is None: return False
@@ -92,7 +95,9 @@ class SmartCitizenKitSource(RESTSource):
         logger.debug(f"{len(devices_in_date_range)} of those might have data in the requested date range.")
         
         for device in devices_in_date_range:
+            logger.debug(f"Working on device with id {device['id']}")
             for sensor in device["data"]["sensors"]:
+                logger.debug(f"Working on sensor with id {sensor['id']}")
                 yield dict(
                            key = f"device:{device['id']}_sensor:{sensor['id']}_{start_date.isoformat()}_{end_date.isoformat()}.pickle",
                            device_id = device["id"],
@@ -104,7 +109,14 @@ class SmartCitizenKitSource(RESTSource):
                            )
 
     def download_chunk(self, chunk: dict): 
-        readings = self.get_readings(chunk["device_id"], chunk["sensor_id"], chunk["start_date"], chunk["end_date"])
+        # Try to load data from the cache first
+        try:
+            readings = self.load_data_from_cache(chunk["key"])
+        except KeyError:
+            logger.debug(f"Downloading from API chunk with key {chunk['key']}")
+            readings = self.get_readings(chunk["device_id"], chunk["sensor_id"], chunk["start_date"], chunk["end_date"])
+            self.save_data_to_cache(readings, chunk["key"])
+
         if readings["readings"]: 
             variable = readings["sensor_key"]
             raw_metadata = {k : v for k, v in readings.items() if k != "readings"}
