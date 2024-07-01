@@ -238,13 +238,16 @@ def parse_union(context, key, _type, value):
 def parse_dict(context, key, _type, value):
     # If the type we've been given is just 'dict' with not further info, just return it
     if len(get_args(_type)) < 2:
-        return value
+        return {
+            k:v for k, v in value.items()
+            if k != LINE_KEY
+        }
 
     key_type, value_type = get_args(_type)
     return {
-        parse_field(context, "", key_type, key_value): parse_field(context, "", value_type, value_value)
-        for key_value, value_value in value.items()
-        if key_value != LINE_KEY
+        parse_field(context, "", key_type, k): parse_field(context, "", value_type, v)
+        for k, v in value.items()
+        if k != LINE_KEY
     }
 
 
