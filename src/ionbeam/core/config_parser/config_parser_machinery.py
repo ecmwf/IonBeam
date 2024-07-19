@@ -158,7 +158,7 @@ def determine_matching_dataclass(context, key, datacls, input_dict):
         cls_name = input_dict[TYPE_KEY]
         try:
             return subclasses[cls_name]
-        except KeyError:
+        except KeyError as e:
             raise ConfigLineError(
                 context,
                 key,
@@ -167,7 +167,7 @@ def determine_matching_dataclass(context, key, datacls, input_dict):
                 f"Config yaml entry for section '{datacls.__name__}' invalid"
                 f" name: '{cls_name}' could not be found as a subclass of {datacls.__name__}"
                 f"\n\nKnown subclasses: {subclasses.keys()}",
-            ) from None
+            ) from e
 
     return datacls
 
@@ -283,11 +283,11 @@ def parse_field(context, key, _type, value):
         try:
             result = _type(value)
         except Exception as e:
-            raise ConfigLineError(context, key, _type, value, str(e)) from None
+            raise ConfigLineError(context, key, _type, value, str(e)) from e
 
         return result
     except Exception as e:
-        raise ConfigError(f"While parsing {key=}, {_type=}, {value=}, got exception \n\t\t{e}")
+        raise ConfigError(f"While parsing {key=}, {_type=}, {value=}") from e
 
 
 @dataclass
@@ -324,8 +324,8 @@ def dataclass_from_dict(context, datacls, input_dict):
     return datacls(**kwargs, **post_init_fields)
 
 
-def parse_config_from_dict(datacls, input_dict, filepath: Path | str | None = None):
-    context = Context(filepath or "???")
+def parse_config_from_dict(datacls, input_dict, filepath: Path | str | None = None, overlay = False):
+    context = Context(filepath or "???", overlay=overlay)
     return dataclass_from_dict(context, datacls, input_dict)
 
 def parse_subclass_from_dict(cls, input_dict):

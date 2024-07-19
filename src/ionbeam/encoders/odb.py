@@ -192,9 +192,6 @@ class ODCEncoder(Encoder):
     seconds: bool = True
     minutes: bool = True
 
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.match})"
-
     def init(self, globals):
         super().init(globals)
 

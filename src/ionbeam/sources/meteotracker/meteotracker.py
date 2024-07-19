@@ -8,7 +8,7 @@
 # # does it submit to any jurisdiction.
 # #
 
-from typing import Literal, ClassVar, Dict, NewType, Tuple, List, Annotated
+from typing import Literal, ClassVar, Dict, NewType, Tuple, List
 
 import dataclasses
 import logging
@@ -19,10 +19,6 @@ import pandas
 import requests
 
 from shapely import geometry
-
-# To deal with the Open-Id/OAuth2 that the API uses
-
-from pathlib import Path
 
 from datetime import datetime, timedelta
 
@@ -175,8 +171,13 @@ class MeteoTracker_API:
         resp = self.oauth.post(
             self.endpoints.token_endpoint, json=dict(email=self.credentials.email, password=self.credentials.password)
         )
+        try:
+            j = resp.json()
+        except requests.JSONDecodeError as e:
+            self.logger.error(f"Failed to authenticate MeteoTracker, response: {resp.text}")
+            raise ValueError("Failed to authenticate MeteoTracker") from e
 
-        self.token = Token(resp.json()["accessToken"], resp.json()["refreshToken"])
+        self.token = Token(j["accessToken"], j["refreshToken"])
         self.oauth.headers.update({"Authorization": f"Bearer {self.token.access_token}"})
 
     def get(self, *args, **kwargs) -> requests.Response:

@@ -2,27 +2,26 @@
 
 import logging
 import pandas as pd
-import re
-from typing import Literal, Tuple, List, Iterable
-
+from typing import Iterable
 from pathlib import Path
-
 import dataclasses
-
-from ...core.bases import Message, TabularMessage, Source, MetaData, InputColumn
-from ...core.history import PreviousActionInfo, ActionInfo
-
+from ...core.bases import TabularMessage
 from ..API_sources_base import RESTSource
-
-import yaml
 from datetime import datetime
-import requests
+from unicodedata import normalize
+from .metadata import construct_sck_metadata
 
-import cachetools
-from datetime import datetime, timedelta
+
+from cachetools import cachedmethod, TTLCache
+from cachetools.keys import hashkey
 
 logger = logging.getLogger(__name__)
     
+def saltedmethodkey(salt):
+    def _hash(self, *args, **kwargs):
+        return hashkey(salt, *args, **kwargs)
+    return _hash
+
 @dataclasses.dataclass
 class SmartCitizenKitSource(RESTSource):
     """
@@ -30,16 +29,21 @@ class SmartCitizenKitSource(RESTSource):
     """
     cache_directory: Path = Path(f"inputs/smart_citizen_kit")
     endpoint = "https://api.smartcitizen.me/v0"
+    cache = TTLCache(maxsize=1e5, ttl=20*60) # Cache API responses for 20 minutes
         
+    @cachedmethod(lambda self: self.cache, key=saltedmethodkey('devices_by_tag'))
     def get_devices_by_tag(self, tag : str):
         return self.get(f"/devices?with_tags={tag}")
     
+    @cachedmethod(lambda self: self.cache, key=saltedmethodkey('users'))
     def get_users(self, username_contains):
         return self.get(f"/users?q[username_cont]={username_contains}")
 
+    @cachedmethod(lambda self: self.cache, key=saltedmethodkey('device'))
     def get_device(self, device_id):
         return self.get(f"/devices/{device_id}")
     
+    @cachedmethod(lambda self: self.cache, key=saltedmethodkey('sensor'))
     def get_sensor(self, sensor_id):
         return self.get(f"/sensors/{sensor_id}")
 
@@ -47,7 +51,10 @@ class SmartCitizenKitSource(RESTSource):
     #     sensors = self.get_device(device_id)["data"]["sensors"]
     #     return sensors
 
-    # @cachetools.cachedmethod(cache = lambda self : readings_cache)
+    def init(self, globals):
+        super().init(globals)
+        self.mappings_variable_unit_dict = {(column.key, column.unit) : column for column in self.mappings}
+
     def get_readings(self, device_id, sensor_id, start_date, end_date):
         return self.get(f"/devices/{device_id}/readings",
                     params = {
@@ -96,6 +103,7 @@ class SmartCitizenKitSource(RESTSource):
         
         for device in devices_in_date_range:
             logger.debug(f"Working on device with id {device['id']}")
+            construct_sck_metadata(self, device)
             for sensor in device["data"]["sensors"]:
                 logger.debug(f"Working on sensor with id {sensor['id']}")
                 yield dict(
@@ -111,14 +119,27 @@ class SmartCitizenKitSource(RESTSource):
     def download_chunk(self, chunk: dict): 
         # Try to load data from the cache first
         try:
-            readings = self.load_data_from_cache(chunk["key"])
+            chunk, readings = self.load_data_from_cache(chunk)
         except KeyError:
             logger.debug(f"Downloading from API chunk with key {chunk['key']}")
             readings = self.get_readings(chunk["device_id"], chunk["sensor_id"], chunk["start_date"], chunk["end_date"])
-            self.save_data_to_cache(readings, chunk["key"])
+            self.save_data_to_cache(chunk, readings)
 
         if readings["readings"]: 
             variable = readings["sensor_key"]
+            unit = normalize("NFKD", chunk["sensor"]["unit"])
+
+            canonical_form = self.mappings_variable_unit_dict.get((variable, unit))
+            if canonical_form is None:
+                logger.warning(f"Variable ('{variable}', '{unit}') not found in mappings for Smart Citizen Kit\n\n"
+                                   f"Sensor: {chunk['sensor']}\n"
+                                   )
+                return
+            
+            # Check if we should discard this data
+            if canonical_form.discard:
+                return
+
             raw_metadata = {k : v for k, v in readings.items() if k != "readings"}
             raw_metadata["device"] = chunk["device"]
             raw_metadata["sensor"] = chunk["sensor"]

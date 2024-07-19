@@ -10,35 +10,24 @@
 
 import logging
 import pandas as pd
-import re
-from typing import Literal, Tuple, List, Iterable
-
-from pathlib import Path
-
+from typing import Iterable
 import dataclasses
-
-from ...core.bases import FileMessage, Source, MetaData, InputColumn
-from ...core.history import PreviousActionInfo, ActionInfo
-
+from ...core.bases import TabularMessage
 from .meteotracker import MeteoTracker_API, MeteoTracker_API_Error
-
+from ..API_sources_base import RESTSource
 import shapely
-import yaml
+from pathlib import Path
 from datetime import datetime
+from .metadata import add_meteotracker_track_to_metadata_store
 
 logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
-class MeteoTrackerSource(Source):
-    secrets_file: Path = Path("secrets.yaml")
-    cache_directory: Path = Path("inputs/meteotracker")
-
-    "How many messages to emit before stopping, useful to debug runs."
-    finish_after: int | None = None
-
+class MeteoTrackerSource(RESTSource):
     "The value to insert as source"
     source: str = "meteotracker"
+    cache_directory: Path = Path(f"inputs/meteotracker")
 
     "A bounding polygon represented in WKT (well known text) format."
     wkt_bounding_polygon: str | None = None  # Use geojson.io to generate
@@ -73,10 +62,6 @@ class MeteoTrackerSource(Source):
         logger.debug(f"MeteoTracker cache_directory: {self.cache_directory}")
         logger.debug(f"Initialialised MeteoTracker source with {self.start_date=}, {self.end_date=}")
 
-    def __str__(self):
-        cls = self.__class__.__name__
-        return f"{cls}({self.start_date} - {self.end_date})"
-
     def in_bounds(self, df):
         if self.wkt_bounding_polygon is None:
             return True
@@ -84,80 +69,18 @@ class MeteoTrackerSource(Source):
         point = shapely.geometry.point.Point(lat, lon)
         return self.bounding_polygon.contains(point)
 
-    def all_filters(self, path, data: pd.DataFrame):
-        # bail out if the author is not one of the living labs
-        if data.empty:
-            logger.warning(f"{path} contains empty CSV!")
-            return False
-
+    def all_filters(self, session, data: pd.DataFrame):
         # bail out if this data is not in the target region
         if not self.in_bounds(data):
-            logger.debug(f"Skipping {path} because it's not in bounds")
+            logger.debug(f"Skipping {session.id} because it's not in bounds")
             return False
 
         return True
 
-    def process_sessions(self, sessions):
-        self.cache_directory.mkdir(parents=True, exist_ok=True)
-        for session in sessions:
-            filename = f"MeteoTracker_{session.id}.csv"
-            path = Path(self.cache_directory) / filename
-
-            if not path.exists():
-                try:
-                    data = self.api.get_session_data(session)
-                except MeteoTracker_API_Error as e:
-                    logger.warning(f"get_session_data failed for session {session.id}\n{e}")
-                    continue
-                print(session)
-                for field in dataclasses.fields(session):
-                    value = getattr(session, field.name)
-                    if value is None or field.name == "columns": continue
-                    data[field.name] = value
-
-                data.to_csv(path, index=False)
-
-            data = pd.read_csv(path)
-
-            if not self.all_filters(path, data):
-                continue
-
-            logger.debug(f"Yielding meteotracker CSV file with columns {data.columns}")
-            logger.debug(f"Author = {data['author'].iloc[0]}")
-            logger.debug(f"Living_lab = {data['living_lab'].iloc[0]}")
-            yield FileMessage(
-                metadata=self.generate_metadata(
-                    filepath=path,
-                    variables = list(data.columns),
-                ),
-            )
-
-    def online_generate_by_daterange(self) -> Iterable[FileMessage]:
+    def online_get_chunks_by_author(self, start_date : datetime, end_date: datetime) -> Iterable[dict]:
         # Do  API requests in chunks larger than the data granularity, upto 3 days
         self.api = MeteoTracker_API(self.credentials, self.api_headers)
-        dates = pd.date_range(start=self.start_date, end=self.end_date, freq="3D")
-        date_ranges = list(zip(dates[:-1], dates[1:]))
-        emitted_messages = 0
-
-        for timespan in date_ranges:
-            try:
-                sessions = self.api.query_sessions(timespan, items=1000)
-            except MeteoTracker_API_Error as e:
-                logger.warning(f"Query_sessions failed for timespan {timespan}\n{e}")
-                continue
-
-            logger.debug(f"Retrieved {len(sessions)} sessions for date {timespan[0].isoformat()}")
-
-            for message in self.process_sessions(sessions):
-                yield message
-                emitted_messages += 1
-                if self.finish_after is not None and emitted_messages >= self.finish_after:
-                    return
-
-    def online_generate_by_author(self) -> Iterable[FileMessage]:
-        # Do  API requests in chunks larger than the data granularity, upto 3 days
-        self.api = MeteoTracker_API(self.credentials, self.api_headers)
-        timespan = (self.start_date, self.end_date)
+        timespan = (start_date, end_date)
 
         # Set up the list of target authors
         authors = []
@@ -167,7 +90,6 @@ class MeteoTrackerSource(Source):
                     author = pattern.format(item)
                     authors.append((living_lab, author))
 
-        sessions = []
         for living_lab, author in authors:
             try:
                 author_sessions = self.api.query_sessions(author=author, timespan=timespan, items=1000)
@@ -177,62 +99,69 @@ class MeteoTrackerSource(Source):
             if author_sessions:
                 logger.debug(f"Retrieved {len(author_sessions)} sessions for {author=}")
 
-            for s in author_sessions:
-                s.living_lab = living_lab
-            sessions.extend(author_sessions)
+            for session in author_sessions:
+                session.living_lab = living_lab
+                yield dict(
+                    key = f"MeteoTracker_{session.id}.pickle",
+                    session=session,
+                )
 
-        logger.debug(f"Sorting sessions oldest to newest, make sure the TimeAggregator knows that!")
-        sessions = sorted(sessions, key=lambda s: s.start_time)
-
-        emitted_messages = 0
-        for message in self.process_sessions(sessions):
-            yield message
-            emitted_messages += 1
-            if self.finish_after is not None and emitted_messages >= self.finish_after:
-                return
-
-    def offline_generate(self) -> Iterable[FileMessage]:
-        # Do  API requests in chunks larger than the data granularity, upto 3 days
-        dates = pd.date_range(start=self.start_date, end=self.end_date, freq="1D")
-        list(zip(dates[:-1], dates[1:]))
-        emitted_messages = 0
-
+    def offline_get_chunks(self, start_date : datetime, end_date: datetime) -> Iterable[dict]:
         for path in self.cache_directory.iterdir():
-            try:
-                data = pd.read_csv(path)
-            except UnicodeDecodeError:
-                logger.warning("{path} is not unicode!")
-                raise
+            chunk, data = self.load_data_from_cache(path=path)
 
+            def filter_by_date(data):
+                if data.empty: return False
+                print(data.columns)
+                t = data.time.apply(pd.Timestamp)
+                return (t.min() <= end_date) and (t.max() >= start_date)
+            
+
+            if not filter_by_date(data):
+                continue
             if not self.all_filters(path, data):
                 continue
 
-            yield FileMessage(
-                metadata=self.generate_metadata(
-                    filepath=path,
-                    variables = list(data.columns),
-                ),
-                history=[
-                    PreviousActionInfo(
-                        action=ActionInfo(name=self.__class__.__name__, code=self.globals.code_source),
-                        message=None,
-                    )
-                ],
+            yield dict(
+                key = path.name,
+                filepath=path,
             )
-            emitted_messages += 1
 
-            if self.finish_after is not None and emitted_messages >= self.finish_after:
-                return
-
-    def generate(self) -> Iterable[FileMessage]:
+    def get_chunks(self, start_date : datetime, end_date: datetime) -> Iterable[dict]:
         # Do  API requests in chunks larger than the data granularity, upto 3 days
         if not self.globals.offline:
             logger.debug("Starting in online mode...")
-            # return self.online_generate_by_daterange()
-            return self.online_generate_by_author()
+            return self.online_get_chunks_by_author(start_date, end_date)
         else:
             logger.debug("Starting in offline mode...")
-            return self.offline_generate()
+            return self.offline_get_chunks(start_date, end_date)
+        
+    def download_chunk(self, chunk: dict): 
+        # Try to load data from the cache first
+        try:
+            chunk, data = self.load_data_from_cache(chunk)
+        except KeyError:
+            logger.debug(f"Downloading from API chunk with key {chunk['key']}")
+            try:
+                data = self.api.get_session_data(chunk["session"])
+            except MeteoTracker_API_Error as e:
+                logger.warning(f"get_session_data failed for session {chunk['session'].id}\n{e}")
+                return
+            self.save_data_to_cache(chunk, data)
+
+        if not self.all_filters(chunk["session"], data):
+            return
+        
+        add_meteotracker_track_to_metadata_store(self, chunk["session"], data)
+
+        raw_metadata = dict(session = dataclasses.asdict(chunk["session"]))
+        
+        yield TabularMessage(
+            metadata=self.generate_metadata(
+                unstructured = raw_metadata,
+            ),
+            data = data,
+        )
 
 
 source = MeteoTrackerSource

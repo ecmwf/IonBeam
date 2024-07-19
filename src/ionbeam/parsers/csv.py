@@ -18,10 +18,10 @@ from ..core.bases import (
     Parser,
     FileMessage,
     TabularMessage,
-    MetaData,
     FinishMessage,
-    InputColumn,
+    InputColumns,
 )
+from unicodedata import normalize
 
 from ..core.converters import unit_conversions
 from ..core.html_formatters import make_section, action_to_html, dataframe_to_html
@@ -51,14 +51,13 @@ class CSVParser(Parser):
         separator: The separator character to use.
         custom_nans: A list of custom NaN values to use.
     """
-    identifying_columns: List[InputColumn] = dataclasses.field(default_factory=list)
-    value_columns: List[InputColumn] = dataclasses.field(default_factory=list)
-    metadata_columns: List[InputColumn] = dataclasses.field(default_factory=list)
+    # Map key names and paths within external data sources to internal canonical names
+    mappings: InputColumns
+
+    identifying_keys: List[str] = dataclasses.field(default_factory=list)
+    metadata_keys: List[str] = dataclasses.field(default_factory=list)
     separator: str = ","
     custom_nans: List[str] | None = None
-
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.match})"
 
     def _repr_html_(self):
         column_html = dataframe_to_html(
@@ -72,50 +71,68 @@ class CSVParser(Parser):
 
     def init(self, globals):
         super().init(globals)
-        # filter out columns we're discarding
-        self.metadata_columns = [c for c in self.metadata_columns if not c.discard]
-        self.value_columns = [c for c in self.value_columns if not c.discard]
-        self.identifying_columns = [c for c in self.identifying_columns if not c.discard]
+        mappings = [c for c in self.mappings if not c.discard]
+
+        # Sort the non-discard columns into metadata, identifying and value columns
+        self.metadata_columns = []
+        self.identifying_columns = []
+        self.value_columns = []
+        for column in mappings:
+            if column.name in self.metadata_keys:
+                self.metadata_columns.append(column)
+            elif column.name in self.identifying_keys:
+                self.identifying_columns.append(column)
+            else: 
+                self.value_columns.append(column)
+
         
         self.all_columns = self.value_columns + self.metadata_columns + self.identifying_columns
-
         self.fixed_columns = self.identifying_columns + self.metadata_columns
-        self.columns_mapping = {c.key: c.name for c in self.all_columns}
 
-        canonical_variables = {c.name: c for c in globals.canonical_variables}
+        self.fixed_column_names = {c.name for c in self.fixed_columns}
+        self.columns_mapping = {c.key: c.name for c in mappings}
+        self.canonical_variables_map = {c.name: c for c in globals.canonical_variables}
+
         for col in self.all_columns:
+            # Check that c.name is actually one of the canonical names
+            if col.name not in self.canonical_variables_map:
+                all = [col for col in self.all_columns if col.name not in self.canonical_variables_map]
+                yaml = "".join(f'- name: {col.name}\n  unit: "{col.unit}"\n\n' 
+                               if col.unit else f'- name: {col.name}\n\n'
+                                for col in all)
+                raise ValueError(f"{col.name} from {self} config is not in canonical names!\n"
+                                 f"Put this into canonical variables:\n{yaml}")
 
-            # Check that preprocessors only create columns with canonical names
-            if col.name not in canonical_variables:
-                raise ValueError(f"{col.name} from {self} config is not in canonical names!")
-
-            # Just copy the whole canonical variable object onto it
-            col.canonical_variable = canonical_variables[col.name]
+            # Copy a reference to the canonical variable object onto it
+            col.canonical_variable = self.canonical_variables_map[col.name]
 
             # Emit a warning if the config doesn't include the unit conversion
+            # This normalize("NFKD", ...) business is because there are some unicode characters that look identical but have
+            # different unicode code points. normalize puts the in some canonical form so they can be compared.
+            # Hint: Try out "µ" == "μ"
             if (
                 col.unit
                 and col.unit != col.canonical_variable.unit
                 and f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}" not in unit_conversions
             ):
                 logger.warning(
-                    f"No unit conversion registered for {col.name} {col.unit} -> {col.canonical_variable.unit}|"
+                    f"No unit conversion registered for {col.name}: {col.unit} -> {col.canonical_variable.unit}|"
                 )
 
             # Tell the parsers what dtypes they need to use
-            col.dtype = canonical_variables[col.name].dtype
+            col.dtype = self.canonical_variables_map[col.name].dtype
 
-    def format_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
-        # extra_keys = {k for k in df.columns if k not in self.columns_mapping}
-        # if extra_keys:
-        #     print(extra_keys)
-        #     logger.warning(f"Data keys {','.join(extra_keys)} do not exist in the config!")
-
+    def rename_columns(self, df):
+        for col in df.columns:
+            # All columns should either already have the correct name ("in self.columns_mapping.values()")
+            # Or have a translation in self.columns_mapping
+            if col not in self.columns_mapping and col not in self.columns_mapping.values():
+                if any(c.key == col and c.discard for c in self.mappings):
+                    raise ValueError(f"BUG: {col=} is marked as discard in mappings.yaml, but somehow got emitted from the source.")
+                raise ValueError(f"{col=} not in CSVParser columns mapping, does it have an entry in mappings.yaml?")
         df.rename(columns=self.columns_mapping, inplace=True)
 
-        # Do dtype conversions
-        # hopefully this was already done by read_csv but you never know
+    def convert_datatypes(self, df):
         for col in self.all_columns:
             if col.name in df and col.canonical_variable.dtype is not None:
                 # convert any custom nan values to the string "NaN"
@@ -129,7 +146,8 @@ class CSVParser(Parser):
                     df[col.name] = df[col.name].astype(col.canonical_variable.dtype, copy=False)
                 except ValueError as e:
                     raise ValueError(f"{col.name} conversion to {col.canonical_variable.dtype} failed with error {e}")
-
+        
+    def do_unit_conversions(self, df):
         # Do unit conversions
         for col in self.all_columns:
             if col.name in df and col.unit != col.canonical_variable.unit:
@@ -139,20 +157,23 @@ class CSVParser(Parser):
                 if col.unit is None:
                     raise ValueError(f"{col=} unit is None!")
                 
-                converter = unit_conversions[f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}"]
+                
+                converter = unit_conversions[normalize("NFKD", f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}")]
                 df[col.name] = df[col.name].apply(converter)
 
+
+    def format_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        self.rename_columns(df)
+        self.convert_datatypes(df)
+        self.do_unit_conversions(df)
         return df
 
     def split_columns(self, df: pd.DataFrame):
-        for value_col in self.value_columns:
-            if value_col.canonical_variable is None:
-                raise RuntimeError(f"{value_col=} canonical variable is None!")
-            if value_col.name in df.columns and value_col.canonical_variable.output:
-                output_cols = self.fixed_columns + [
-                    value_col,
-                ]
-                yield value_col, df[[c.name for c in output_cols]]
+        for column_name in df.columns:
+            if column_name in self.fixed_column_names: continue
+            yield column_name, df[self.fixed_column_names + [column_name]]
+
 
     def process(self, rawdata: FileMessage | FinishMessage) -> Iterable[TabularMessage]:
         if isinstance(rawdata, FinishMessage):
@@ -174,40 +195,37 @@ class CSVParser(Parser):
             )
 
         df = self.format_dataframe(df)
+        logging.debug(f"Processed: {df.columns}")
+        
+        metadata = self.generate_metadata(
+            message=rawdata,
+            filepath=None,
+        )
 
-        assert rawdata.metadata.variables is not None
+        output_msg = TabularMessage(
+            metadata=metadata,
+            columns=[c.canonical_variable for c in self.all_columns],
+            data=df,
+        )
 
-        if self.globals.split_data_columns:
-            # Split the data into data frames for each of the value types
-            for variable_column, df in self.split_columns(df):
-                metadata = self.generate_metadata(
-                    message=rawdata,
-                    observation_variable=variable_column.name,
-                    filepath=None,
-                    variables = [self.columns_mapping[v] for v in rawdata.metadata.variables if v in self.columns_mapping],
-                )
+        yield self.tag_message(output_msg, rawdata)
 
-                output_msg = TabularMessage(
-                    metadata=metadata,
-                    columns=[c.canonical_variable for c in self.fixed_columns + [variable_column]],
-                    data=df,
-                )
+        # if self.globals.split_data_columns:
+        #     # Split the data into data frames for each of the value types
+        #     for variable_column, df in self.split_columns(df):
+        #         metadata = self.generate_metadata(
+        #             message=rawdata,
+        #             observation_variable=variable_column.name,
+        #             filepath=None,
+        #         )
 
-                yield self.tag_message(output_msg, rawdata)
-        else:
-            metadata = self.generate_metadata(
-                message=rawdata,
-                observation_variable=",".join(value_col.name for value_col in self.value_columns),
-                filepath=None,
-            )
+        #         output_msg = TabularMessage(
+        #             metadata=metadata,
+        #             columns=[c.canonical_variable for c in self.fixed_columns + [variable_column]],
+        #             data=df,
+        #         )
 
-            output_msg = TabularMessage(
-                metadata=metadata,
-                columns=[c.canonical_variable for c in self.all_columns],
-                data=df,
-            )
-
-            yield self.tag_message(output_msg, rawdata)
+        #         yield self.tag_message(output_msg, rawdata)
 
 
 

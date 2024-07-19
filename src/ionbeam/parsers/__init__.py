@@ -10,8 +10,8 @@
 
 from .csv import CSVParser
 from .csv_file_chunker import CSVChunker
-from .generate_metadata import GenerateMetaData
 from .time_splitter import TimeSplitter
+from .splitter import Splitter
 
 __all__ = [
     "CSVParser",

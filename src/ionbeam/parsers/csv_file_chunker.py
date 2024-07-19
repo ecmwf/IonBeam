@@ -16,9 +16,6 @@ class CSVChunker(Processor):
     finish_after: int | None = None
     separator: str = ","
 
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.match})"
-
     def process(self, input_message: FileMessage | FinishMessage) -> Iterable[TabularMessage]:
         logger.debug(f"CSV Chunker got {input_message}")
         if isinstance(input_message, FinishMessage):

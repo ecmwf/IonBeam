@@ -15,9 +15,6 @@ class TimeSplitter(Processor):
     granularity: str = "6H"
     finish_after: int | None = None
 
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.match})"
-
     def process(self, input_message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
         if isinstance(input_message, FinishMessage):
             return

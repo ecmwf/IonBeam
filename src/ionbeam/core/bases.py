@@ -13,21 +13,30 @@ from typing import Iterable, Callable, List, Literal, TypeVar, Any, Annotated
 import re
 import pandas
 from pathlib import Path
-import os
 from .html_formatters import dataclass_to_html, message_to_html, action_to_html
 from .history import (
     PreviousActionInfo,
     ActionInfo,
     MessageInfo,
     CodeSourceInfo,
-    describe_code_source,
 )
 from .mars_keys import MARSRequest, FDBSchema
-from datetime import datetime, timedelta
-import yaml
+from datetime import datetime, timedelta, timezone
 import uuid
+import itertools as it
 
-@dataclasses.dataclass(unsafe_hash=True)
+from unicodedata import normalize
+
+from dataclasses import dataclass
+# from functools import partial
+# from pydantic.dataclasses import dataclass
+
+# class Config:
+#     arbitrary_types_allowed = True
+
+# dataclass = partial(dataclass, config=Config)
+
+@dataclass(unsafe_hash=True)
 class MetaData:
     source_action_id: uuid.UUID | None = None
     state: str | None = None
@@ -36,7 +45,6 @@ class MetaData:
     time_slice: pandas.Period | None = None
     encoded_format: str | None = None
     filepath: Path | None = None
-    variables: list[str] | None = None
     mars_request: MARSRequest = dataclasses.field(default_factory=MARSRequest)
     unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
 
@@ -47,7 +55,7 @@ class MetaData:
         return dataclass_to_html(self)
 
 
-@dataclasses.dataclass
+@dataclass
 class Message:
     "Base Message Class from which FinishMessage and DataMessage inherit"
 
@@ -55,13 +63,13 @@ class Message:
         return message_to_html(self)
 
 
-@dataclasses.dataclass
+@dataclass
 class FinishMessage(Message):
     "Indicates no more messages will come down the pipeline."
     reason: str
 
 
-@dataclasses.dataclass
+@dataclass
 class DataMessage(Message):
     "A message that represents some data. It may have an attached dataframe, a reference to a file or somethihg else."
     metadata: MetaData
@@ -83,12 +91,12 @@ class DataMessage(Message):
         return f"{class_name}({', '.join(arg_string)})"
 
 
-@dataclasses.dataclass
+@dataclass
 class FileMessage(DataMessage):
     pass
 
 
-@dataclasses.dataclass
+@dataclass
 class TabularMessage(DataMessage):
     data: pandas.DataFrame
     columns: list = dataclasses.field(default_factory=list, kw_only=True)
@@ -103,7 +111,7 @@ DataMessageVar = TypeVar("DataMessageVar", bound=DataMessage)
 
 
 # Config Classes
-@dataclasses.dataclass
+@dataclass
 class CanonicalVariable:
     """
     Represents a physical variable with units, dtype and other metadata
@@ -135,8 +143,12 @@ class CanonicalVariable:
 
     def __repr__(self):
         return f"CanonicalVariable(name={self.name!r}, unit={self.unit!r}, desc={self.desc!r})"
+    
+    def __post_init__(self):
+        # Make a best effort to deal with unicode characters that look the same but have different code points
+        if self.unit: self.unit = normalize("NFKD", self.unit)
 
-@dataclasses.dataclass
+@dataclass
 class IngestionTimeConstants:
     query_timespan: tuple[datetime, datetime]
     emit_after_hours: int
@@ -149,14 +161,14 @@ class IngestionTimeConstants:
                 return datetime.fromisoformat(s)
             except: pass
             try:
-                return eval(s, dict(datetime=datetime, timedelta=timedelta))
+                return eval(s, dict(datetime=datetime, timedelta=timedelta, timezone=timezone))
             except SyntaxError as e:
                 raise SyntaxError(f"{s} has a syntax error {e}")
         def interval_eval(tup): return tuple(sorted(map(date_eval, tup)))
 
         self.query_timespan = interval_eval(self.query_timespan)
 
-@dataclasses.dataclass
+@dataclass
 class Globals:
     canonical_variables: List[CanonicalVariable]
     data_path: Path
@@ -179,9 +191,11 @@ class Globals:
     # When a class hasn't been instantiated yet use a string, see https://peps.python.org/pep-0484/#forward-references
     actions: dict[uuid.UUID, "Action"] = dataclasses.field(default_factory=dict)
 
+    def _repr_html_(self): return dataclass_to_html(self)
 
 
-@dataclasses.dataclass
+
+@dataclass
 class Action:
     "The base class for actions, from which Source and Processor inherit"
 
@@ -199,6 +213,9 @@ class Action:
 
     def _repr_html_(self):
         return action_to_html(self)
+    
+    def __str__(self):
+        return f"{self.__class__.__name__}"
 
     def resolve_path(self, path: str | Path, type: Literal["data", "config"] = "data") -> Path:
         assert self.globals
@@ -253,7 +270,7 @@ class Action:
         return msg
 
 
-@dataclasses.dataclass
+@dataclass
 class Source(Action):
     "An Action which only outputs messages."
 
@@ -274,7 +291,7 @@ class Source(Action):
         raise NotImplementedError
 
 
-@dataclasses.dataclass
+@dataclass
 class Match:
     """
     Represents a filter on incoming messages. A message is considered to match a Match object if
@@ -319,7 +336,7 @@ class Match:
         return f"{class_name}({', '.join(arg_string)})"
 
 
-@dataclasses.dataclass
+@dataclass
 class Processor(Action):
     "An Action which accepts and returns messages"
     # UUID is the fast path that just matches instantly with a single previous action
@@ -343,7 +360,7 @@ class Processor(Action):
         raise NotImplementedError
 
 
-@dataclasses.dataclass
+@dataclass
 class Parser(Processor):
     """
     An action which takes raw input messages and outputs parsed ones.
@@ -360,7 +377,7 @@ class Aggregator(Processor):
     pass
 
 
-@dataclasses.dataclass
+@dataclass
 class EncodedMessage(TabularMessage):
     format: str
 
@@ -368,7 +385,7 @@ class EncodedMessage(TabularMessage):
         return f"EncodedMessage(format={self.format})"
 
 
-@dataclasses.dataclass
+@dataclass
 class Encoder(Processor):
     def encode(self, parsed_data: TabularMessage) -> Iterable[EncodedMessage]:
         raise NotImplementedError("Implement encode() in derived class")
@@ -380,7 +397,7 @@ class Encoder(Processor):
         self.metadata = dataclasses.replace(self.metadata, state="encoded")
 
 
-@dataclasses.dataclass
+@dataclass
 class Writer(Processor):
     def process(self, data: EncodedMessage) -> Iterable[Message]:
         raise NotImplementedError("Implement encode() in derived class")
@@ -389,7 +406,7 @@ class Writer(Processor):
         self.metadata = dataclasses.replace(self.metadata, state="written")
 
 
-@dataclasses.dataclass
+@dataclass
 class InputColumn:
     """Represents a variable within an external stream of data
     and links it to our nice internal representation.
@@ -403,7 +420,7 @@ class InputColumn:
 
     name: str
     key: str = "__DEFAULT_TO_NAME__"
-    type: type | str | None = None
+    type: str | None = None
     unit: str | None = None
     discard: bool = False
     canonical_variable: CanonicalVariable | None = None
@@ -411,3 +428,31 @@ class InputColumn:
     def __post_init__(self):
         if self.key == "__DEFAULT_TO_NAME__":
             self.key = self.name
+
+        # Make a best effort to deal with unicode characters that look the same but have different code points
+        if self.unit: self.unit = normalize("NFKD", str(self.unit))
+
+class InputColumns(list):
+    """
+    Implement a custom syntax for lists of InputColumns where input columns that look like this:
+    ```
+    - name: equivalent_carbon_dioxide 
+    key: 
+        - eco2
+        - eCO2
+    unit: ["ppm", "ppb"]
+    ```    
+    will expand to the cartesian product of all the keys and units.
+    """
+    def __init__(self, iterable):
+        # expand mappings to allow for the cartesian product of any key, unit combinations
+        def l(d, k, default): 
+            value = d.get(k, default)
+            return value if isinstance(value, list) else [value]
+        
+        allowed = {f.name for f in dataclasses.fields(InputColumn)}
+        super().__init__([InputColumn(**({k : v for k,v in col.items() if k in allowed}
+                                        | dict(key = key, unit = unit)))
+                          for col in iterable 
+                          for key, unit in it.product(l(col, "key", "__DEFAULT_TO_NAME__"),
+                                                      l(col, "unit", None))])

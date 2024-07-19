@@ -30,7 +30,8 @@ class AcronetSource(RESTSource):
     cache_directory: Path = Path(f"inputs/acronet")
     endpoint = "https://webdrops.cimafoundation.org/app/"
     # endpoints_url = "https://testauth.cimafoundation.org/auth/realms/webdrops/.well-known/openid-configuration"
-    cache_version = 3 # increment this to invalidate the cache
+    cache_version = 4 # increment this to invalidate the cache
+    mappings: List[InputColumn] = dataclasses.field(default_factory=list)
 
     def init(self, globals):
         super().init(globals)
@@ -63,7 +64,7 @@ class AcronetSource(RESTSource):
             for station in self.api.stations.values():
                 yield dict(
                     key = f"{station.id}_{start.isoformat()}_{end.isoformat()}.pickle",
-                    station = station,
+                    station = dataclasses.asdict(station),
                     start = start,
                     end = end,
                 )
@@ -71,27 +72,21 @@ class AcronetSource(RESTSource):
     def download_chunk(self, chunk: dict):
             station = chunk["station"]
             try:
-                data = self.load_data_from_cache(chunk["key"])
+                _, data = self.load_data_from_cache(chunk)
             except KeyError:
                 data = self.api.get_data_by_station(
-                    station_name=station.name,
+                    station_name=station["name"],
                     start_date=chunk["start"],
                     end_date=chunk["end"],
                     aggregation_time_seconds=60,
                 )
-                self.save_data_to_cache(data, chunk["key"])
+                self.save_data_to_cache(chunk, data)
 
-            # Copy data in from the station object
-            for column in self.copy_metadata_to_columns:
-                if hasattr(station, column.key):
-                    data[column.name] = getattr(station, column.key)
-            
             data["author"] = "Acronet"
             
 
             yield TabularMessage(
                 metadata=self.generate_metadata(
-                    variables = list(data.columns),
                     unstructured = dict(station = station)
                 ),
                 data = data

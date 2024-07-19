@@ -1,16 +1,21 @@
 import dataclasses
-from ..core.bases import Message, Source,  InputColumn
+from ..core.bases import Message, Source,  InputColumns
 from pathlib import Path
 from typing import Iterable, Any
 import logging
 from datetime import datetime
+
 import requests
+from urllib3.util import Retry
+from requests.adapters import HTTPAdapter
 from urllib.parse import urljoin
 import pickle
 
 from ..metadata.db import IngestedChunk
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, URL
+
+import itertools as it
 
 logger = logging.getLogger(__name__)
 
@@ -32,25 +37,23 @@ class APISource(Source):
         - get_chunks
         - download_chunk 
     """
+    mappings: InputColumns
 
     "The time interval to ingest, can be overridden by globals.source_timespan"
     finish_after: int | None = None
 
     "A list of data to extract from the incoming API responses and add in as columns in the data"
-    copy_metadata_to_columns: list[InputColumn] = dataclasses.field(default_factory = list)
+    copy_metadata_to_columns: list[str] = dataclasses.field(default_factory = list)
+    
 
-    cache_version: int = 1 # increment this to invalidate the cache
+    cache_version: int = 2 # increment this to invalidate the cache
     use_cache: bool = True
 
     def init(self, globals):
         super().init(globals)
         self.start_date, self.end_date = self.globals.ingestion_time_constants.query_timespan
         self.cache_directory = self.resolve_path(self.cache_directory, type="data")
-
-        self.sql_engine = create_engine(URL.create(
-            "postgresql+psycopg2",
-            **self.globals.secrets["postgres_database"],
-        ), echo = False)
+        self.mappings_dict = {column.name: column for column in self.mappings}
 
     def get_chunks(self, start_date : datetime, end_date: datetime) -> Iterable[Any]:
         """
@@ -66,8 +69,12 @@ class APISource(Source):
         """
         raise NotImplementedError
     
-    def load_data_from_cache(self, cache_key : str) -> Any:
-        path = Path(self.cache_directory) / cache_key
+    def load_data_from_cache(self, chunk=None, path: Path | None = None) -> Any:
+        if chunk and path: raise ValueError("Only one of chunk or path should be provided")
+        if not chunk and not path: raise ValueError("Either chunk or path should be provided")
+        if chunk: path = Path(self.cache_directory) / chunk["key"]
+        assert path is not None
+
         if not self.use_cache: raise KeyError("Cache is disabled")
         if not path.exists(): raise KeyError(f"Cache file {path} does not exist")
 
@@ -78,42 +85,62 @@ class APISource(Source):
             logger.debug(f"Cache file {path} could not be read: {e}")
             raise KeyError
 
+        if not isinstance(d, dict) or "version" not in d:
+            logger.debug(f"Cache file {path} is not in the expected format")
+            raise KeyError
+        
         if d["version"] != self.cache_version: 
             logger.debug(f"Cache file {path} has version {d['version']} but we are expecting {self.cache_version}")
             raise KeyError
         
-        if d["cache_key"] != cache_key:
-            logger.debug(f"Cache file {path} has cache_key {d['cache_key']} but we are expecting {cache_key}")
+        if chunk and d["cache_key"] != chunk["key"]:
+            logger.debug(f"Cache file {path} has cache_key {d['cache_key']} but we are expecting {chunk['key']}")
             raise KeyError
         
-        return d["data"]
+        return d["chunk"], d["data"]
         
-    def save_data_to_cache(self, data : Any, cache_key : str):
-        path = Path(self.cache_directory) / cache_key
+    def save_data_to_cache(self, chunk : dict, data : Any):
+        path = Path(self.cache_directory) / chunk["key"]
         path.parent.mkdir(parents = True, exist_ok = True)        
         with open(path, "wb") as f:
             pickle.dump(dict(
                 version = self.cache_version,
+                chunk = chunk,
                 data = data,
-                cache_key = cache_key,
+                cache_key = chunk["key"],
                 ), f)
 
-    def query_chunk_ingested(self, cache_key : str) -> bool:
-        """
-        Query the database to see if this chunk has already been ingested.
-        """
-        with Session(self.sql_engine) as session:
-            return session.query(IngestedChunk).where(
-                IngestedChunk.source == self.metadata.source,
-                IngestedChunk.cache_key == cache_key,
-            ).one_or_none()
+    # def query_chunk_ingested(self, cache_key : str) -> bool:
+    #     """
+    #     Query the database to see if this chunk has already been ingested.
+    #     """
+    #     with Session(self.sql_engine) as session:
+    #         return session.query(IngestedChunk).where(
+    #             IngestedChunk.source == self.metadata.source,
+    #             IngestedChunk.cache_key == cache_key,
+    #         ).one_or_none()
         
-        
+    def offline_chunks(self):
+        """
+        Return an iterable of chunks that have already been ingested
+        """
+        for path in self.cache_directory.glob("*.pickle"):
+            try:
+                chunk, _ = self.load_data_from_cache(path=path)
+            except KeyError:
+                continue
+            yield chunk
+
     def generate(self) -> Iterable[Message]:
         emitted_messages = 0
 
-        for chunk in self.get_chunks(self.start_date, self.end_date):
-            cache_key = chunk["key"]
+        if self.globals.offline:
+            chunk_iterable = self.offline_chunks()
+        else:
+            chunk_iterable = self.get_chunks(self.start_date, self.end_date)
+
+
+        for chunk in chunk_iterable:
             try:
                 messages = self.download_chunk(chunk)
             except API_Error as e:
@@ -122,7 +149,8 @@ class APISource(Source):
 
             # Yield the messages until we reach the limit or the end of the data
             for message in messages:
-                for column in self.copy_metadata_to_columns:
+                for column_name in self.copy_metadata_to_columns:
+                    column = self.mappings_dict[column_name]
                     message.data[column.name] = recursive_get(message.metadata.unstructured, column.key.split(".")) 
 
                 yield message
@@ -130,7 +158,6 @@ class APISource(Source):
                 if self.finish_after is not None and emitted_messages >= self.finish_after:
                     return
                 
-
 @dataclasses.dataclass
 class RESTSource(APISource):
     endpoint = "scheme://example.com/api/v1" # Override this in derived classes
@@ -138,6 +165,16 @@ class RESTSource(APISource):
     def init(self, globals):
         super().init(globals)
         self.session = requests.Session()
+
+        # Add retry for HTTP requests
+        retries = Retry(
+            total=3,
+            backoff_factor=0.1,
+            status_forcelist=[502, 503, 504],
+            allowed_methods={'POST'},
+        )
+        self.session.mount('https://', HTTPAdapter(max_retries=retries))
+        self.session.mount('http://', HTTPAdapter(max_retries=retries))
 
     def get(self, url, *args, **kwargs):
         """

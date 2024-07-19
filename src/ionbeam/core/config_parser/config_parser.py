@@ -107,16 +107,19 @@ def parse_globals(config_dir: Path, **overrides):
 
     with open(global_config_file) as f:
         data = yaml.load(f, Loader=SafeLineLoader)
-
-        # merge config from the command line into the global config keys
-        data["globals"] |= overrides
+        if "sources" in overrides:
+            data["sources"] = overrides["sources"]
+            del overrides["sources"]
 
         config = parse_config_from_dict(Config, data, filepath=global_config_file)
-
 
     # Based on the environment =dev/test/prod/local merge config into globals
     env = config.globals.environment
     config.globals = merge_overlay(config.globals, config.environments[env])
+    
+    # Merge config from the command line into the global config keys
+    globals_override = parse_config_from_dict(Globals, overrides, overlay=True)
+    config.globals = merge_overlay(config.globals, globals_override)
 
     # Set up the namespace, this affects both fdb and postgres
     # any data or tables in different namespaces are kept silo'd off
@@ -179,7 +182,6 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
         ├── MARS_keys.yaml
         └── actions.yaml
     """
-
     config = parse_globals(config_dir, **overrides)
 
     # Loop over one level of subdirectories and read in the actions from each one
@@ -218,5 +220,5 @@ def parse_single_action(config_dir: Path, action_input : Path | str | dict, **ov
 
     action.init(config.globals)
 
-    return action
+    return config, action
     

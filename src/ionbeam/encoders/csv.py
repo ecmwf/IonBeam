@@ -24,8 +24,6 @@ class CSVEncoder(Encoder):
     minutes: bool = False
     one_file_per_granule: bool = True
 
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.match})"
 
     def init(self, globals):
         super().init(globals)
