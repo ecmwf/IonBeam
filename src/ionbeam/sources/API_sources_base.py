@@ -46,7 +46,7 @@ class APISource(Source):
     copy_metadata_to_columns: list[str] = dataclasses.field(default_factory = list)
     
 
-    cache_version: int = 2 # increment this to invalidate the cache
+    cache_version: int = 3 # increment this to invalidate the cache
     use_cache: bool = True
 
     def init(self, globals):

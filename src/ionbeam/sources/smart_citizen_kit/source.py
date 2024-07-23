@@ -55,6 +55,7 @@ class SmartCitizenKitSource(RESTSource):
         super().init(globals)
         self.mappings_variable_unit_dict = {(column.key, column.unit) : column for column in self.mappings}
 
+    @cachedmethod(lambda self: self.cache, key=saltedmethodkey('readings'))
     def get_readings(self, device_id, sensor_id, start_date, end_date):
         return self.get(f"/devices/{device_id}/readings",
                     params = {
@@ -104,50 +105,93 @@ class SmartCitizenKitSource(RESTSource):
         for device in devices_in_date_range:
             logger.debug(f"Working on device with id {device['id']}")
             construct_sck_metadata(self, device)
-            for sensor in device["data"]["sensors"]:
-                logger.debug(f"Working on sensor with id {sensor['id']}")
-                yield dict(
-                           key = f"device:{device['id']}_sensor:{sensor['id']}_{start_date.isoformat()}_{end_date.isoformat()}.pickle",
-                           device_id = device["id"],
-                           sensor_id = sensor["id"],
-                           start_date = start_date,
-                           end_date = end_date,
-                           device = device,
-                           sensor = sensor,
-                           )
+            yield dict(
+                        key = f"device:{device['id']}_{start_date.isoformat()}_{end_date.isoformat()}.pickle",
+                        device_id = device["id"],
+                        start_date = start_date,
+                        end_date = end_date,
+                        device = device,
+                        )
+
+    def get_all_sensor_data(self, chunk: dict) -> list[dict]:
+        """Get all the sensor readings in the rawest possible form,
+            leave any formatting decisions for after the caching layer
+            
+            The object returned by get_readings has structure:
+            ```
+            {'device_id': 16030,
+            'sensor_key': 'tvoc',
+            'sensor_id': 113,
+            'component_id': 71464,
+            'rollup': '1s',
+            'function': 'avg',
+            'from': '2024-07-11T09:52:37Z',
+            'to': '2024-07-18T09:52:37Z',
+            'sample_size': 9596,
+            'readings': [
+                ['2024-07-18T09:52:34Z', 1],
+                ...
+                ]
+            }
+            ```
+            Unfortunately the readings returned by different sensors for a device are not
+            guaranteed to be at the same time points, so we have to carefully merge them.
+            """
+        return [self.get_readings(chunk["device_id"],
+                     sensor["id"],
+                     chunk["start_date"],
+                     chunk["end_date"])
+                for sensor in chunk["device"]["data"]["sensors"]]
 
     def download_chunk(self, chunk: dict): 
         # Try to load data from the cache first
         try:
-            chunk, readings = self.load_data_from_cache(chunk)
+            chunk, sensor_data = self.load_data_from_cache(chunk)
         except KeyError:
             logger.debug(f"Downloading from API chunk with key {chunk['key']}")
-            readings = self.get_readings(chunk["device_id"], chunk["sensor_id"], chunk["start_date"], chunk["end_date"])
-            self.save_data_to_cache(chunk, readings)
+            sensor_data = self.get_all_sensor_data(chunk)
+            self.save_data_to_cache(chunk, sensor_data)
 
-        if readings["readings"]: 
-            variable = readings["sensor_key"]
-            unit = normalize("NFKD", chunk["sensor"]["unit"])
+        raw_metadata = {}
+        raw_metadata["device"] = chunk["device"]
+        raw_metadata["readings"] = []
 
-            canonical_form = self.mappings_variable_unit_dict.get((variable, unit))
-            if canonical_form is None:
-                logger.warning(f"Variable ('{variable}', '{unit}') not found in mappings for Smart Citizen Kit\n\n"
-                                   f"Sensor: {chunk['sensor']}\n"
-                                   )
-                return
-            
-            # Check if we should discard this data
-            if canonical_form.discard:
-                return
+        dfs = []
+        def make_df(s):
+            df = pd.DataFrame(s["readings"], columns = ["time", s["sensor_key"]])
+            df.time = pd.to_datetime(df.time, utc = True) 
+            df = df.set_index("time")
+            return df
+        
+        sensors = chunk["device"]["data"]["sensors"]
+        for readings, sensor in zip(sensor_data, sensors):
+            if readings: 
+                # Check that this variable,unit pair is known to us.
+                variable, unit = readings["sensor_key"], normalize("NFKD", sensor["unit"])
+                canonical_form = self.mappings_variable_unit_dict.get((variable, unit))
 
-            raw_metadata = {k : v for k, v in readings.items() if k != "readings"}
-            raw_metadata["device"] = chunk["device"]
-            raw_metadata["sensor"] = chunk["sensor"]
-            df = pd.DataFrame(readings["readings"], columns = ["time", variable])
-            
-            yield TabularMessage(
-                metadata=self.generate_metadata(
-                    unstructured = raw_metadata,
-                ),
-                data = df,
-            )
+                # If not emit a warning, though in future this will be a message sent to an operator
+                if canonical_form is None:
+                    logger.warning(f"Variable ('{variable}', '{unit}') not found in mappings for Smart Citizen Kit\n\n"
+                                    f"Sensor: {sensor}\n"
+                                    )
+                    continue
+                
+                # If this data has been explicitly marked for discarding, silently drop it.
+                if canonical_form.discard:
+                    continue
+                
+                # Save the readings metadata
+                raw_metadata["readings"].append({k : v for k, v in readings.items() if k != "readings"})
+                
+                dfs.append(make_df(readings))
+
+
+        df = pd.concat(dfs, axis = 1)
+        
+        yield TabularMessage(
+            metadata=self.generate_metadata(
+                unstructured = raw_metadata,
+            ),
+            data = df,
+        )
