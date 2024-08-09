@@ -10,3 +10,4 @@
 
 
 from .by_time import TimeAggregator
+from .by_time_2 import NewTimeAggregator
