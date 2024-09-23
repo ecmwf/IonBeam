@@ -15,9 +15,9 @@
 ### 📡 What is IonBeam?
 
 **IonBeam** is a toolkit for **stream based processing of IoT observations**. It allows observational IoT data to be 
-1. Ingested from many sources: REST APIs, MQTT brokers, file servers etc.
-2. Transformed, cleaned, split, combined and anything else.
-3. Output into multiple storage formats.
+1. 🔗 Ingested from many sources: REST APIs, MQTT brokers, file servers etc.
+2. 🔄 Transformed, cleaned, split, combined and anything else.
+3. 💾 Output into multiple storage formats and databases.
 
 Ionbeam uses a **message / action architecture**. Chunks of observations are represented by messages. Messages are routed through a series of actions which perform processing stesps before the final data is written out.
 
@@ -43,7 +43,7 @@ IonBeam can be used in three ways:
 
 ---
 
-## Dev Installation
+## 💻 Dev Installation
 
 Install from source
 
@@ -68,16 +68,16 @@ pre-commit install
 
 Create a `secrets.yaml` file containing the access credentials for the various sources of data, use `example_secrets.yaml` as a template. `secrets.yaml` is in the gitignore to lower the risk that it accidentally gets committed to git.
 
-## Documentation
+## 📚 Documentation
 
 The documentation will be available at on readthedocs.io once this repo is made public. For now you can build it with sphinx.
 
-## License
+## 📜 License
 
 [Apache License 2.0](LICENSE) In applying this license, ECMWF does not waive the privileges and immunities
 granted to it by virtue of its status as an intergovernmental organisation nor does it submit to any jurisdiction.
 
-## Testing
+## ✅ Testing
 
 To run the default battery of smoke tests, just run pytest:
 
@@ -91,7 +91,7 @@ To run against live APIs use:
 $ pytest -m network
 ```
 
-## Running the Jupyter notebooks
+## 📓 Running the Jupyter notebooks
 
 Setting up a jupyer lab server from scratch using conda or mamba:
 
@@ -109,7 +109,7 @@ jupyter lab
 ```
 
 
-## Command Line Usage
+## 🖥️ Command Line Usage
 Currently the main way to interact with the pipeline is through the command line interface.
 ```bash
 % python -m ionbeam --help
