@@ -91,12 +91,13 @@ To run against live APIs use:
 $ pytest -m network
 ```
 
-## Running the Jupyter notebooks
+## Running the Jupyter notebooks
+
 Setting up a jupyer lab server from scratch using conda or mamba:
 
 ```sh
-# Make an environment for iot-ingester
-# Do this at the root of the repository pwd=something/iot-ingester/
+# Make an environment for IonBeam
+# Do this at the root of the repository pwd=something/IonBeam/
 conda env create --name ionbeam ipykernel
 conda activate ionbeam
 pip install --editable ".[dev]"
@@ -112,7 +113,7 @@ jupyter lab
 Currently the main way to interact with the pipeline is through the command line interface.
 ```bash
 % python -m ionbeam --help
-usage: ECMWF IOT Observation Processor [-h] [--validate-config] [-v] [-j [NUMBER]]
+usage: IonBeam [-h] [--validate-config] [-v] [-j [NUMBER]]
                                        [--finish-after [NUMBER]]
                                        config_file
 
