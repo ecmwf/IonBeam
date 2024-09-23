@@ -1,19 +1,47 @@
+> [!WARNING]
+> This project is ALPHA and will be experimental for the foreseeable future. Interfaces and functionality are likely to change. DO NOT use this software in any project/software that is operational.
 
 <p align="center">
-    <img alt="The IONBeam logo, showing the name and a line drawing of a stylised scientific instrument who operation involves streams of ions."src="https://github.com/ecmwf-projects/iot-ingester/blob/ac8c020bda2a1143d0c4ffb6a29ff58eb0e2c790/ionbeam.png">
+    <img alt="IonBeam logo, showing a stylized scientific instrument with ion streams." src="https://github.com/ecmwf-projects/iot-ingester/blob/ac8c020bda2a1143d0c4ffb6a29ff58eb0e2c790/ionbeam.png">
 </p>
+
 <p align="center">
-    <em>A streaming library for IoT data</em>
+    <em>⚡️ A library for IoT data wrangling ⚡️</em>
 </p>
 
-:warning: This project is ALPHA and will be experimental for the foreseeable future. Interfaces and functionality are likely to change. DO NOT use this software in any project/software that is operational. :warning:
+---
 
-This is a prototype library for streaming IOT observations into a database. It's based on message + action model where streams of messages are transformed by different actions before reaching their final destination which could be a database or external service.
 
-This project can be deployed in three ways:
-    1. Locally, as a single threaded process, see Command Line Usage.
-    3. A local docker-compose setup, see [the deployment repo](https://github.com/ecmwf-projects/iot-ingester-deployment)
-    3. TODO: The above but running on a kubernetes cluster.
+### 📡 What is IonBeam?
+
+**IonBeam** is a toolkit for **stream based processing of IoT observations**. It allows observational IoT data to be 
+1. Ingested from many sources: REST APIs, MQTT brokers, file servers etc.
+2. Transformed, cleaned, split, combined and anything else.
+3. Output into multiple storage formats**.
+
+Ionbeam uses a **message / action architecture**. Chunks of observations are represented by messages. Messages are routed through a series of actions which perform processing stesps before the final data is written out.
+
+---
+
+### 🚀 Features
+
+- Sources: REST APIs, MQTT brokers, file servers etc.
+- Support for both polling and event based data ingestion.
+- 
+- Transform **streams of messages** with actions before they reach their final destination.
+- Compatible with databases or external services for flexible deployment.
+
+---
+
+### 🛠️ Deployment Options
+
+IonBeam can be used in three ways:
+
+1. **Locally**, as a command line tool. See [Command Line Usage](#).
+2. **Docker-compose** setup, for local testing and development.
+3. (🔜 **Coming Soon**): Deployment via a Heml Chart to Kubernetes cluster.
+
+---
 
 ## Dev Installation
 
@@ -109,54 +137,3 @@ options:
 The `-vv` and `--finish-after` options are useful for debugging runs.
 
 See [this notebook](examples/notebooks/run_the_pipeline_manually.ipynb) for a walkthrough of assembling the pipeline from various components and then running it. This is useful for debugging the output at various stages in the pipeline.
-
-## The config
-There's a lot happening in `config/config.yaml`. The structure of the file is defined by a set of nested python dataclasses starting with `Config` in `ionbeam.core.config_parser`.
-
-The three big pieces are the parsers which define how to rename and clean up the input data, `canonical_variables.yaml` which defines a unique internal name, dtype and unit for each variable and `MARS_keys.yaml` which defines how to spit the data out to ODB format.
-
-## Architecture
-
-### Source:
-yields raw tabular data
-metadata_keys: [`source`]
-
-### Preprocessor:
-- renames columns to canonical names
-- formats dates to timezone aware UTC dates
-- converts units
-- splits data into single variables + metadata columns
-- metadata_keys: [`source`, `observed_variable`]
-
-### Aggregators:
-- Aggregates data by source, variable and time_slice
-- In future could merge different sources if appropriate.
-- metadata_keys: [`source`, `observed_variable`, `time_slice`]
-
-### Quality Controlers [to implement]:
-- Filters on [`source`, `observed_variable`, `time_slice`], may take more that one unique tuple?
-- does some quality control, ML, whatever
-- yields output data
-
-### Encoders:
-- matches on [`source`, `observed_variable`, `time_slice`]
-- encoders to specified output format, currently CSV, ODB
-
-## Changelog
-
-- added CIMA and Meteotracker sources
-    - Meteotracker caches raw data to disk, CIMA does not currently
-
-- added a secrets.yaml file for credentials
-    - header: useragent: ecmwf scraper from: thomas.hodson@ecmwf.int fields
-
-- changed config parser to load the full config immediately from nested dataclasses
-    - gives better and immediate error messages
-    - annoyingly forces you to specify some classes as unions rather than using base classes
-
-- added unit conversions
-    - currently writing the unit conversion table by hand, fine for now.
-    - looked at using popular python packages like pint, unit etc by  few support the 100 in "C/100m"
-
-- added a way to cleanly finsh the pipeline using a special AbortMessage
-    - This is necessary for the stateful pipes funtcions like the time aggregator
