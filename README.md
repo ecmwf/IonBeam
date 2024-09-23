@@ -17,7 +17,7 @@
 **IonBeam** is a toolkit for **stream based processing of IoT observations**. It allows observational IoT data to be 
 1. Ingested from many sources: REST APIs, MQTT brokers, file servers etc.
 2. Transformed, cleaned, split, combined and anything else.
-3. Output into multiple storage formats**.
+3. Output into multiple storage formats.
 
 Ionbeam uses a **message / action architecture**. Chunks of observations are represented by messages. Messages are routed through a series of actions which perform processing stesps before the final data is written out.
 
