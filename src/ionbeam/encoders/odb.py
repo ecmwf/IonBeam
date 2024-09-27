@@ -13,7 +13,7 @@ from typing import Literal, List, Dict, Iterable
 from pathlib import Path
 
 from ..core.bases import TabularMessage, FinishMessage, FileMessage, Encoder
-from ..core.config_parser.config_parser import ConfigError
+from ..core.config_parser.config_parser_machinery import ConfigError
 
 import pandas as pd
 
