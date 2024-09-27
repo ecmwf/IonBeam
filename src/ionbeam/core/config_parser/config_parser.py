@@ -18,13 +18,21 @@ from typing import Annotated, List
 import yaml
 from yamlinclude import YamlIncludeConstructor
 
+# This line is necessary to automatically find all the subclasses of things like "Encoder"
+# Even though black desperately wants to remove it as an unused import
+from ... import (  # noqa: F401
+    aggregators,
+    encoders,
+    parsers,
+    quality_assessment,
+    sources,
+    writers,
+)
 from ...metadata.db import create_namespaced_engine
 from ..bases import Action, Globals
 from ..history import describe_code_source
 from ..mars_keys import FDBSchema
 from .config_parser_machinery import ConfigError, merge_overlay, parse_config_from_dict
-
-# # This line is necessary to automatically find all the subclasses of things like "Encoder"
 
 logger = logging.getLogger(__name__)
 
