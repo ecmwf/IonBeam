@@ -8,28 +8,26 @@
 # # does it submit to any jurisdiction.
 # #
 
-import logging
-
-from dataclasses import dataclass, field
-from typing import List, Literal, Annotated
-from pathlib import Path
-from collections import defaultdict
 import itertools as it
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Annotated, List
 
 # yamlinclude allows us to include one yaml file from another
 import yaml
 from yamlinclude import YamlIncludeConstructor
 
-from ..bases import CanonicalVariable, Action, Globals, Match
-from ..history import describe_code_source, CodeSourceInfo
-from .config_parser_machinery import parse_config_from_dict, ConfigError, merge_overlay
-from ..mars_keys import FDBSchema
 from ...metadata.db import create_namespaced_engine
+from ..bases import Action, Globals
+from ..history import describe_code_source
+from ..mars_keys import FDBSchema
+from .config_parser_machinery import ConfigError, merge_overlay, parse_config_from_dict
 
 # # This line is necessary to automatically find all the subclasses of things like "Encoder"
-from ... import sources, parsers, aggregators, quality_assessment, encoders, writers
 
 logger = logging.getLogger(__name__)
+
 
 # Set up the yaml parser to include line numbers with the key "__line__"
 class SafeLineLoader(yaml.SafeLoader):
@@ -53,6 +51,7 @@ class Config:
     sources: List[str]
     environments: dict[str, Annotated[Globals, "overlay"]]
 
+
 def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
     """
     Refering to the docs for parse_config, this function deals with the subfolders:
@@ -64,7 +63,9 @@ def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
     It then calls action.init() to give all the actions a change to look at the global config.
     """
     # Set up the yaml parser to support file includes
-    YamlIncludeConstructor.add_to_loader_class(loader_class=SafeLineLoader, base_dir=str(yaml_file.parent))
+    YamlIncludeConstructor.add_to_loader_class(
+        loader_class=SafeLineLoader, base_dir=str(yaml_file.parent)
+    )
 
     # Load the yaml file
     with open(yaml_file) as f:
@@ -85,6 +86,7 @@ def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
 
     return config
 
+
 def parse_globals(config_dir: Path, **overrides):
     if not config_dir.exists():
         raise ConfigError(f"{config_dir} does not exist!")
@@ -95,9 +97,9 @@ def parse_globals(config_dir: Path, **overrides):
         global_config_file = config_dir
         config_dir = config_dir.parent
 
-
-    YamlIncludeConstructor.add_to_loader_class(loader_class=SafeLineLoader, base_dir=str(config_dir))
-    
+    YamlIncludeConstructor.add_to_loader_class(
+        loader_class=SafeLineLoader, base_dir=str(config_dir)
+    )
 
     logger.warning(f"Configuration Directory: {config_dir}")
     logger.warning(f"Global config file: {global_config_file}")
@@ -114,9 +116,9 @@ def parse_globals(config_dir: Path, **overrides):
         config = parse_config_from_dict(Config, data, filepath=global_config_file)
 
     # Based on the environment =dev/test/prod/local merge config into globals
-    env = config.globals.environment
+    env = overrides.get("environment", config.globals.environment)
     config.globals = merge_overlay(config.globals, config.environments[env])
-    
+
     # Merge config from the command line into the global config keys
     globals_override = parse_config_from_dict(Globals, overrides, overlay=True)
     config.globals = merge_overlay(config.globals, globals_override)
@@ -126,14 +128,18 @@ def parse_globals(config_dir: Path, **overrides):
     # This is useful for experiments or the dev/test/local split
     config.globals.namespace = getattr(config.globals, "namespace", env)
 
-    logger.debug(f"Loaded global config...")
-    
+    logger.debug("Loaded global config...")
+
     if config.globals.config_path is None:
         config.globals.config_path = config_dir
 
-
     # Resolve the paths in the global config relative to the current directory
-    for name in ["data_path", "fdb_schema_path", "metkit_language_template", "secrets_file"]:
+    for name in [
+        "data_path",
+        "fdb_schema_path",
+        "metkit_language_template",
+        "secrets_file",
+    ]:
         path = getattr(config.globals, name)
         if not path.is_absolute():
             path = (config_dir.parent / path).resolve()
@@ -146,11 +152,11 @@ def parse_globals(config_dir: Path, **overrides):
 
     # Set up the global sql engine with a namespace and secrets
     config.globals.sql_engine = create_namespaced_engine(
-            config.globals.namespace, 
-            **config.globals.secrets["postgres_database"],
-            host = config.globals.postgres_database["host"],
-            port = config.globals.postgres_database["port"],
-        )
+        config.globals.namespace,
+        **config.globals.secrets["postgres_database"],
+        host=config.globals.postgres_database["host"],
+        port=config.globals.postgres_database["port"],
+    )
 
     # Parse the global fdb schema file
     # This is used to validate odb files during encoding and before writing to the fdb
@@ -164,6 +170,7 @@ def parse_globals(config_dir: Path, **overrides):
     logger.debug(f"Checked repository source state: {config.globals.code_source}")
 
     return config
+
 
 def parse_config(config_dir: Path, schema=Config, **overrides):
     """
@@ -186,7 +193,8 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
 
     # Loop over one level of subdirectories and read in the actions from each one
     action_source_files = {
-        source_name: config_dir / source_name / "actions.yaml" for source_name in config.sources
+        source_name: config_dir / source_name / "actions.yaml"
+        for source_name in config.sources
     }
     action_source_files["base"] = config_dir / "actions.yaml"
 
@@ -202,14 +210,17 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
     config.sources = sources
     return config, actions
 
-def parse_single_action(config_dir: Path, action_input : Path | str | dict, **overrides):
+
+def parse_single_action(config_dir: Path, action_input: Path | str | dict, **overrides):
     config = parse_globals(config_dir, **overrides)
 
     if isinstance(action_input, Path):
-        YamlIncludeConstructor.add_to_loader_class(loader_class=SafeLineLoader, base_dir=str(action_input.parent))
+        YamlIncludeConstructor.add_to_loader_class(
+            loader_class=SafeLineLoader, base_dir=str(action_input.parent)
+        )
         with open(action_input) as f:
             action_dict = yaml.load(f, Loader=SafeLineLoader)
-    
+
     elif isinstance(action_input, str):
         action_dict = yaml.safe_load(action_input)
 
@@ -221,4 +232,3 @@ def parse_single_action(config_dir: Path, action_input : Path | str | dict, **ov
     action.init(config.globals)
 
     return config, action
-    
