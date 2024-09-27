@@ -9,25 +9,26 @@
 # #
 
 import dataclasses
-from typing import Iterable, Callable, List, Literal, TypeVar, Any, Annotated
-import re
-import pandas
-from pathlib import Path
-from .html_formatters import dataclass_to_html, message_to_html, action_to_html
-from .history import (
-    PreviousActionInfo,
-    ActionInfo,
-    MessageInfo,
-    CodeSourceInfo,
-)
-from .mars_keys import MARSRequest, FDBSchema
-from datetime import datetime, timedelta, timezone
-import uuid
 import itertools as it
-
+import re
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Annotated, Callable, Iterable, List, Literal, TypeVar
 from unicodedata import normalize
 
-from dataclasses import dataclass
+import pandas
+
+from .history import (
+    ActionInfo,
+    CodeSourceInfo,
+    MessageInfo,
+    PreviousActionInfo,
+)
+from .html_formatters import action_to_html, dataclass_to_html, message_to_html
+from .mars_keys import FDBSchema, MARSRequest
+
 # from functools import partial
 # from pydantic.dataclasses import dataclass
 
@@ -35,6 +36,7 @@ from dataclasses import dataclass
 #     arbitrary_types_allowed = True
 
 # dataclass = partial(dataclass, config=Config)
+
 
 @dataclass(unsafe_hash=True)
 class MetaData:
@@ -66,12 +68,14 @@ class Message:
 @dataclass
 class FinishMessage(Message):
     "Indicates no more messages will come down the pipeline."
+
     reason: str
 
 
 @dataclass
 class DataMessage(Message):
     "A message that represents some data. It may have an attached dataframe, a reference to a file or somethihg else."
+
     metadata: MetaData
     history: list = dataclasses.field(default_factory=list, kw_only=True)
 
@@ -143,10 +147,12 @@ class CanonicalVariable:
 
     def __repr__(self):
         return f"CanonicalVariable(name={self.name!r}, unit={self.unit!r}, desc={self.desc!r})"
-    
+
     def __post_init__(self):
         # Make a best effort to deal with unicode characters that look the same but have different code points
-        if self.unit: self.unit = normalize("NFKD", self.unit)
+        if self.unit:
+            self.unit = normalize("NFKD", self.unit)
+
 
 @dataclass
 class IngestionTimeConstants:
@@ -156,17 +162,23 @@ class IngestionTimeConstants:
     time_direction: Literal["forwards", "backwards"] = "forwards"
 
     def __post_init__(self):
-        def date_eval(s): 
-            try: 
-                return datetime.fromisoformat(s)
-            except: pass
+        def date_eval(s):
             try:
-                return eval(s, dict(datetime=datetime, timedelta=timedelta, timezone=timezone))
+                return datetime.fromisoformat(s)
+            except:
+                pass
+            try:
+                return eval(
+                    s, dict(datetime=datetime, timedelta=timedelta, timezone=timezone)
+                )
             except SyntaxError as e:
                 raise SyntaxError(f"{s} has a syntax error {e}")
-        def interval_eval(tup): return tuple(sorted(map(date_eval, tup)))
+
+        def interval_eval(tup):
+            return tuple(sorted(map(date_eval, tup)))
 
         self.query_timespan = interval_eval(self.query_timespan)
+
 
 @dataclass
 class Globals:
@@ -186,13 +198,12 @@ class Globals:
     secrets: dict | None = None
     api_hostname: str | None = None
     postgres_database: dict | None = None
-    namespace: str | None = None
 
     # When a class hasn't been instantiated yet use a string, see https://peps.python.org/pep-0484/#forward-references
     actions: dict[uuid.UUID, "Action"] = dataclasses.field(default_factory=dict)
 
-    def _repr_html_(self): return dataclass_to_html(self)
-
+    def _repr_html_(self):
+        return dataclass_to_html(self)
 
 
 @dataclass
@@ -205,7 +216,7 @@ class Action:
     id: uuid.UUID = dataclasses.field(default_factory=uuid.uuid4, kw_only=True)
     globals: Annotated[Globals, "post_init"] = dataclasses.field(kw_only=True)
 
-    def init(self, globals : Globals):
+    def init(self, globals: Globals):
         "Initialise self with access to the global config variables"
         self.globals = globals
         self.globals.actions[self.id] = self
@@ -213,11 +224,13 @@ class Action:
 
     def _repr_html_(self):
         return action_to_html(self)
-    
+
     def __str__(self):
         return f"{self.__class__.__name__}"
 
-    def resolve_path(self, path: str | Path, type: Literal["data", "config"] = "data") -> Path:
+    def resolve_path(
+        self, path: str | Path, type: Literal["data", "config"] = "data"
+    ) -> Path:
         assert self.globals
         if type == "data":
             base = self.globals.data_path
@@ -247,23 +260,33 @@ class Action:
         keys = message_keys | action_keys | explicit_keys
         return MetaData(**keys)
 
-    def tag_message(self, msg: DataMessageVar, previous_msg: DataMessage | MessageInfo | None) -> DataMessageVar:
+    def tag_message(
+        self, msg: DataMessageVar, previous_msg: DataMessage | MessageInfo | None
+    ) -> DataMessageVar:
         """
         Update the message history, using the current message and the previous message
         If there is no logical previous message, such as when doing TimeAggregation,
         you can directly pass a MessageInfo object in place of previous_message.
         """
         if isinstance(previous_msg, DataMessage):
-            message = MessageInfo(name=previous_msg.__class__.__name__, metadata=previous_msg.metadata)
+            message = MessageInfo(
+                name=previous_msg.__class__.__name__, metadata=previous_msg.metadata
+            )
         elif isinstance(previous_msg, MessageInfo):
             message = previous_msg
         else:
-            raise ValueError(f"previous_msg was of type {type(previous_msg)} not DataMessage or MessageInfo")
+            raise ValueError(
+                f"previous_msg was of type {type(previous_msg)} not DataMessage or MessageInfo"
+            )
 
-        msg.history = previous_msg.history.copy() if isinstance(previous_msg, DataMessage) else []
+        msg.history = (
+            previous_msg.history.copy() if isinstance(previous_msg, DataMessage) else []
+        )
         msg.history.append(
             PreviousActionInfo(
-                action=ActionInfo(name=self.__class__.__name__, code=self.globals.code_source),
+                action=ActionInfo(
+                    name=self.__class__.__name__, code=self.globals.code_source
+                ),
                 message=message,
             )
         )
@@ -299,7 +322,6 @@ class Match:
     Match fields may be strings or regex.
     """
 
-    
     source_action_id: uuid.UUID | None = None
     "only match on messages coming from Actions with this id"
 
@@ -339,16 +361,17 @@ class Match:
 @dataclass
 class Processor(Action):
     "An Action which accepts and returns messages"
+
     # UUID is the fast path that just matches instantly with a single previous action
     match: List[Match] | None = dataclasses.field(default=None, kw_only=True)
 
     def matches(self, message: Message) -> bool:
         if isinstance(message, FinishMessage):
             return True
-        
-        assert(isinstance(message, DataMessage))
-        assert(self.match is not None)
-        
+
+        assert isinstance(message, DataMessage)
+        assert self.match is not None
+
         # Fast path for just matching an message from a particular action
         if isinstance(self.match, uuid.UUID):
             return message.metadata.source_action_id == self.match
@@ -430,29 +453,41 @@ class InputColumn:
             self.key = self.name
 
         # Make a best effort to deal with unicode characters that look the same but have different code points
-        if self.unit: self.unit = normalize("NFKD", str(self.unit))
+        if self.unit:
+            self.unit = normalize("NFKD", str(self.unit))
+
 
 class InputColumns(list):
     """
     Implement a custom syntax for lists of InputColumns where input columns that look like this:
     ```
-    - name: equivalent_carbon_dioxide 
-    key: 
+    - name: equivalent_carbon_dioxide
+    key:
         - eco2
         - eCO2
     unit: ["ppm", "ppb"]
-    ```    
+    ```
     will expand to the cartesian product of all the keys and units.
     """
+
     def __init__(self, iterable):
-        # expand mappings to allow for the cartesian product of any key, unit combinations
-        def l(d, k, default): 
+        # expand mappings to allow for the cartesian product of any key, unit combinations
+        def l(d, k, default):
             value = d.get(k, default)
             return value if isinstance(value, list) else [value]
-        
+
         allowed = {f.name for f in dataclasses.fields(InputColumn)}
-        super().__init__([InputColumn(**({k : v for k,v in col.items() if k in allowed}
-                                        | dict(key = key, unit = unit)))
-                          for col in iterable 
-                          for key, unit in it.product(l(col, "key", "__DEFAULT_TO_NAME__"),
-                                                      l(col, "unit", None))])
+        super().__init__(
+            [
+                InputColumn(
+                    **(
+                        {k: v for k, v in col.items() if k in allowed}
+                        | dict(key=key, unit=unit)
+                    )
+                )
+                for col in iterable
+                for key, unit in it.product(
+                    l(col, "key", "__DEFAULT_TO_NAME__"), l(col, "unit", None)
+                )
+            ]
+        )

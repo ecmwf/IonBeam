@@ -28,7 +28,7 @@ from ... import (  # noqa: F401
     sources,
     writers,
 )
-from ...metadata.db import create_namespaced_engine
+from ...metadata.db import create_sql_engine
 from ..bases import Action, Globals
 from ..history import describe_code_source
 from ..mars_keys import FDBSchema
@@ -131,11 +131,6 @@ def parse_globals(config_dir: Path, **overrides):
     globals_override = parse_config_from_dict(Globals, overrides, overlay=True)
     config.globals = merge_overlay(config.globals, globals_override)
 
-    # Set up the namespace, this affects both fdb and postgres
-    # any data or tables in different namespaces are kept silo'd off
-    # This is useful for experiments or the dev/test/local split
-    config.globals.namespace = getattr(config.globals, "namespace", env)
-
     logger.debug("Loaded global config...")
 
     if config.globals.config_path is None:
@@ -158,9 +153,8 @@ def parse_globals(config_dir: Path, **overrides):
     with open(config.globals.secrets_file, "r") as f:
         config.globals.secrets = yaml.safe_load(f)
 
-    # Set up the global sql engine with a namespace and secrets
-    config.globals.sql_engine = create_namespaced_engine(
-        config.globals.namespace,
+    # Set up the global sql engine
+    config.globals.sql_engine = create_sql_engine(
         **config.globals.secrets["postgres_database"],
         host=config.globals.postgres_database["host"],
         port=config.globals.postgres_database["port"],
