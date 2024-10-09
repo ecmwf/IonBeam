@@ -1,0 +1,46 @@
+# Default types
+
+param:      Param;
+step:       Step;
+date:       Date;
+hdate:      Date;
+refdate:    Date;
+latitude:   Double;
+longitude:  Double;
+levelist:   Double;
+grid:       Grid;
+expver:     Expver;
+
+time:       Time;
+fcmonth:    Integer;
+
+number:     Integer;
+frequency:  Integer;
+direction:  Integer;
+channel:    Integer;
+
+instrument: Integer;
+ident:      Integer;
+
+diagnostic: Integer;
+iteration:  Integer;
+system:     Integer;
+method:     Integer;
+
+# Current schema
+[ class, expver, stream, date, time
+       [ platform
+               [ observation_variable ]]
+]
+
+# Whole earth view
+#[ class, expver, stream=lwda, type=oai, date:Year, 
+#       [ platform??, date:YearMonth,
+#               [ obsgroup??, reportype??, observation_variable??, date:Date, time ]]
+#]
+
+# Time series view
+#[ class, expver, stream=sots, type=ionbeam, date:Year,
+#       [ platform??,
+#               [ date, station_id]]
+#]

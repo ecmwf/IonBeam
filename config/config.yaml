@@ -1,0 +1,69 @@
+globals:
+  # A list of observables with name, unit and other metadata that the incoming datastreams get mapped to.
+  canonical_variables: !include canonical_variables.yaml
+
+  # Where to look for input data
+  data_path: ../data/
+
+  # The secrets file to use
+  # Todo: add a mechanism to template values from this file into the config with a constructor like !secrets meteotracker.password
+  secrets_file: config/secrets.yaml
+
+  # Whether sources should attempt to access external services or just use locally cached data
+  # Can be overridden at the command line
+  offline: false
+  overwrite: false
+
+ # Global constants that override things in the sources and timeaggregator
+  ingestion_time_constants:
+    query_timespan: 
+      - datetime.now(tz=timezone.utc) - timedelta(days = 7)
+      - datetime.now(tz=timezone.utc)
+      # - "2023-06-10T00:00:00Z"
+      # - "2025-05-01T00:00:00Z"
+    
+    # How old a data granule must be before the aggregator considers it to be "complete"
+    # This allows time for late data to arrive
+    emit_after_hours: 20
+
+    # How big a data granule should be
+    granularity: 1h
+
+    # In what direction the time aggregator expects data to arrive. 
+    time_direction: forwards
+
+  
+  fdb_schema_path: config/fdb/server/custom_schema
+  metkit_language_template: config/metkit/language.yaml.template
+
+sources:
+  # - sensor.community
+  #- acronet
+  - meteotracker
+  #- smart_citizen_kit
+
+environments:
+  local:
+    api_hostname: http://localhost:5002/api/v1/
+    offline: true
+    overwrite: true
+    postgres_database:
+      host: localhost
+      port: 5432
+
+  dev:   
+    api_hostname: http://iotdev-001:18201/api/v1/ # (requires an SSH tunnel)
+    # api_hostname: https://ionbeam-dev.ecmwf.int/api/v1/ # Deployed Frontend (need to fix)
+    offline: false
+    overwrite: false
+    postgres_database:
+      host: iotdev-001
+      port: 9875
+
+  test: 
+    api_hostname: https://ionbeam-test.ecmwf.int/api/v1
+    offline: false
+    overwrite: false
+    postgres_database:
+      host: iotdev-002
+      port: 9875

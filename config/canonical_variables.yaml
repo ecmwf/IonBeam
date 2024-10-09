@@ -1,0 +1,264 @@
+# This file will contain a list of our canonical variables various metadata associated with them
+
+# This is our canonical name for each variable
+# Where possible I have used the same keys as defined by the WMO, see WMO_variables.yaml
+# When that's not possible we need to define the key, unit and definition
+# Possibly other variables too
+
+# for dtype use object aliases from https://pandas.pydata.org/docs/user_guide/basics.html#basics-dtypes
+# default dtype is float64
+
+- name: sensor_name
+  dtype: object
+  desc: The name of the sensor that made the observation.
+
+- name: time
+  dtype: datetime64[ns, UTC]
+  desc: The time that the observation was made.
+
+- name: offset_tz
+  desc: Uncertain what this means in the Meteotracker data.
+  dtype: object
+
+- name: lat
+  unit: "EPSG:4326"
+  desc: "The lattitude of the observation, referenced to WGS84 (EPSG: 4326)"
+
+- name: lon
+  unit: "EPSG:4326"
+  desc: "The longitude of the observation, referenced to WGS84 (EPSG: 4326)"
+
+- name: altitude
+  unit: "EPSG:4326"
+  desc: "The altitude of the observation, referenced to WGS84 (EPSG: 4326)"
+
+- name: author
+  dtype: object
+  desc: The author field from the Meteotracker data
+
+- name: track_id
+  desc: A unique identifer for a single recorded track from a mobile sensor.
+  dtype: object
+
+- name: station_name
+  desc: A human readable name for a station or device. Not necessarily unique.
+  dtype: object
+
+- name: station_id
+  desc: A unique identifer for a station, sensor or device.
+  dtype: object
+
+- name: created_at
+  dtype: datetime64[ns, UTC]
+
+- name: city
+  dtype: object
+
+- name: country
+  dtype: object
+
+- name: sensor_type
+  dtype: object
+
+- name: location
+  dtype: int
+
+- name: observation_id
+  desc: A unique identifer for a stationary sensor.
+  dtype: object
+
+- name: air_temperature_near_surface
+  output: true
+  unit: K
+  codetype: 35 # Land TEMP
+  varno: 39 # 2m temperature (K)
+  obstype: 5 # TEMP
+  reportype: 1
+
+- name: relative_humidity_near_surface
+  output: true
+  unit: "%"
+  WMO: true # indicates this exact name is defined by the WMO
+  codetype: 14 # Automatic Land SYNOP
+  varno: 58 # 2m rel. humidity
+  obstype: 1 # SYNOP
+  reportype: 2
+
+- name: humidity_index
+  output: true
+  unit: K
+  reportype: 3
+
+- name: internal_temperature
+  output: true
+  unit: K
+  desc: The internal temperature of the sensor.
+  reportype: 4
+
+- name: vertical_temperature_gradient
+  output: true
+  desc: 
+  unit: "°C/100m"
+  reportype: 5
+
+- name: air_pressure_near_surface
+  output: true
+  unit: Pa
+  WMO: False #the WMO use hPa as the unit
+  reportype: 6
+
+- name: pressure_sealevel
+  unit: Pa
+  reportype: 7
+
+- name: co2
+  output: true
+  unit: ppm
+  WMO: true
+  reportype: 8
+
+- name: wind_gust
+  output: true
+  unit: m.s-1 
+  WMO: true
+  reportype: 9
+
+- name: wind_gust_direction
+  output: true
+  unit: "°"
+  reportype: 10
+
+- name: dew_point_temperature
+  output: true
+  unit: K
+  WMO: true
+  reportype: 11
+
+- name: wind_direction_near_surface
+  output: true
+  unit: "°"
+  WMO: true
+  reportype: 12
+
+- name: wind_speed_near_surface
+  output: true
+  unit: "m/s"
+  WMO: true
+  reportype: 13
+
+- name: rain
+  output: true
+  unit: "mm"
+  reportype: 14
+
+- name: wind_direction
+  output: true
+  unit: "Degrees"
+  reportype: 15
+
+- name: anemometer
+  output: true
+  unit: "m/s"
+  reportype: 16
+
+
+- name: radiometer
+  unit: "W/m^2"
+- name: battery_level
+  unit: "V"
+  reportype: 17
+
+
+- name: thermometer_min
+  output: true
+  unit: K
+  reportype: 18
+
+- name: thermometer_max
+  output: true
+  unit: K
+  reportype: 19
+
+- name: signal_strength
+  unit: "CSQ"
+
+- name: solar_radiation_index
+  unit: 1
+
+- name: bluetooth_RSSI
+  unit: dBm
+
+- name: carbon_dioxide
+  unit: ppm
+
+- name: carbon_monoxide
+  unit: ppm
+
+- name: particulate_matter_1
+  unit: "μg/m3"
+
+- name: particulate_matter_2_5
+  unit: "μg/m3"
+
+- name: particulate_matter_4
+  unit: "μg/m3"
+
+- name: particulate_matter_10
+  unit: "μg/m3"
+
+- name: particulate_matter_particle_number_0_3
+  unit: "#/cm3"
+
+- name: particulate_matter_particle_number_0_5
+  unit: "#/cm3"
+
+- name: particulate_matter_particle_number_1
+  unit: "#/cm3"
+
+- name: particulate_matter_particle_number_2_5
+  unit: "#/cm3"
+
+- name: particulate_matter_particle_number_4
+  unit: "#/cm3"
+
+- name: particulate_matter_particle_number_5
+  unit: "#/cm3"
+
+- name: particulate_matter_particle_number_10
+  unit: "#/cm3"
+
+- name: typical_particle_size
+  unit: "μm"
+
+- name: EPA_Air_Quality
+  unit: 1
+
+- name: Fast_Air_Quality
+  unit: 1
+
+- name: ozone
+  unit: "ppb"
+
+- name: potential_temperature
+  unit: K
+
+- name: total_volatile_organic_compounds
+  unit: ppb
+
+- name: equivalent_carbon_dioxide
+  unit: ppm
+
+- name: noise_dB
+  unit: "dB"
+
+- name: noise_dBA
+  unit: "dBA"
+
+- name: nitrogen_oxide
+  unit: "ppm"
+
+- name: ambient_light
+  unit: "lux"
+
+- name: unknown
+  unit: "NA"

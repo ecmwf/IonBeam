@@ -1,0 +1,32 @@
+actions:
+  - class: AcronetSource
+    mappings: !include mappings.yaml
+    copy_metadata_to_columns:
+      - station_id
+      - station_name
+      - lat
+      - lon
+
+  - class: CSVParser
+    mappings: !include mappings.yaml
+    identifying_keys:
+      - time
+
+    metadata_keys:
+      - author
+      - station_id
+      - lat
+      - lon
+
+  - class: TimeSplitter
+    granularity: 6h
+
+  - class: TimeAggregator
+    granularity: 1h
+    emit_after_hours: 120
+
+  - class: ODCEncoder
+    output: outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb
+    MARS_keys: !include MARS_keys.yaml
+
+# From here messages fall into the general stream of the pipeline defined in ../actions.yml 

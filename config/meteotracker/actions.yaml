@@ -1,0 +1,54 @@
+actions:
+  - class: MeteoTrackerSource #Can use either MeteoTrackerOfflineSource or MeteoTrackerSource
+    metadata:
+      source: meteotracker
+    cache_directory: inputs/meteotracker
+    mappings: !include mappings.yaml
+    copy_metadata_to_columns:
+      -  author
+      -  offset_tz
+      -  track_id
+
+    # wkt_bounding_polygon: "POLYGON ((7.008125020793557 45.56326584931264, 7.008125020793557 38.29891947585193, 10.582293217633804 38.29891947585193, 10.582293217633804 45.56326584931264, 7.008125020793557 45.56326584931264))"
+    author_patterns:
+      Bologna:
+          bologna_living_lab_{}: range(1,21)
+      Barcelona:
+          barcelona_living_lab_{}: range(1, 16)
+          Barcelona_living_lab_{}: range(1, 16)
+      Genoa:
+          CIMA I-Change: range(1,2)
+          genova_living_lab_{}: range(1,30)
+      Amsterdam:
+          Amsterdam_living_lab_ICHANGE: range(1,2)
+          Gert-Jan Steeneveld: range(1,2)
+      # #Hasselt:
+      # #    Don't ingest me! hasselt_living_lab_{}: range(1,16)
+      Ouagadougou:
+          llwa_living_lab_{}: range(1,16)
+      Dublin:
+          "Dublin LL": range(1,2)
+      Jerusalem:
+          jerusalem_living_lab_{}: range(1,16)
+
+  - class: CSVParser
+    mappings: !include mappings.yaml
+    identifying_keys:
+      -  time
+
+    metadata_keys:
+      -  author
+      -  offset_tz
+      -  track_id
+      -  lat
+      -  lon
+      -  air_pressure_near_surface
+
+  - class: TimeAggregator
+    granularity: 1h
+    emit_after_hours: 48
+    time_direction: forwards
+
+  - class: ODCEncoder
+    output: outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb
+    MARS_keys: !include MARS_keys.yaml

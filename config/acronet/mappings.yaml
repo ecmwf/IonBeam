@@ -1,0 +1,61 @@
+- name: time
+  key: time
+  type: datetime
+
+- name: author
+- name: station_id
+  key: station.id
+
+- name: station_name
+  key: station.name
+
+- name: lat
+  unit: EPSG:4326
+  key: station.lat
+
+- name: lon
+  unit: EPSG:4326
+  key: station.lon
+
+- name: rain
+  key: "PLUVIOMETRO [mm]"
+  unit: "mm"
+- name: air_temperature_near_surface
+  key: "TERMOMETRO [°C]"
+  unit: "°C"
+- name: relative_humidity_near_surface
+  key: "IGROMETRO [%]"
+  unit: "%"
+- name: wind_direction_near_surface
+  key: "DIREZIONEVENTO [Degrees]"
+  unit: °
+- name: wind_speed_near_surface
+  key: "ANEMOMETRO [m/s]"
+  unit: "m/s"
+- name: air_pressure_near_surface
+  key: "BAROMETRO [hPa]"
+  unit: "hPa"
+- name: radiometer
+  key: "RADIOMETRO [W/m^2]"
+  unit: "W/m^2"
+- name: battery_level
+  key: "BATTERIA [V]"
+  unit: "V"
+- name: internal_temperature
+  key: "TERMOMETRO_INTERNA [°C]"
+  unit: "°C"
+- name: wind_gust_direction
+  key: "DIREZIONEVENTO_RAFFICA [Degrees]"
+  unit: °
+- name: wind_gust
+  key: "ANEMOMETRO_RAFFICA [m/s]"
+  unit: "m/s"
+- name: thermometer_min
+  key: "TERMOMETRO_MIN [°C]"
+  unit: "°C"
+- name: thermometer_max
+  key: "TERMOMETRO_MAX [°C]"
+  unit: "°C"
+- name: signal_strength
+  key: "SIGNAL_STRENGTH [CSQ]"
+  unit: "CSQ"

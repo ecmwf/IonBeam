@@ -1,0 +1,19 @@
+globals:
+  
+  # A list of observables with name, unit and other metadata that the incoming datastreams get mapped to.
+  canonical_variables: !include canonical_variables.yaml
+
+  # Where to look for other config files (TODO: is this necessary?)
+  config_path: ./ionbeam
+
+  # Where to look for input data
+  data_path: /data/
+
+  # Whether sources should attempt to access external services or just use locally cached data
+  # Can be overridden at the command line
+  offline: True
+
+sources:
+  # - sensor.community
+  # - acronet
+  - meteotracker
