@@ -8,22 +8,18 @@
 # # does it submit to any jurisdiction.
 # #
 
-from typing import Iterable, List, Literal
-from pathlib import Path
-
-import pandas as pd
-
 import dataclasses
-
-from ..core.bases import Writer, Message, FileMessage, FinishMessage
-
 import logging
-import findlibs
 import os
-import yaml
-import json
-from jinja2 import Template
 import shutil
+from pathlib import Path
+from typing import Iterable
+
+import findlibs
+import yaml
+from jinja2 import Template
+
+from ..core.bases import FileMessage, FinishMessage, Message, Writer
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +27,14 @@ def install_metkit_overlays(template, keys):
     # Find the location of the metkit library
     metkit_path = findlibs.find("metkit")
     if not metkit_path:
-        raise ValueError(f"Failed to find metkit library")
+        raise ValueError("Failed to find metkit library")
 
     # Check the path conforms to our expectations
     if Path(metkit_path).with_suffix("").parts[-2:] == ('lib', 'libmetkit'):
         base = Path(metkit_path).parents[1]
     else:
         # raise ValueError(f"Unexpected metkit location: {metkit_path}")
-        base = Path("/usr")
+        base = Path("/usr/local")
 
     # Figure out the location of the language.yaml and odb/marsrequest.yaml files
     language_path = base / "share/metkit/language.yaml"
@@ -109,10 +105,10 @@ class FDBWriter(Writer):
         for lib in self.debug:
             os.environ[f"{lib.upper()}_DEBUG"] = "1"
 
-        logger.debug(f"Installing metkit overlays")
+        logger.debug("Installing metkit overlays")
         install_metkit_overlays(self.metkit_language_template, ["platform", "observation_variable"])
 
-        import pyfdb # This has to happen late so that it pucks up the above.
+        import pyfdb  # This has to happen late so that it pucks up the above.
         
         return pyfdb.FDB()
 
@@ -124,7 +120,7 @@ class FDBWriter(Writer):
         fdb = self.configure_fdb_client()
 
         if len(list(fdb.list(request))) > 0 and not self.globals.overwrite:
-            logger.debug(f"Dropping data because it's already in the database.")
+            logger.debug("Dropping data because it's already in the database.")
         else:
             with open(input_message.metadata.filepath, "rb") as f:
                 fdb.archive(f.read())
