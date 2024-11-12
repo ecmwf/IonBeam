@@ -1,6 +1,86 @@
+[project]
+name = "ionbeam"
+dynamic = ["version"]
+description = "A streaming library for IoT data."
+readme = { file = "README.md", content-type = "text/markdown" }
+authors = [{ name = "Tom Hodson (ECMWF)", email = "thomas.hodson@ecmwf.int" }]
+requires-python = ">=3.10"
+license = { text = "BSD-3-Clause" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: The 3-Clause BSD License",
+    "Operating System :: OS Independent"
+]
+dependencies = [
+    "pandas",
+    "numexpr",
+    "requests",
+    "oauthlib",
+    "requests-oauthlib",
+    "pyyaml",
+    "munch",
+    "Levenshtein",
+    "tqdm",
+    "argparse",
+    "watchdog",
+    "shapely",
+    "pyyaml-include >=1.4, <2.0",  # For including files in yaml. Todo: refactor code to support version 2
+    "bs4",  # For sensor.community
+    "lxml",
+    "pika",
+    "rich",
+    "pe", # For parsing fdb schema files wit with a PEF grammar
+    "sqlalchemy", # For managing the SQL database schema
+    "sqlalchemy-utils",
+    "geoalchemy2",
+    "jinja2",
+    "psycopg2-binary",
+    "wurlitzer",  # For printing C++ output in the console
+    "cachetools",
+    "responses",
+
+    # ECMWF dependencies
+    "pyodc @ git+https://github.com/TomHodson/pyodc.git@develop",
+    "pyaviso @ git+https://github.com/ecmwf/aviso.git@develop",
+    "pyfdb @ git+https://github.com/ecmwf/pyfdb.git@develop",
+    "findlibs",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "ruff",
+    "flake8",
+    "pre-commit",
+    "isort",
+    "responses",
+]
+typing = [
+    "pandas-stubs",
+    "types-oauthlib",
+    "types-requests",
+    "munch-stubs",
+    "types-requests"
+]
+
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "myst-parser",
+    "sphinx-autobuild"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [build-system]
-requires = ["setuptools>=4.2"]
+requires = ["setuptools", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "node-and-date"
 
 [tool.pytest.ini_options]
 markers = [
