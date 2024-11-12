@@ -1,10 +1,9 @@
-from functools import cache
 import dataclasses
-from dataclasses import dataclass, field, Field
-import dataclasses # So we can override is_dataclass and fields with a custom implementation
-from typing import Union, get_origin, get_args, List
 import typing
+from dataclasses import Field, dataclass, field
 from pathlib import Path
+from typing import Union, get_args, get_origin
+
 from .common import ConfigError, ConfigMatchError
 
 # TYPE_KEY is a special key that determines which class or type to pick in ambiguous cases.
@@ -217,7 +216,7 @@ def parse_union(context, key, _type, value):
                 key,
                 _type,
                 value,
-                f"Union types of multiple non-dataclasses are not allowed"
+                "Union types of multiple non-dataclasses are not allowed"
                 " because there's no way to decide which one to use for parsing!",
             )
 
@@ -319,7 +318,7 @@ def dataclass_from_dict(context, datacls, input_dict):
     
     # initialise all the post_init fields to None, leaving it up to the caller to deal with them
     post_init_fields = {field.name : None for field in fields(datacls) 
-                        if is_post_init_field(field) and not field.name in kwargs}
+                        if is_post_init_field(field) and field.name not in kwargs}
 
     return datacls(**kwargs, **post_init_fields)
 

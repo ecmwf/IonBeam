@@ -125,6 +125,10 @@ def parse_globals(config_dir: Path, **overrides):
 
     # Based on the environment =dev/test/prod/local merge config into globals
     env = overrides.get("environment", config.globals.environment)
+    if env is None:
+        logger.debug("No environment specified, defaulting to 'local'")
+        env = "local"
+        
     config.globals = merge_overlay(config.globals, config.environments[env])
 
     # Merge config from the command line into the global config keys
