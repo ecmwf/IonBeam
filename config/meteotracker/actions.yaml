@@ -31,6 +31,8 @@ actions:
       Jerusalem:
           jerusalem_living_lab_{}: range(1,16)
 
+  - class: FilterMeteoTracker
+  
   - class: CSVParser
     mappings: !include mappings.yaml
     identifying_keys:
@@ -44,11 +46,22 @@ actions:
       -  lon
       -  air_pressure_near_surface
 
-  - class: TimeAggregator
-    granularity: 1h
-    emit_after_hours: 48
-    time_direction: forwards
+  # - class: TimeAggregator
+  #   granularity: 1h
+  #   emit_after_hours: 48
+  #   time_direction: forwards
 
   - class: ODCEncoder
-    output: outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb
-    MARS_keys: !include MARS_keys.yaml
+    split_data_columns: False
+    output: outputs/{source}/odb/by_id/{source_id}.odb
+    MARS_keys: !include MARS_keys_per_track.yaml
+
+  - class: FDBWriter
+    config:
+      engine: toc
+      spaces:
+      - handler: Default
+        roots:
+        - path: /media/data/fdb
+
+  - class: MeteoTrackerMarkIngested

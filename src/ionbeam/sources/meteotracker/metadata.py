@@ -72,7 +72,7 @@ def add_meteotracker_track_to_metadata_store(mt_source, mt_session, data):
     with Session(mt_source.globals.sql_engine) as db_session:
         track = db_session.query(db.Station).where(db.Station.external_id == mt_session.id).one_or_none()
         if track:
-            logger.info(f"Track with external_id == {mt_session.id} already in the database")
+            logger.info(f"Track with external_id == {mt_session.id} already in the database {track.ingested = }")
             return True, track
 
         sensor = create_sensor_if_necessary(mt_source, db_session, properties = data.columns, name = "Meteotracker Sensor")

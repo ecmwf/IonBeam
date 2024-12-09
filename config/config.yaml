@@ -17,10 +17,8 @@ globals:
  # Global constants that override things in the sources and timeaggregator
   ingestion_time_constants:
     query_timespan: 
-      - datetime.now(tz=timezone.utc) - timedelta(days = 7)
+      - datetime.now(tz=timezone.utc) - timedelta(minutes = 10)
       - datetime.now(tz=timezone.utc)
-      # - "2023-06-10T00:00:00Z"
-      # - "2025-05-01T00:00:00Z"
     
     # How old a data granule must be before the aggregator considers it to be "complete"
     # This allows time for late data to arrive
@@ -44,12 +42,12 @@ sources:
 
 environments:
   local:
-    api_hostname: http://localhost:5002/api/v1/
+    api_hostname: http://localhost:80/api/v1/
     offline: true
     overwrite: true
     postgres_database:
       host: localhost
-      port: 5432
+      port: 9875
 
   dev:   
     api_hostname: http://iotdev-001:18201/api/v1/ # (requires an SSH tunnel)

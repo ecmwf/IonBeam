@@ -152,7 +152,8 @@ class MeteoTrackerSource(RESTSource):
         if not self.all_filters(chunk["session"], data):
             return
         
-        add_meteotracker_track_to_metadata_store(self, chunk["session"], data)
+        already_there, _ = add_meteotracker_track_to_metadata_store(self, chunk["session"], data)
+
 
         raw_metadata = dict(session = dataclasses.asdict(chunk["session"]))
         

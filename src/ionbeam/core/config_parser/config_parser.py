@@ -159,7 +159,7 @@ def parse_globals(config_dir: Path, **overrides):
 
     # Set up the global sql engine
     config.globals.sql_engine = create_sql_engine(
-        **config.globals.secrets["postgres_database"],
+        **config.globals.secrets.get("postgres_database", {}),
         host=config.globals.postgres_database["host"],
         port=config.globals.postgres_database["port"],
     )

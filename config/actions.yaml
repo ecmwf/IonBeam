@@ -3,9 +3,9 @@ actions:
   #   match:
   #   - state: odc_encoded
 
-    - class: RESTWriter
-      match:
-      - state: odc_encoded
+    # - class: RESTWriter
+    #   match:
+    #   - state: odc_encoded
   #   match:
   #     - state: odc_encoded
 
@@ -20,6 +20,12 @@ actions:
   # - class: FDBWriter
   #   match:
   #     - state: odc_encoded
+  #   config:
+  #     engine: toc
+  #     spaces:
+  #     - handler: Default
+  #       roots:
+  #       - path: /media/data/fdb
 
   #   FDB5_client_config:
   #     type: remote

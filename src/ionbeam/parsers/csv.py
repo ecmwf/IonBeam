@@ -199,8 +199,11 @@ class CSVParser(Parser):
         df = self.format_dataframe(df)
         logging.debug(f"Processed: {df.columns}")
 
+
+
         metadata = self.generate_metadata(
             message=rawdata,
+            observation_variable= ",".join(v.name for v in self.value_columns),
             filepath=None,
         )
 

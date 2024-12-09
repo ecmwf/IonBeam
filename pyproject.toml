@@ -42,7 +42,7 @@ dependencies = [
     # ECMWF dependencies
     "pyodc @ git+https://github.com/TomHodson/pyodc.git@develop",
     "pyaviso @ git+https://github.com/ecmwf/aviso.git@develop",
-    "pyfdb @ git+https://github.com/ecmwf/pyfdb.git@develop",
+    "pyfdb @ git+https://github.com/ecmwf/pyfdb.git@feature/add-fdb-archive-not-multiple",
     "findlibs",
 ]
 

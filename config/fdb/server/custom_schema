@@ -27,11 +27,19 @@ iteration:  Integer;
 system:     Integer;
 method:     Integer;
 
+# By track, used for meteotracker data
+[ class, expver, stream, date
+       [ platform
+               [ source_id ]]
+]
+
 # Current schema
 [ class, expver, stream, date, time
        [ platform
                [ observation_variable ]]
 ]
+
+
 
 # Whole earth view
 #[ class, expver, stream=lwda, type=oai, date:Year, 

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-python -m ionbeam ./config -vvvv --env=local --finish-after=1 #--init-db --overwrite --offline 
+cd /home/math/IonBeam
+echo `date` >> cron_logs.txt
+/home/math/.venv/bin/python -m ionbeam ./config --env=local --simple-output >> cron_logs.txt
 
 # To drop into a debugger on error, enable the -simple-output option first
 # python -m ionbeam ./config -vvvv --offline --finish-after=1 --simple-output --debug

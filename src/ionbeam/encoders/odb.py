@@ -185,6 +185,7 @@ class ODCEncoder(Encoder):
     output: str = "outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb"
     MARS_keys: List[MARS_Key] = dataclasses.field(default_factory=list)
     one_file_per_granule: bool = True
+    split_data_columns: bool = False
 
     "Columns names to extract and put into the odb properties field"
     columns_to_metadata: list[str] = dataclasses.field(default_factory=list)
@@ -243,7 +244,7 @@ class ODCEncoder(Encoder):
         for col in self.MARS_keys:
 
             # skip observed_value if we're not splitting data into multiple granules
-            if not self.globals.split_data_columns and col.name == "observed_value":
+            if not self.split_data_columns and col.name == "observed_value":
                 continue
 
             try:
@@ -253,9 +254,11 @@ class ODCEncoder(Encoder):
                 raise e
 
         # Add in all the value columns
-        if not self.globals.split_data_columns:
+        if not self.split_data_columns:
+            logger.warning(f"{msg.data.columns = }")
             for name in msg.metadata.observation_variable.split(","):
-                output_data[name] = msg.data[name]
+                if name in msg.data:
+                    output_data[name] = msg.data[name]
 
         return pd.DataFrame(output_data)
 
@@ -263,10 +266,11 @@ class ODCEncoder(Encoder):
         if isinstance(msg, FinishMessage):
             return
 
-        if self.globals.split_data_columns:
+        if self.split_data_columns:
             # Todo: think more about the case where we're emitting a variable like pressure both as an observation and an id'ing column
             if isinstance(msg.data[msg.metadata.observation_variable], pd.DataFrame):
-                raise ValueError(f"Data columns conatains duplicated entry! {msg.data[msg.metadata.observation_variable].columns}")
+                raise ValueError(f"Data columns contains duplicated entry! {msg.data[msg.metadata.observation_variable].columns}")
+            
             obsval_dtype = msg.data[msg.metadata.observation_variable].dtype
     
             if str(obsval_dtype).startswith("str") or str(obsval_dtype) == "object":
@@ -325,14 +329,13 @@ class ODCEncoder(Encoder):
         )
 
         if self.one_file_per_granule:
-            f = "outputs/{source}/odb/{observation_variable}/{date}_{time:04d}.odb"
-            kwargs = dict(
+            kwargs = mars_request | dict(
                 observation_variable=msg.metadata.observation_variable,
                 source=msg.metadata.source,
                 date=output_df["date"][0],
-                time=output_df["time"][0],
+                # time=output_df["time"][0],
             )
-            f = f.format(**kwargs)
+            f = self.output.format(**kwargs)
 
             self.output_file = self.globals.data_path / f
             self.output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -348,6 +351,8 @@ class ODCEncoder(Encoder):
                 raise ValueError(
                     f"""{col.name}: pd.Series({data.dtype}) -> MARS_Key({repr(col.dtype)})
                     won't work!
+                    {dtype_lookup[col.dtype] = }
+                    {data.dtype = }
                     {col=}
                     {data=}
                     """

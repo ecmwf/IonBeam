@@ -19,6 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.types import JSON
+from sqlalchemy.sql import text
 from sqlalchemy_utils import URLType, UUIDType
 
 logger = logging.getLogger(__name__)
@@ -151,11 +152,12 @@ class Author(Base):
         return f"Author(id={self.id}, name={self.name!r}, description={self.name!r})"
 
     def as_json(self):
-        return dict(
+        json = dict(
             name=self.name,
-            description=self.description,
-            url=self.url.url if self.url else None,
         )
+        if self.description: json["description"] = self.description
+        if self.url: json["url"] = self.url.url
+        return json
 
 
 class Station(Base):
@@ -166,6 +168,7 @@ class Station(Base):
 
     name: Mapped[str]
     description: Mapped[str] = mapped_column(nullable=True)
+    ingested: Mapped[bool] = False
 
     sensors: Mapped[list["Sensor"]] = relationship(
         secondary=sensor_station_association_table, back_populates="stations"
@@ -223,6 +226,15 @@ class Station(Base):
             authors=[a.as_json() for a in self.authors],
         )
 
+        d["mars_request"] = {
+            "class": "rd",
+            "date": self.earliest_reading.strftime("%Y%m%d"),
+            "expver": "xxxx",
+            "stream": "lwda",
+            "platform": self.platform,
+            "source_id": self.external_id,
+        }
+
         if type == "full":
             d.update(
                 geojson=location_geojson,
@@ -256,12 +268,16 @@ def init_db(globals):
     # Clear out all the tables and recreate them
     logger.warning("Deleting all SQL tables")
     Base.metadata.drop_all(db_engine)
+       
+    with Session(db_engine) as session:
+        session.execute(text("CREATE EXTENSION IF NOT EXISTS postgis;"))
 
     logger.warning("Recreating all SQL tables")
     Base.metadata.create_all(db_engine)
 
     logger.warning("Populating properties from the config")
     with Session(db_engine) as session:
+
         # Populate the properties table from the config
         for variable in globals.canonical_variables:
             property = (
