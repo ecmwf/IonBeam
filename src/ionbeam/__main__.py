@@ -13,10 +13,13 @@
 # Note: I've put some imports after the argparse code to make the cmdline usage feel snappier
 import argparse
 import logging
+import os
 import pdb
 import sys
 import traceback
 from pathlib import Path
+
+os.environ["ODC_ENABLE_WRITING_LONG_STRING_CODEC"] = "1"
 
 from rich.logging import RichHandler
 

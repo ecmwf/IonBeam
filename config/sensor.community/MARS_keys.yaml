@@ -87,7 +87,7 @@
   column_description: 'The aggregation platform that we retrieved this data from.'
   dtype: STRING
 
-- name: source_id
+- name: external_id
   dtype: STRING
   fill_method: function
   key: station_id

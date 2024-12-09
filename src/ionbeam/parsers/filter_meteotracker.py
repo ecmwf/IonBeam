@@ -8,28 +8,19 @@
 # does it submit to any jurisdiction.
 #
 
-from typing import Iterable, List, Literal
-
-import pandas as pd
-
 import dataclasses
+import logging
+from typing import Iterable
+
+from sqlalchemy.orm import Session
 
 from ..core.bases import (
-    Parser,
     FileMessage,
-    TabularMessage,
     FinishMessage,
-    InputColumns,
+    Parser,
+    TabularMessage,
 )
 from ..metadata import db
-from sqlalchemy.orm import Session
-from unicodedata import normalize
-
-from ..core.converters import unit_conversions
-from ..core.html_formatters import make_section, action_to_html, dataframe_to_html
-from dataclasses import asdict
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +62,7 @@ class MeteoTrackerMarkIngested(Parser):
         if isinstance(input_message, FinishMessage):
             return
 
-        external_id = input_message.metadata.mars_request["source_id"].value
+        external_id = input_message.metadata.mars_request["external_id"].value
 
         with Session(self.globals.sql_engine) as db_session:
             track = db_session.query(db.Station).where(db.Station.external_id == external_id).one_or_none()

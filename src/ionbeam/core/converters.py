@@ -14,8 +14,9 @@ unit_conversions = {
     "ºC -> K": lambda t: t + 273.15, # Yes, this degree symbol looks weird, this is actually the unicode character known as "MASCULINE ORDINAL INDICATOR"
     "dB -> dBA": lambda x: x, # This may or may not be wrong, depends on whether there are data sources reporting noise that is genuinely in dB rather than dBA
     "Degrees -> °": lambda d: d,
-    "m/s -> m.s-1": lambda s: s,
+    "m/s -> m/s": lambda s: s,
     "km/h -> m/s": lambda s: s * 0.277778,
+    'knots -> m/s': lambda s: s * 0.514444,
     "mbar -> hPa": lambda p: p,
     "mbar -> Pa": lambda p: p * 100,
     "kPa -> Pa": lambda p: p * 1000,

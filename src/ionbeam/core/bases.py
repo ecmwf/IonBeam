@@ -198,6 +198,7 @@ class Globals:
     secrets: dict | None = None
     api_hostname: str | None = None
     postgres_database: dict | None = None
+    custom_mars_keys: list[str] | None = None
 
     # When a class hasn't been instantiated yet use a string, see https://peps.python.org/pep-0484/#forward-references
     actions: dict[uuid.UUID, "Action"] = dataclasses.field(default_factory=dict)

@@ -9,27 +9,21 @@
 # #
 
 import dataclasses
-from typing import Literal, List, Dict, Iterable
-from pathlib import Path
+import json
 
-from ..core.bases import TabularMessage, FinishMessage, FileMessage, Encoder
-from ..core.config_parser.config_parser_machinery import ConfigError
+# import codc as odc
+import logging
+import warnings
+from collections import defaultdict
+from dataclasses import field
+from typing import Dict, Iterable, List, Literal
 
 import pandas as pd
-
-import hashlib
-
-from dataclasses import field
-from collections import defaultdict
-
 import pyodc as odc
-# import codc as odc
 
-import logging
-
-import warnings
-
-import json
+from ..core.bases import Encoder, FileMessage, FinishMessage, TabularMessage
+from ..core.config_parser.config_parser_machinery import ConfigError
+from ..metadata import id_hash
 
 warnings.simplefilter(action="error", category=FutureWarning)
 
@@ -66,6 +60,9 @@ def four_digit_hour(msg: TabularMessage) -> pd.Series:
     # return msg.data.time.dt.hour.apply(lambda x: "{0:02d}00".format(x))
     return msg.data.time.dt.hour * 100
 
+def start_time(msg: TabularMessage) -> pd.Series:
+    logger.debug("start time is runnning")
+    return msg.data.start_time.dt.strftime('%H%M')
 
 def minutes_with_fractional_seconds(msg: TabularMessage) -> pd.Series:
     "populates min@body"
@@ -102,6 +99,17 @@ def station_id(msg: TabularMessage) -> pd.Series:
         strings = msg.data["track_id"]
 
     return strings
+
+
+
+
+def station_id_hash(msg: TabularMessage) -> pd.Series:
+    if "station_id" in msg.data:
+        strings = msg.data["station_id"]
+    else:
+        strings = msg.data["track_id"]
+
+    return strings.apply(id_hash)
 
 
 def dataset(msg: TabularMessage) -> pd.Series:
@@ -164,7 +172,11 @@ class MARS_Key:
                 if self.key not in globals():
                     raise ConfigError(f"Trying to fill the mars key '{self.name}' using function '{self.key}' but it isn't defined in the source code.")
                 f = globals()[self.key]
-                return f(msg).astype(dtype)
+                try:
+                    out = f(msg).astype(dtype)
+                except Exception as e:
+                    raise ValueError(f"Error calling {f} with {msg} {f(msg) = }") from e
+                return out
             case _:
                 raise ValueError
 
@@ -255,11 +267,12 @@ class ODCEncoder(Encoder):
 
         # Add in all the value columns
         if not self.split_data_columns:
-            logger.warning(f"{msg.data.columns = }")
+            # logger.warning(f"{msg.data.columns = }")
             for name in msg.metadata.observation_variable.split(","):
-                if name in msg.data:
+                if name in msg.data and name not in output_data:
                     output_data[name] = msg.data[name]
 
+            # logger.warning(f"{output_data.keys() = }")
         return pd.DataFrame(output_data)
 
     def encode(self, msg: TabularMessage | FinishMessage) -> Iterable[FileMessage]:
@@ -333,8 +346,12 @@ class ODCEncoder(Encoder):
                 observation_variable=msg.metadata.observation_variable,
                 source=msg.metadata.source,
                 date=output_df["date"][0],
-                # time=output_df["time"][0],
+                external_id=output_df["external_id"][0],
+                internal_id=output_df["internal_id"][0],
             )
+            if "start_time" in output_df.columns:
+                kwargs["time"] = output_df["start_time"][0]
+            
             f = self.output.format(**kwargs)
 
             self.output_file = self.globals.data_path / f

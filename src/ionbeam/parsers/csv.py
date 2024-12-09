@@ -204,6 +204,7 @@ class CSVParser(Parser):
         metadata = self.generate_metadata(
             message=rawdata,
             observation_variable= ",".join(v.name for v in self.value_columns),
+            unstructured=rawdata.metadata.unstructured,
             filepath=None,
         )
 

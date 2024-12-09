@@ -1,32 +1,3 @@
-# name & type: mars key is name@type
-
-# These values pulled from codes.ecmwf.int/ if possible
-# dtype: INTEGER
-# column_decription: the description for this column
-# value_description: the meaning of this particular numeric value
-# dtype: one of REAL, DOUBLE, INTEGER, STRING
-
-# Each Mars_key can can be populated using different methods:
-
-# Fill this column with a literal constant
-# method: constant
-# value: value
-
-# Fill this column by looking the observation variable up in the config
-# method: from_config
-
-# Fill this column with a static value by looking up a key in the message metadata
-# fill_method: from_metadata
-# key: author
-
-# Fill this column with a varying value by looking up a key in the message data
-# fill_method: from_data
-# key: lat
-
-# Fill this column using a function defined in ionbeam.encoders.odb
-# fill_method: function
-# key: function_name
-
 - name: class
   fill_method: constant
   value: rd
@@ -44,10 +15,6 @@
   value: lwda
   column_description: mars key - forecasting system used to generate data
 
-#################################################
-# Other metadata                                #
-#################################################
-
 - name: project
   dtype: STRING
   fill_method: constant
@@ -55,15 +22,15 @@
   column_description: Which project this data is part of. Currently I-Change, AD4GD or Any
 
 - name: platform
-  fill_method: from_metadata
-  key: source
-  column_description: 'The aggregation platform that we retrieved this data from.'
   dtype: STRING
+  fill_method: constant
+  value: Acronet
+  column_description: 'The aggregation platform that we retrieved this data from.'
 
 - name: aggregation_type
   dtype: STRING
   fill_method: constant
-  value: tracked
+  value: chunked
   column_description: 'The aggregation platform that we retrieved this data from.'
 
 - name: source_name
@@ -90,12 +57,12 @@
   fill_method: function
   key: decimal_encoded_date
 
-# The minutes including 2dp fractional part
-- name: datetime
+- name: start_time
   dtype: STRING
-  column_description: The datetime as ISO 8601
+  column_description: The datetime as ISO 8601 of the start of the file chunk
   fill_method: function
-  key: datetime
+  key: start_time
+
 
 - name: altitude
   dtype: DOUBLE

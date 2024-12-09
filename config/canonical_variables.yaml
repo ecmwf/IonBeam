@@ -16,6 +16,10 @@
   dtype: datetime64[ns, UTC]
   desc: The time that the observation was made.
 
+- name: start_time
+  dtype: datetime64[ns, UTC]
+  desc: For chunked data files, the logical begingined of the time period of the chunk.
+  
 - name: offset_tz
   desc: Uncertain what this means in the Meteotracker data.
   dtype: object
@@ -119,7 +123,7 @@
 
 - name: wind_gust
   output: true
-  unit: m.s-1 
+  unit: "m/s"
   WMO: true
   reportype: 9
 

@@ -8,29 +8,48 @@
 # # does it submit to any jurisdiction.
 # #
 
-import logging
-import pandas as pd
-from typing import Literal, List, Iterable
-from pathlib import Path
-from datetime import datetime
-
 import dataclasses
+import logging
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Iterable, List
 
-from ...core.bases import TabularMessage, Source, MetaData, InputColumn
+import pandas as pd
+
+from ...core.bases import InputColumn, TabularMessage
 from ..API_sources_base import RESTSource
-
 from .cima import CIMA_API
 
 logger = logging.getLogger(__name__)
+
+def round_datetime(dt: datetime, round_to: int = 5, method: str = "floor") -> datetime:
+    if round_to <= 0:
+        raise ValueError("round_to must be a positive integer")
+    if method not in {"floor", "ceil"}:
+        raise ValueError("method must be 'floor' or 'ceil'")
+    
+    # Calculate the number of seconds since the start of the day
+    total_seconds = (dt - dt.replace(hour=0, minute=0, second=0, microsecond=0)).total_seconds()
+    
+    # Calculate the rounded total seconds
+    rounding_seconds = round_to * 60
+    if method == "floor":
+        rounded_seconds = (total_seconds // rounding_seconds) * rounding_seconds
+    else:  # method == "ceil"
+        rounded_seconds = ((total_seconds + rounding_seconds - 1) // rounding_seconds) * rounding_seconds
+    
+    # Return the rounded datetime
+    return dt.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(seconds=rounded_seconds)
+
 
 @dataclasses.dataclass
 class AcronetSource(RESTSource):
     """
     """
-    cache_directory: Path = Path(f"inputs/acronet")
+    cache_directory: Path = Path("inputs/acronet")
     endpoint = "https://webdrops.cimafoundation.org/app/"
     # endpoints_url = "https://testauth.cimafoundation.org/auth/realms/webdrops/.well-known/openid-configuration"
-    cache_version = 4 # increment this to invalidate the cache
+    cache_version = 5 # increment this to invalidate the cache
     mappings: List[InputColumn] = dataclasses.field(default_factory=list)
 
     def init(self, globals):
@@ -44,8 +63,10 @@ class AcronetSource(RESTSource):
         """
         Return an iterable of objects representing chunks of data we should download from the API
         """
-        # The maximum number of days we can request is 3
-        dates = pd.date_range(start=self.start_date, end=self.end_date, freq="3D")
+        # The maximum number time range we can request is 3 days
+        start = round_datetime(self.start_date, round_to=5, method="floor")
+        end = round_datetime(self.start_date, round_to=5, method="ceil")
+        dates = pd.date_range(start, end, freq="5min")
         
         # Ensure the last date is included
         if dates[-1] != self.end_date:
@@ -83,11 +104,10 @@ class AcronetSource(RESTSource):
                 self.save_data_to_cache(chunk, data)
 
             data["author"] = "Acronet"
-            
 
             yield TabularMessage(
                 metadata=self.generate_metadata(
-                    unstructured = dict(station = station)
+                    unstructured = dict(station = station, start = chunk["start"], end = chunk["end"])
                 ),
                 data = data
             )

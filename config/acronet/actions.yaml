@@ -6,6 +6,7 @@ actions:
       - station_name
       - lat
       - lon
+      - start_time
 
   - class: CSVParser
     mappings: !include mappings.yaml
@@ -18,15 +19,17 @@ actions:
       - lat
       - lon
 
-  - class: TimeSplitter
-    granularity: 6h
-
-  - class: TimeAggregator
-    granularity: 1h
-    emit_after_hours: 120
+  - class: AddAcronetMetadata
 
   - class: ODCEncoder
-    output: outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb
-    MARS_keys: !include MARS_keys.yaml
+    split_data_columns: False
+    output: outputs/{source}/odb/{external_id}_{start_time}.odb
+    MARS_keys: !include MARS_keys_per_track.yaml
 
-# From here messages fall into the general stream of the pipeline defined in ../actions.yml 
+  - class: FDBWriter
+    config:
+      engine: toc
+      spaces:
+      - handler: Default
+        roots:
+        - path: /Users/math/git/IonBeam_bundle/data/fdb_root

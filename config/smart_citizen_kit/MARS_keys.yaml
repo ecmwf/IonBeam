@@ -93,7 +93,7 @@
   column_description: 'The name of the individual entity data came from.'
   dtype: STRING
 
-- name: source_id
+- name: external_id
   dtype: STRING
   fill_method: function
   key: station_id

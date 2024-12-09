@@ -18,8 +18,8 @@ from sqlalchemy import (
     create_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
-from sqlalchemy.types import JSON
 from sqlalchemy.sql import text
+from sqlalchemy.types import JSON
 from sqlalchemy_utils import URLType, UUIDType
 
 logger = logging.getLogger(__name__)
@@ -164,6 +164,7 @@ class Station(Base):
     __tablename__ = "station"
     id = mapped_column(UUIDType, primary_key=True, default=uuid.uuid4)
     external_id: Mapped[str]  # Whatever id came from the external source
+    internal_id: Mapped[str]
     platform: Mapped[str]
 
     name: Mapped[str]
@@ -208,7 +209,7 @@ class Station(Base):
     def as_json(self, type="simple"):
         d = {
             k: getattr(self, k)
-            for k in ["name", "description", "platform", "external_id"]
+            for k in ["name", "description", "platform", "external_id", "internal_id"]
         }
 
         location_feature = to_shape(self.location_feature)
@@ -228,11 +229,12 @@ class Station(Base):
 
         d["mars_request"] = {
             "class": "rd",
-            "date": self.earliest_reading.strftime("%Y%m%d"),
             "expver": "xxxx",
             "stream": "lwda",
+            "aggregation_type": "tracked" if self.platform == "meteotracker" else "chunked",
+            "date": self.earliest_reading.strftime("%Y%m%d"),
             "platform": self.platform,
-            "source_id": self.external_id,
+            "internal_id": self.internal_id,
         }
 
         if type == "full":
@@ -269,6 +271,7 @@ def init_db(globals):
     logger.warning("Deleting all SQL tables")
     Base.metadata.drop_all(db_engine)
        
+    logger.warning("Running CREATE EXTENSION IF NOT EXISTS postgis;")
     with Session(db_engine) as session:
         session.execute(text("CREATE EXTENSION IF NOT EXISTS postgis;"))
 

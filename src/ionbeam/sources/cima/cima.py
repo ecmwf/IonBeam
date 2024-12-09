@@ -14,34 +14,39 @@
 TODO: Currently the geowindow and stationgroup used are hardcoded, that might need to be fixed at some point
 """
 
-import logging
-from functools import cached_property
 import itertools
+import logging
+import pickle
+from datetime import datetime, timedelta, timezone
+from functools import cached_property
+from pathlib import Path
+from typing import Dict, List, Tuple
 
 import Levenshtein
+import numpy as np
+import pandas as pd
 import requests
-
-import pickle
-import yaml
-
 from munch import Munch
-
-from typing import Dict, List, Tuple
 
 # To deal with the Open-Id/OAuth2 that the API uses
 from oauthlib.oauth2 import LegacyApplicationClient
 from requests_oauthlib import OAuth2Session  # type: ignore[import]
 
-from datetime import timedelta, datetime, timezone
-from pathlib import Path
-
-import pandas as pd
-import numpy as np
-
-
-from .types import SensorName, SensorNameIT, sensor_name_translations_EN2IT, sensor_name_translations_IT2EN
-from .types import CIMA_API_Error, Credentials, Endpoints
-from .types import StationName, GenericSensor, APISensor, UniqueSensor, Station, GeoBBox
+from .types import (
+    APISensor,
+    CIMA_API_Error,
+    Credentials,
+    Endpoints,
+    GenericSensor,
+    GeoBBox,
+    SensorName,
+    SensorNameIT,
+    Station,
+    StationName,
+    UniqueSensor,
+    sensor_name_translations_EN2IT,
+    sensor_name_translations_IT2EN,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -397,10 +402,19 @@ class CIMA_API:
                 columns[sensor_name].append(json_data["values"])
 
                 # Check that the sensor readings were really taken at the same times
-                if time_points is not None:
-                    assert json_data["timeline"] == time_points
-                else:
-                    time_points = json_data["timeline"]
+                if time_points:
+                    
+                    if not json_data["timeline"] == time_points:
+                        logger.warning(f"""Sensor {station_name = }
+                                    {sensor_name = }
+                                    start = {s}
+                                    end = {e} has different time points
+                                    {time_points = }
+                                    {json_data["timeline"] = }
+                                    """)
+                        raise ValueError("Time points are not the same")
+
+                time_points = json_data["timeline"]
 
             columns["time_index"].append(time_points)  # type: ignore[arg-type]
 

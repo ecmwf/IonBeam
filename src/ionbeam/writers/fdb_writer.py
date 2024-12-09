@@ -106,7 +106,7 @@ class FDBWriter(Writer):
             os.environ[f"{lib.upper()}_DEBUG"] = "1"
 
         logger.debug("Installing metkit overlays")
-        install_metkit_overlays(self.metkit_language_template, ["platform", "observation_variable", "source_id"])
+        install_metkit_overlays(self.metkit_language_template, self.globals.custom_mars_keys)
 
         import pyfdb  # This has to happen late so that it pucks up the above.
         

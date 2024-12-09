@@ -17,7 +17,7 @@ globals:
  # Global constants that override things in the sources and timeaggregator
   ingestion_time_constants:
     query_timespan: 
-      - datetime.now(tz=timezone.utc) - timedelta(minutes = 10)
+      - datetime.now(tz=timezone.utc) - timedelta(hours = 6)
       - datetime.now(tz=timezone.utc)
     
     # How old a data granule must be before the aggregator considers it to be "complete"
@@ -33,10 +33,11 @@ globals:
   
   fdb_schema_path: config/fdb/server/custom_schema
   metkit_language_template: config/metkit/language.yaml.template
+  custom_mars_keys: ["platform", "observation_variable", "external_id","internal_id", "aggregation_type", "start_time"]
 
 sources:
   # - sensor.community
-  #- acronet
+  - acronet
   - meteotracker
   #- smart_citizen_kit
 

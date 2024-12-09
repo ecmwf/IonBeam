@@ -1,11 +1,11 @@
-from ...metadata import db
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-from sqlalchemy.orm.exc import NoResultFound
-from shapely.geometry import MultiPoint, box
-from shapely import to_geojson
-
 import logging
+
+from shapely import to_geojson
+from shapely.geometry import MultiPoint, box
+from sqlalchemy.orm import Session
+
+from ...metadata import db, id_hash
+
 logger = logging.getLogger(__name__)
 
 def get_db_properties(mt_source, session, keys):
@@ -83,6 +83,7 @@ def add_meteotracker_track_to_metadata_store(mt_source, mt_session, data):
         
         track = db.Station(
             external_id = mt_session.id,
+            internal_id = id_hash(mt_session.id),
             platform = "meteotracker",
             name = "MeteoTracker Track",
             description = "A MeteoTracker Track.",

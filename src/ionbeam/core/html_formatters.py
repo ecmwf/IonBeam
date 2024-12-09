@@ -1,9 +1,11 @@
+import random
+import string
 from dataclasses import fields, is_dataclass
-import pandas as pd
-import string, random
-import pyodc as odc
 from pathlib import Path
 from typing import BinaryIO
+
+import pandas as pd
+import pyodc as odc
 
 
 def random_id(n):

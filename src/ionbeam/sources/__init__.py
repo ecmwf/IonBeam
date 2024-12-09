@@ -9,15 +9,15 @@
 # #
 
 from pathlib import Path
-from ..core.plugins import find_plugin
-from ..core.bases import Source
 
+from ..core.bases import Source
+from ..core.plugins import find_plugin
+from .cima import AcronetSource, AddAcronetMetadata
 from .meteotracker.source import MeteoTrackerSource
-from .cima.source import AcronetSource
-from .sensor_community import SensorCommunitySource
 from .multi_file import MultiFileSource
-from .watch_directory import WatchDirectorySource
+from .sensor_community import SensorCommunitySource
 from .smart_citizen_kit import SmartCitizenKitSource
+from .watch_directory import WatchDirectorySource
 
 __all__ = [
     "MeteoTrackerSource",
