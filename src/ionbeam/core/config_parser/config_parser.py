@@ -145,6 +145,7 @@ def parse_globals(config_dir: Path, **overrides):
         "data_path",
         "cache_path",
         "fdb_schema_path",
+        "fdb_root",
         "metkit_language_template",
         "secrets_file",
     ]:

@@ -306,8 +306,8 @@ class ODCEncoder(Encoder):
         logger.debug(f"Generated MARS keys for {msg}")
         mars_request, schema_branch = self.fdb_schema.parse(mars_request)
 
-        for k, v in mars_request.items():
-            logger.debug(v.info())
+        # for k, v in mars_request.items():
+        #     logger.debug(v.info())
 
         # And encode the supplied data
         # logger.debug(f"Columns before encoding to ODC: {df.columns}")

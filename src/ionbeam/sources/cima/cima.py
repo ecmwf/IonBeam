@@ -399,7 +399,7 @@ class CIMA_API:
                         end_date=e,
                         aggregation_time_seconds=aggregation_time_seconds,
                     )
-                except CIMA_API_Error as e:
+                except CIMA_API_Error:
                     logger.warning(f"Failed to get data for {station_name} {sensor_name} {s} {e}")
                     json_data = {"timeline": False}
                     continue

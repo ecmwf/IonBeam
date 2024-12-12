@@ -105,7 +105,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--init-db",
         action="store_true",
-        help="(Re)initialise the SQL database. THIS WIPES ALL SQL DATA!",
+        help="(Re)initialise all the databases.",
     )
 
     parser.add_argument(

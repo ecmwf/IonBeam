@@ -109,7 +109,7 @@ class FDBWriter(Writer):
         if "schema" not in self.config:
             self.config["schema"] = str(globals.fdb_schema_path)
 
-        self.fdb_client = self.configure_fdb_client()
+        self.fdb = self.configure_fdb_client()
 
     def configure_fdb_client(self):
         fdb5_path = findlibs.find("fdb5")
@@ -130,16 +130,15 @@ class FDBWriter(Writer):
             return
 
         assert input_message.metadata.filepath is not None
-        fdb = self.configure_fdb_client()
 
         request = input_message.metadata.mars_request.as_strings()
-        logger.warning(request)
+        # logger.warning(request)
 
-        if len(list(fdb.list(request))) > 0 and not self.globals.overwrite:
+        if len(list(self.fdb.list(request))) > 0 and not self.globals.overwrite:
             logger.debug("Dropping data because it's already in the database.")
         else:
             with open(input_message.metadata.filepath, "rb") as f:
-                fdb.archive_single(f.read(), request)
+                self.fdb.archive_single(f.read(), request)
 
         metadata = self.generate_metadata(input_message, mars_request=input_message.metadata.mars_request)
         output_msg = FileMessage(metadata=metadata)

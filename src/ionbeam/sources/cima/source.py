@@ -48,7 +48,7 @@ class AcronetSource(RESTSource):
         date_ranges = list(zip(dates[:-1], dates[1:]))
 
         for start, end in date_ranges:
-            for station in list(self.api.stations.values())[:1]:
+            for station in self.api.stations.values():
                 yield dict(
                     key = f"{station.id}_{start.isoformat()}_{end.isoformat()}.pickle",
                     station = dataclasses.asdict(station),
