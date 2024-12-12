@@ -4,8 +4,8 @@ time:       Time;
 
 # By track, used for meteotracker data
 [ class, expver, stream
-       [aggregation_type, platform
-               [internal_id, date, time]]
+       [aggregation_type, platform, date
+               [internal_id, time]]
 ]
 
 # See standard schema file below for reference

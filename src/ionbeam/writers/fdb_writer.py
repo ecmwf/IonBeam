@@ -137,8 +137,10 @@ class FDBWriter(Writer):
         if len(list(self.fdb.list(request))) > 0 and not self.globals.overwrite:
             logger.debug("Dropping data because it's already in the database.")
         else:
+            assert input_message.metadata.filepath is not None
             with open(input_message.metadata.filepath, "rb") as f:
                 self.fdb.archive_single(f.read(), request)
+                self.fdb.flush()
 
         metadata = self.generate_metadata(input_message, mars_request=input_message.metadata.mars_request)
         output_msg = FileMessage(metadata=metadata)

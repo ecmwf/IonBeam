@@ -300,6 +300,7 @@ class ODCEncoder(Encoder):
         mars_request = {k: output_df[k].iloc[0] for k in output_df.columns if output_df[k].nunique() == 1}
         
         assert msg.metadata.time_span is not None
+        mars_request["date"] = msg.metadata.time_span.start.strftime("%Y%m%d")
         mars_request["time"] = msg.metadata.time_span.start.strftime("%H%M")
         logger.debug(mars_request)
 
