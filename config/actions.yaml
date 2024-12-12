@@ -1,48 +1,6 @@
 actions:
-  # - class: RESTWriter
-  #   match:
-  #   - state: odc_encoded
-
-    # - class: RESTWriter
-    #   match:
-    #   - state: odc_encoded
-  #   match:
-  #     - state: odc_encoded
-
-  #   FDB5_client_config:
-  #     engine: toc
-  #     spaces:
-  #     - handler: Default
-  #       roots:
-  #       - path: /Users/math/git/IonBeam-Deployment/data/fdb_root
-  
-
-  # - class: FDBWriter
-  #   match:
-  #     - state: odc_encoded
-  #   config:
-  #     engine: toc
-  #     spaces:
-  #     - handler: Default
-  #       roots:
-  #       - path: /media/data/fdb
-
-  #   FDB5_client_config:
-  #     type: remote
-  #     host: fdb-catalogue
-  #     port: 8000
-  #     schema: /Users/math/git/iot-ingester-deployment/config/fdb/server/custom_schema
-  #     engine: remote
-  #     store: remote
-
-  #   debug:
-  #     - ECKIT
-  #     - FDB
-
-
-
-
-  # - class: AVISONotifier
-  #   match:
-  #      - state: written
+  # By default uses local config and pulls schema and root from global config
+  - class: FDBWriter
+    match:
+    - state: "odc_encoded"
 

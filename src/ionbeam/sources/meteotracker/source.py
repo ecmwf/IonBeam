@@ -8,17 +8,20 @@
 # # does it submit to any jurisdiction.
 # #
 
-import logging
-import pandas as pd
-from typing import Iterable
 import dataclasses
-from ...core.bases import TabularMessage
-from .meteotracker import MeteoTracker_API, MeteoTracker_API_Error
-from ..API_sources_base import RESTSource
-import shapely
-from pathlib import Path
+import logging
 from datetime import datetime
+from pathlib import Path
+from typing import Iterable
+
+import pandas as pd
+import shapely
+
+from ...core.bases import TabularMessage, TimeSpan
+from ...core.time import round_datetime
+from ..API_sources_base import RESTSource
 from .metadata import add_meteotracker_track_to_metadata_store
+from .meteotracker import MeteoTracker_API, MeteoTracker_API_Error
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +30,7 @@ logger = logging.getLogger(__name__)
 class MeteoTrackerSource(RESTSource):
     "The value to insert as source"
     source: str = "meteotracker"
-    cache_directory: Path = Path(f"inputs/meteotracker")
+    cache_directory: Path = Path("inputs/meteotracker")
 
     "A bounding polygon represented in WKT (well known text) format."
     wkt_bounding_polygon: str | None = None  # Use geojson.io to generate
@@ -127,7 +130,7 @@ class MeteoTrackerSource(RESTSource):
                 filepath=path,
             )
 
-    def get_chunks(self, start_date : datetime, end_date: datetime) -> Iterable[dict]:
+    def get_chunks(self, start_date : datetime, end_date: datetime, _) -> Iterable[dict]:
         # Do  API requests in chunks larger than the data granularity, upto 3 days
         if not self.globals.offline:
             logger.debug("Starting in online mode...")
@@ -153,13 +156,18 @@ class MeteoTrackerSource(RESTSource):
             return
         
         already_there, _ = add_meteotracker_track_to_metadata_store(self, chunk["session"], data)
-
-
-        raw_metadata = dict(session = dataclasses.asdict(chunk["session"]))
         
+        # Round start time to nearest 5 minute chunk
+        granularity = self.globals.ingestion_time_constants.granularity
+        time_span = TimeSpan(
+            start = round_datetime(chunk["session"].start_time, round_to = granularity, method="floor"),
+            end = round_datetime(datetime.fromisoformat(data.time.iloc[-1]), round_to = granularity, method="ceil")
+        )
+
         yield TabularMessage(
             metadata=self.generate_metadata(
-                unstructured = raw_metadata,
+                time_span = time_span,
+                unstructured = dict(session = dataclasses.asdict(chunk["session"])),
             ),
             data = data,
         )

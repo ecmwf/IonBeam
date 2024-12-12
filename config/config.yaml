@@ -4,10 +4,17 @@ globals:
 
   # Where to look for input data
   data_path: ../data/
+  cache_path: ../data/cache/
 
   # The secrets file to use
   # Todo: add a mechanism to template values from this file into the config with a constructor like !secrets meteotracker.password
   secrets_file: config/secrets.yaml
+  
+  # Files to configure the FDB
+  fdb_schema_path: config/schema
+  metkit_language_template: config/language.yaml.template
+  custom_mars_keys: ["platform", "observation_variable", "external_id","internal_id", "aggregation_type"]
+
 
   # Whether sources should attempt to access external services or just use locally cached data
   # Can be overridden at the command line
@@ -17,7 +24,7 @@ globals:
  # Global constants that override things in the sources and timeaggregator
   ingestion_time_constants:
     query_timespan: 
-      - datetime.now(tz=timezone.utc) - timedelta(hours = 6)
+      - datetime.now(tz=timezone.utc) - timedelta(hours = 5)
       - datetime.now(tz=timezone.utc)
     
     # How old a data granule must be before the aggregator considers it to be "complete"
@@ -25,15 +32,11 @@ globals:
     emit_after_hours: 20
 
     # How big a data granule should be
-    granularity: 1h
+    granularity:
+      minutes: 5
 
     # In what direction the time aggregator expects data to arrive. 
     time_direction: forwards
-
-  
-  fdb_schema_path: config/fdb/server/custom_schema
-  metkit_language_template: config/metkit/language.yaml.template
-  custom_mars_keys: ["platform", "observation_variable", "external_id","internal_id", "aggregation_type", "start_time"]
 
 sources:
   # - sensor.community
@@ -43,7 +46,17 @@ sources:
 
 environments:
   local:
-    api_hostname: http://localhost:80/api/v1/
+    fdb_root: /Users/math/git/IonBeam_bundle/data/fdb_root
+    api_hostname: ""
+    offline: true
+    overwrite: true
+    postgres_database:
+      host: localhost
+      port: 9875
+
+  ewc:
+    fdb_root: /media/data/fdb_root
+    api_hostname: ""
     offline: true
     overwrite: true
     postgres_database:

@@ -169,5 +169,5 @@ actions:
     match:
       - source: meteotracker
         state: "time_aggregated"
-    output: outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb
+    output: outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_span.start_time}.odb
     MARS_keys: !include MARS_keys.yaml

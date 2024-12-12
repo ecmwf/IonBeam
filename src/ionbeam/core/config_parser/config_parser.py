@@ -143,6 +143,7 @@ def parse_globals(config_dir: Path, **overrides):
     # Resolve the paths in the global config relative to the current directory
     for name in [
         "data_path",
+        "cache_path",
         "fdb_schema_path",
         "metkit_language_template",
         "secrets_file",

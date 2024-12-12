@@ -232,10 +232,12 @@ class Station(Base):
             "expver": "xxxx",
             "stream": "lwda",
             "aggregation_type": "tracked" if self.platform == "meteotracker" else "chunked",
-            "date": self.earliest_reading.strftime("%Y%m%d"),
             "platform": self.platform,
             "internal_id": self.internal_id,
         }
+        if self.platform == "meteotracker":
+            d["mars_request"]["date"] = self.earliest_reading.strftime("%Y%m%d")
+
 
         if type == "full":
             d.update(

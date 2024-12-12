@@ -25,7 +25,7 @@ actions:
     match:
       - source: sensor.community
         state: time_aggregated
-    output: data/outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb
+    output: data/outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_span.start_time}.odb
     MARS_keys: !include MARS_keys.yaml
     fdb_schema: |
       expver:     Expver;

@@ -17,8 +17,9 @@ TODO: Currently the geowindow and stationgroup used are hardcoded, that might ne
 import itertools
 import logging
 import pickle
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from functools import cached_property
+from functools import cached_property, reduce
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -384,52 +385,45 @@ class CIMA_API:
 
 
         # might be better to use a pre-allocated numpy array here
-        columns: Dict[SensorName | str, List[List[float]]] = {sensor_name: [] for sensor_name in station_info.sensors}
-        columns["time_index"] = []
+        columns : defaultdict[SensorName, dict] = defaultdict(lambda : dict(sensor = None, times = [], readings = []))
 
         for s, e in list(zip(dates[:-1], dates[1:])):
             self.oauth.token = self.oauth.refresh_token(self.endpoints.token_endpoint)
 
-            time_points = None
-            for sensor_name in station_info.sensors.keys():
-                json_data = self._single_request_station_and_sensor(
-                    station_name,
-                    sensor_name,
-                    start_date=s,
-                    end_date=e,
-                    aggregation_time_seconds=aggregation_time_seconds,
-                )
-                columns[sensor_name].append(json_data["values"])
+            for sensor_name, sensor in station_info.sensors.items():
+                try:
+                    json_data = self._single_request_station_and_sensor(
+                        station_name,
+                        sensor_name,
+                        start_date=s,
+                        end_date=e,
+                        aggregation_time_seconds=aggregation_time_seconds,
+                    )
+                except CIMA_API_Error as e:
+                    logger.warning(f"Failed to get data for {station_name} {sensor_name} {s} {e}")
+                    json_data = {"timeline": False}
+                    continue
 
-                # Check that the sensor readings were really taken at the same times
-                if time_points:
-                    
-                    if not json_data["timeline"] == time_points:
-                        logger.warning(f"""Sensor {station_name = }
-                                    {sensor_name = }
-                                    start = {s}
-                                    end = {e} has different time points
-                                    {time_points = }
-                                    {json_data["timeline"] = }
-                                    """)
-                        raise ValueError("Time points are not the same")
+                # Skip any sensors that didn't return any data
+                if json_data["timeline"]:
+                    columns[sensor_name]['sensor'] = sensor
+                    columns[sensor_name]["times"].extend(json_data["timeline"])
+                    columns[sensor_name]["readings"].extend(json_data["values"])
 
-                time_points = json_data["timeline"]
+        dfs = [
+            pd.DataFrame(
+                        {
+                            f"{sensor_name} [{details['sensor'].unit}]": details["readings"],
+                            "time": pd.to_datetime(details["times"], format="%Y%m%d%H%M", utc = True),
+                        })
+            for sensor_name, details in columns.items()
+        ]
 
-            columns["time_index"].append(time_points)  # type: ignore[arg-type]
+        df = reduce(
+                lambda left, right: pd.merge(left, right, on="time", how="outer"),
+                dfs
+            )
 
-        # flatten the lists of lists
-        flattened_columns = {}
-        for key in columns:
-            flattened_columns[key] = list(itertools.chain.from_iterable(columns[key]))
-
-        df = pd.DataFrame(
-            {
-                f"{sensor_name} [{sensor_info.unit}]": flattened_columns[sensor_name]
-                for sensor_name, sensor_info in station_info.sensors.items()
-            },
-            index=pd.to_datetime(flattened_columns["time_index"], format="%Y%m%d%H%M", utc = True),
-        )
         df.replace(to_replace=-9998.0, value=np.nan, inplace=True)
-        df.reset_index(names = ["time"], inplace=True)
+
         return df

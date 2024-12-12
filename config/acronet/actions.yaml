@@ -6,7 +6,6 @@ actions:
       - station_name
       - lat
       - lon
-      - start_time
 
   - class: CSVParser
     mappings: !include mappings.yaml
@@ -24,12 +23,5 @@ actions:
   - class: ODCEncoder
     split_data_columns: False
     output: outputs/{source}/odb/{external_id}_{start_time}.odb
-    MARS_keys: !include MARS_keys_per_track.yaml
+    MARS_keys: !include MARS_keys.yaml
 
-  - class: FDBWriter
-    config:
-      engine: toc
-      spaces:
-      - handler: Default
-        roots:
-        - path: /Users/math/git/IonBeam_bundle/data/fdb_root

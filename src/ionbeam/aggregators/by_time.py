@@ -9,25 +9,22 @@
 # #
 
 import dataclasses
-from typing import Literal, Iterable, List, Dict, Generator
+import itertools as it
 import logging
 from collections import defaultdict
 from dataclasses import field
-import itertools as it
+from datetime import timedelta, timezone
+from typing import Dict, Iterable, List, Literal
 
 import pandas as pd
 
-from datetime import timezone, timedelta
-
 from ..core.bases import (
     Aggregator,
-    MetaData,
-    DataMessage,
-    TabularMessage,
     FinishMessage,
+    MetaData,
+    TabularMessage,
 )
-from ..core.history import MessageInfo
-from ..core.html_formatters import make_section, dataframe_to_html, action_to_html
+from ..core.html_formatters import action_to_html, dataframe_to_html, make_section
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +75,7 @@ class TimeSliceBucket:
             metadata=MetaData(
                 source=source,
                 observation_variable=observation,
-                time_slice=self.period,
+                time_span=self.period,
             ),
         )
         return message

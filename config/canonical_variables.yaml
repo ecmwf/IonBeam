@@ -18,7 +18,7 @@
 
 - name: start_time
   dtype: datetime64[ns, UTC]
-  desc: For chunked data files, the logical begingined of the time period of the chunk.
+  desc: For chunked data files, the logical begining of the time period of the chunk, possibly rounded.
   
 - name: offset_tz
   desc: Uncertain what this means in the Meteotracker data.

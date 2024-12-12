@@ -15,6 +15,7 @@ import argparse
 import logging
 import os
 import pdb
+import shutil
 import sys
 import traceback
 from pathlib import Path
@@ -113,6 +114,13 @@ if __name__ == "__main__":
         help="Which environment to use, local, dev or test",
     )
 
+    parser.add_argument(
+    "--sources",
+    type=str,
+    nargs='+',
+    help="Which sources to use, e.g. --sources meteotracker acronet smartcitizenkit"
+)
+
     args = parser.parse_args()
 
     handlers = []
@@ -148,11 +156,11 @@ if __name__ == "__main__":
 
     config, actions = parse_config(
         args.config_folder,
-        offline=args.offline,
-        overwrite=args.overwrite,
-        environment=args.environment,
+        offline = args.offline,
+        overwrite = args.overwrite,
+        environment = args.environment,
+        sources = args.sources,
     )
-    print(args)
 
     sources, downstream_actions = [], []
     for action in actions:
@@ -168,15 +176,6 @@ if __name__ == "__main__":
     logger.info(f"    Data Path: {config.globals.data_path}")
     logger.info(f"    Offline: {config.globals.offline}")
     logger.info(f"    Overwrite: {config.globals.overwrite}")
-    if config.globals.ingestion_time_constants is not None:
-        logger.info("    Ingestion Time Constants:")
-        logger.info(f"         Query Timespan: {tuple(d.isoformat() for d in config.globals.ingestion_time_constants.query_timespan)}")  # fmt: skip
-        logger.info(
-            f"         Emit After (Hours): {config.globals.ingestion_time_constants.emit_after_hours}"
-        )
-        logger.info(
-            f"         Granularity: {config.globals.ingestion_time_constants.granularity}"
-        )
 
     logger.info("Sources")
     for i, a in enumerate(sources):
@@ -186,18 +185,33 @@ if __name__ == "__main__":
         sys.exit()
 
     if args.init_db:
-        host = config.globals.postgres_database["host"]
-        logger.warning(f"Wiping the postgres database as {host}!")
+        logger.warning(f"Wiping the postgres, fdb and cache databases for env = {config.globals.environment}!")
         if (
-            host != "localhost"
+            config.globals.environment != "local"
             and prompt(
-                f"Are you sure you want to wipe the postgres database at {host}? y/n: "
+                f"Are you sure you want to wipe the database for env = {config.globals.environment}? y/n: "
             )
             != "y"
         ):
             sys.exit()
-        from ionbeam.metadata.db import init_db
 
+
+        paths = [
+            ["Data", config.globals.data_path],
+            ["FDB Root", config.globals.fdb_root],
+            ["Cache", config.globals.cache_path],
+        ]
+        for name, path in paths:
+            logger.warning(f"Deleting {name} at {path}")
+            shutil.rmtree(path, ignore_errors=True)
+        
+        for name, path in paths:
+            logger.warning(f"Recreating {name} at {path}")
+            path.mkdir(parents=True, exist_ok=True)
+
+
+        logger.warning("Wiping Postgres db")
+        from ionbeam.metadata.db import init_db
         init_db(config.globals)
         logger.warning("SQL Database wiped and reinitialised.")
 

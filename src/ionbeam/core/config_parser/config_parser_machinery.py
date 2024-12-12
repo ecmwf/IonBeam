@@ -280,7 +280,7 @@ def parse_field(context, key, _type, value):
             return parse_dict(context, key, _type, value)
 
         try:
-            result = _type(value)
+            result = _type(**{k : v for k,v in value.items() if k != "__line__"}) if isinstance(value, dict) else _type(value)
         except Exception as e:
             raise ConfigLineError(context, key, _type, value, str(e)) from e
 

@@ -42,7 +42,7 @@ encoders:
     match:
     - source: acronet
       state: "quality_controlled"
-    output: data/outputs/{source}/csv/{observation_variable}/{observation_variable}_{time_slice.start_time}.csv
+    output: data/outputs/{source}/csv/{observation_variable}/{observation_variable}_{time_span.start_time}.csv
     metadata:
       state: encoded
 
@@ -50,7 +50,7 @@ encoders:
     match:
       - source: acronet
         state: "quality_controlled"
-    output: data/outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb
+    output: data/outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_span.start_time}.odb
     MARS_keys: !include MARS_keys.yaml
     
 

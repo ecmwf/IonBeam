@@ -60,7 +60,7 @@ def four_digit_hour(msg: TabularMessage) -> pd.Series:
     # return msg.data.time.dt.hour.apply(lambda x: "{0:02d}00".format(x))
     return msg.data.time.dt.hour * 100
 
-def start_time(msg: TabularMessage) -> pd.Series:
+def start_time_four_digit(msg: TabularMessage) -> pd.Series:
     logger.debug("start time is runnning")
     return msg.data.start_time.dt.strftime('%H%M')
 
@@ -194,7 +194,7 @@ class ODCEncoder(Encoder):
         output: A format string for the output path for each file.
         MARS_keys: Determines the output columns
     """
-    output: str = "outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb"
+    output: str = "outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_span.start}.odb"
     MARS_keys: List[MARS_Key] = dataclasses.field(default_factory=list)
     one_file_per_granule: bool = True
     split_data_columns: bool = False
@@ -298,6 +298,9 @@ class ODCEncoder(Encoder):
         # Parse the odb file into a mars request
         # Grab the column name and value for every static column in the dataframe
         mars_request = {k: output_df[k].iloc[0] for k in output_df.columns if output_df[k].nunique() == 1}
+        
+        assert msg.metadata.time_span is not None
+        mars_request["time"] = msg.metadata.time_span.start.strftime("%H%M")
         logger.debug(mars_request)
 
         logger.debug(f"Generated MARS keys for {msg}")
@@ -321,8 +324,8 @@ class ODCEncoder(Encoder):
                 if val is not None:
                     additional_metadata[key] = val
 
-            if msg.metadata.time_slice is not None:
-                additional_metadata["timeslice"] = str(msg.metadata.time_slice.start_time.isoformat())
+            if msg.metadata.time_span is not None:
+                additional_metadata["timeslice"] = str(msg.metadata.time_span.start.isoformat())
 
         # Copy additional data from the data itself into the properties
         for key in self.columns_to_metadata:
@@ -349,8 +352,7 @@ class ODCEncoder(Encoder):
                 external_id=output_df["external_id"][0],
                 internal_id=output_df["internal_id"][0],
             )
-            if "start_time" in output_df.columns:
-                kwargs["time"] = output_df["start_time"][0]
+            kwargs["start_time"] = msg.metadata.time_span.start.strftime("%H:%M:%S")
             
             f = self.output.format(**kwargs)
 
@@ -401,7 +403,10 @@ class ODCEncoder(Encoder):
 
         output_msg = FileMessage(
             metadata=self.generate_metadata(
-                msg, filepath=self.output_file, encoded_format="odb", mars_request=mars_request
+                msg, 
+                time_span = msg.metadata.time_span,
+                filepath=self.output_file,
+                encoded_format="odb", mars_request=mars_request
             ),
         )
         yield self.tag_message(output_msg, msg)

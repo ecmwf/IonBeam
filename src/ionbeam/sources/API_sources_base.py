@@ -1,21 +1,16 @@
 import dataclasses
-from ..core.bases import Message, Source,  InputColumns
-from pathlib import Path
-from typing import Iterable, Any
 import logging
+import pickle
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Iterable
+from urllib.parse import urljoin
 
 import requests
-from urllib3.util import Retry
 from requests.adapters import HTTPAdapter
-from urllib.parse import urljoin
-import pickle
+from urllib3.util import Retry
 
-from ..metadata.db import IngestedChunk
-from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, URL
-
-import itertools as it
+from ..core.bases import InputColumns, Message, Source
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +47,7 @@ class APISource(Source):
     def init(self, globals):
         super().init(globals)
         self.start_date, self.end_date = self.globals.ingestion_time_constants.query_timespan
-        self.cache_directory = self.resolve_path(self.cache_directory, type="data")
+        self.cache_directory = globals.cache_path / self.source
         self.mappings_dict = {column.name: column for column in self.mappings}
 
     def get_chunks(self, start_date : datetime, end_date: datetime) -> Iterable[Any]:
@@ -137,7 +132,7 @@ class APISource(Source):
         if self.globals.offline:
             chunk_iterable = self.offline_chunks()
         else:
-            chunk_iterable = self.get_chunks(self.start_date, self.end_date)
+            chunk_iterable = self.get_chunks(self.start_date, self.end_date, self.globals.ingestion_time_constants.granularity)
 
 
         for chunk in chunk_iterable:

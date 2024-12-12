@@ -56,7 +56,7 @@ def column_metadata_to_html(columns):
 
 def summarise_metadata(m):
     return ", ".join(
-        str(v) for k in ["source", "observation_variable", "time_slice", "encoded_format"] if (v := getattr(m, k))
+        str(v) for k in ["source", "observation_variable", "time_span", "encoded_format"] if (v := getattr(m, k))
     )
 
 

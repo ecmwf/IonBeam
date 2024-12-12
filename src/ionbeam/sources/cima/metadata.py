@@ -141,7 +141,10 @@ class AddAcronetMetadata(Parser):
                 update_acronet_station_in_metadata_store(db_session, input_message, station)
 
         output_msg = TabularMessage(
-            metadata=self.generate_metadata(message=input_message),
+            metadata=self.generate_metadata(
+                message=input_message,
+                 time_span = input_message.metadata.time_span,
+            ),
             data=input_message.data,
         )
 

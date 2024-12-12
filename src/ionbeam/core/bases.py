@@ -37,6 +37,10 @@ from .mars_keys import FDBSchema, MARSRequest
 
 # dataclass = partial(dataclass, config=Config)
 
+@dataclass
+class TimeSpan:
+    start: datetime
+    end: datetime
 
 @dataclass(unsafe_hash=True)
 class MetaData:
@@ -44,7 +48,7 @@ class MetaData:
     state: str | None = None
     source: None | str = None
     observation_variable: None | str = None
-    time_slice: pandas.Period | None = None
+    time_span: TimeSpan | None = None
     encoded_format: str | None = None
     filepath: Path | None = None
     mars_request: MARSRequest = dataclasses.field(default_factory=MARSRequest)
@@ -86,7 +90,7 @@ class DataMessage(Message):
             "state": "state",
             "src": "source",
             "obs": "observation_variable",
-            "timeslc": "time_slice",
+            "timeslc": "time_span",
         }.items():
             val = getattr(self.metadata, key, None)
             if val is not None:
@@ -158,7 +162,7 @@ class CanonicalVariable:
 class IngestionTimeConstants:
     query_timespan: tuple[datetime, datetime]
     emit_after_hours: int
-    granularity: str
+    granularity: timedelta
     time_direction: Literal["forwards", "backwards"] = "forwards"
 
     def __post_init__(self):
@@ -184,14 +188,21 @@ class IngestionTimeConstants:
 class Globals:
     canonical_variables: List[CanonicalVariable]
     data_path: Path
-    metkit_language_template: Path
-    environment: str = "local"
-    fdb_schema_path: Path = Path("fdb_schema")
-    secrets_file: Path = Path("secrets.yaml")
+    cache_path: Path
+    ingestion_time_constants: IngestionTimeConstants
     config_path: Path | None = None
+    
+    environment: str = "local"
+
+    metkit_language_template: Path | None = None
+    fdb_schema_path: Path | None = None
+    fdb_root: Path | None = None
+
+    secrets_file: Path = Path("secrets.yaml")
+
     offline: bool = False
     overwrite: bool = False
-    ingestion_time_constants: IngestionTimeConstants | None = None
+
     split_data_columns: bool = True
     code_source: CodeSourceInfo | None = None
     fdb_schema: Annotated[FDBSchema, "post_init"] = dataclasses.field(kw_only=True)

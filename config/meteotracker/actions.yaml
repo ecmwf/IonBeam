@@ -49,14 +49,6 @@ actions:
   - class: ODCEncoder
     split_data_columns: False
     output: outputs/{source}/odb/by_id/{external_id}.odb
-    MARS_keys: !include MARS_keys_per_track.yaml
-
-  - class: FDBWriter
-    config:
-      engine: toc
-      spaces:
-      - handler: Default
-        roots:
-        - path: /Users/math/git/IonBeam_bundle/data/fdb_root
+    MARS_keys: !include MARS_keys.yaml
 
   # - class: MeteoTrackerMarkIngested

@@ -9,7 +9,8 @@ import pandas as pd
 from cachetools import TTLCache, cachedmethod
 from cachetools.keys import hashkey
 
-from ...core.bases import TabularMessage
+from ...core.bases import TabularMessage, TimeSpan
+from ...core.time import round_datetime
 from ..API_sources_base import RESTSource
 from .metadata import construct_sck_metadata
 
@@ -87,7 +88,7 @@ class SmartCitizenKitSource(RESTSource):
         logger.debug(f"Found {len(devices)} devices overall for I-CHANGE.")
         return devices
 
-    def get_chunks(self, start_date: datetime, end_date: datetime) -> Iterable[dict]:
+    def get_chunks(self, start_date: datetime, end_date: datetime, _) -> Iterable[dict]:
         """
         Return an iterable of objects representing chunks of data we should download from the API
         In this case (device_id, sensor_id) tuples
@@ -199,8 +200,15 @@ class SmartCitizenKitSource(RESTSource):
         # Remove time as the index and just have it as a normal column
         df = df.reset_index()
 
+        granularity = self.globals.ingestion_time_constants.granularity
+        time_span = TimeSpan(
+            start = round_datetime(chunk["start_date"], round_to=granularity, method="floor"),
+            end = round_datetime(chunk["end_date"], round_to=granularity, method="ceil")
+        )
+
         yield TabularMessage(
             metadata=self.generate_metadata(
+                time_span=time_span,
                 unstructured=raw_metadata,
             ),
             data=df,

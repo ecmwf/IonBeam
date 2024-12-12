@@ -1,6 +1,10 @@
 # See https://app.meteotracker.com/html/api-docs/#numericPoint for mapping
+
 - name: time
   key: time
+  type: datetime
+
+- name: start_time
   type: datetime
 
 - name: author

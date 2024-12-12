@@ -49,5 +49,5 @@ actions:
     time_direction: forwards
 
   - class: ODCEncoder
-    output: outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_slice.start_time}.odb
+    output: outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_span.start_time}.odb
     MARS_keys: !include MARS_keys.yaml

@@ -80,7 +80,7 @@ def install_metkit_overlays(template, keys):
 
 @dataclasses.dataclass
 class FDBWriter(Writer):
-    config: dict
+    config: dict | None = None
     debug: list[str] = dataclasses.field(default_factory=list)
 
     def __str__(self):
@@ -91,6 +91,21 @@ class FDBWriter(Writer):
         self.metadata = dataclasses.replace(self.metadata, state="written")
         self.metkit_language_template = globals.metkit_language_template
 
+        if not self.config:
+            self.config = dict(
+                engine = "toc",
+                spaces = [
+                    dict(
+                        handler = "Default",
+                        roots = [
+                            dict(
+                                path = str(globals.fdb_root)
+                            )
+                        ]
+                    )
+                ]
+            )
+
         if "schema" not in self.config:
             self.config["schema"] = str(globals.fdb_schema_path)
 
@@ -100,17 +115,15 @@ class FDBWriter(Writer):
         fdb5_path = findlibs.find("fdb5")
         logger.debug(f"FDBWriter using fdb5 shared library from {fdb5_path}")
 
-        os.environ["FDB5_CONFIG"] = yaml.dump(self.config)
-
         for lib in self.debug:
             os.environ[f"{lib.upper()}_DEBUG"] = "1"
 
         logger.debug("Installing metkit overlays")
         install_metkit_overlays(self.metkit_language_template, self.globals.custom_mars_keys)
 
-        import pyfdb  # This has to happen late so that it pucks up the above.
+        import pyfdb
         
-        return pyfdb.FDB()
+        return pyfdb.FDB(self.config)
 
     def process(self, input_message: FileMessage | FinishMessage) -> Iterable[Message]:
         if isinstance(input_message, FinishMessage):

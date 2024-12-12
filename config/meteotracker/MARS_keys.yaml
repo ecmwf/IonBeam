@@ -44,33 +44,6 @@
   value: lwda
   column_description: mars key - forecasting system used to generate data
 
-- name: reportype
-  dtype: INTEGER
-  fill_method: from_config
-  column_description: Mandatory mars key that labels the observation variable
-
-#################################################
-# Stuff required to keep the mars client happy  #
-#################################################
-
-- name: andate
-  dtype: INTEGER
-  column_description: Date of data ingestion, encoded as YYYYMMDD
-  fill_method: function
-  key: decimal_encoded_date
-
-- name: antime
-  dtype: INTEGER
-  column_description: Time of data ingestion, encoded as HHMM
-  fill_method: function
-  key: four_digit_hour
-
-- name: groupid@hdr
-  dtype: INTEGER
-  fill_method: constant
-  value: 17
-  column_description: Mandatory (for now) mars key
-
 #################################################
 # Other metadata                                #
 #################################################
@@ -87,6 +60,12 @@
   column_description: 'The aggregation platform that we retrieved this data from.'
   dtype: STRING
 
+- name: aggregation_type
+  dtype: STRING
+  fill_method: constant
+  value: tracked
+  column_description: 'The aggregation platform that we retrieved this data from.'
+
 - name: source_name
   fill_method: from_data
   key: author
@@ -99,11 +78,11 @@
   key: station_id
   column_description: 'A unique id for the individual entity data came from.'
 
-- name: observation_variable
+- name: internal_id
   dtype: STRING
-  fill_method: from_metadata
-  key: observation_variable
-  column_description: 'The observed property.'
+  fill_method: function
+  key: station_id_hash
+  column_description: 'A unique id for the individual entity data came from.'
 
 - name: date
   dtype: INTEGER
@@ -111,13 +90,6 @@
   fill_method: function
   key: decimal_encoded_date
 
-- name: time
-  dtype: INTEGER
-  column_description: obs. exact time
-  fill_method: function
-  key: four_digit_hour
-
-# The minutes including 2dp fractional part
 - name: datetime
   dtype: STRING
   column_description: The datetime as ISO 8601
@@ -125,27 +97,20 @@
   key: datetime
 
 - name: altitude
+  dtype: DOUBLE
   column_description: altitude
-  dtype: REAL
   fill_method: function
   key: altitude
 
 # lat and lon coords
 - name: lat
   column_description: latitude
-  dtype: REAL
+  dtype: DOUBLE
   fill_method: from_data
   key: lat
 
 - name: lon
   column_description: longitude
-  dtype: REAL
+  dtype: DOUBLE
   fill_method: from_data
   key: lon
-
-# The actual observed value
-- name: observed_value
-  column_description: observed variable
-  dtype: REAL
-  fill_method: function
-  key: obsvalue

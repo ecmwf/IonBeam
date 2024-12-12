@@ -14,38 +14,19 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, List
 
-import pandas as pd
-
-from ...core.bases import InputColumn, TabularMessage
+from ...core.bases import InputColumn, TabularMessage, TimeSpan
+from ...core.time import round_datetime, split_time_interval_into_chunks
 from ..API_sources_base import RESTSource
 from .cima import CIMA_API
 
 logger = logging.getLogger(__name__)
-
-def round_datetime(dt: datetime, round_to: int = 5, method: str = "floor") -> datetime:
-    if round_to <= 0:
-        raise ValueError("round_to must be a positive integer")
-    if method not in {"floor", "ceil"}:
-        raise ValueError("method must be 'floor' or 'ceil'")
-    
-    # Calculate the number of seconds since the start of the day
-    total_seconds = (dt - dt.replace(hour=0, minute=0, second=0, microsecond=0)).total_seconds()
-    
-    # Calculate the rounded total seconds
-    rounding_seconds = round_to * 60
-    if method == "floor":
-        rounded_seconds = (total_seconds // rounding_seconds) * rounding_seconds
-    else:  # method == "ceil"
-        rounded_seconds = ((total_seconds + rounding_seconds - 1) // rounding_seconds) * rounding_seconds
-    
-    # Return the rounded datetime
-    return dt.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(seconds=rounded_seconds)
 
 
 @dataclasses.dataclass
 class AcronetSource(RESTSource):
     """
     """
+    source: str = "acronet"
     cache_directory: Path = Path("inputs/acronet")
     endpoint = "https://webdrops.cimafoundation.org/app/"
     # endpoints_url = "https://testauth.cimafoundation.org/auth/realms/webdrops/.well-known/openid-configuration"
@@ -59,30 +40,15 @@ class AcronetSource(RESTSource):
                             headers = globals.secrets["headers"],)
 
 
-    def get_chunks(self, start_date : datetime, end_date: datetime) -> Iterable[dict]:
+    def get_chunks(self, start_date : datetime, end_date: datetime, chunk_size: timedelta) -> Iterable[dict]:
         """
         Return an iterable of objects representing chunks of data we should download from the API
-        """
-        # The maximum number time range we can request is 3 days
-        start = round_datetime(self.start_date, round_to=5, method="floor")
-        end = round_datetime(self.start_date, round_to=5, method="ceil")
-        dates = pd.date_range(start, end, freq="5min")
-        
-        # Ensure the last date is included
-        if dates[-1] != self.end_date:
-            dates = pd.DatetimeIndex(
-                dates.union(
-                    [
-                        self.end_date,
-                    ]
-                )
-            )
-
-        # Convert to ranges
+        """     
+        dates = split_time_interval_into_chunks(self.start_date, self.end_date, chunk_size)
         date_ranges = list(zip(dates[:-1], dates[1:]))
 
         for start, end in date_ranges:
-            for station in self.api.stations.values():
+            for station in list(self.api.stations.values())[:1]:
                 yield dict(
                     key = f"{station.id}_{start.isoformat()}_{end.isoformat()}.pickle",
                     station = dataclasses.asdict(station),
@@ -105,9 +71,18 @@ class AcronetSource(RESTSource):
 
             data["author"] = "Acronet"
 
+
+            granularity = self.globals.ingestion_time_constants.granularity
+            time_span = TimeSpan(
+                start = round_datetime(chunk["start"], round_to=granularity, method="floor"),
+                end = round_datetime(chunk["end"], round_to=granularity, method="ceil")
+            )
+
             yield TabularMessage(
                 metadata=self.generate_metadata(
-                    unstructured = dict(station = station, start = chunk["start"], end = chunk["end"])
+                    time_span = time_span,
+                    unstructured = dict(station = station, 
+                    start = chunk["start"], end = chunk["end"])
                 ),
                 data = data
             )
