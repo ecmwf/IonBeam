@@ -14,3 +14,5 @@ examples/notebooks/
 *.odb
 # *.ipynb
 cron_logs.txt
+cron_logs_acronet.txt
+cron_logs_meteotracker.txt
