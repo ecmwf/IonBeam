@@ -8,14 +8,12 @@
 # # does it submit to any jurisdiction.
 # #
 
-import logging, sys
+import logging
+import sys
+from itertools import chain, cycle, islice
 from typing import Iterable, Sequence
 
-from itertools import cycle, islice, chain
-
-from .bases import FinishMessage, MessageStream, Processor, Action, DataMessage, Message, Aggregator
-from typing import Tuple
-
+from .bases import Aggregator, FinishMessage, Message, MessageStream
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +54,7 @@ def empty_aggregators(actions) -> Iterable[Message]:
     """
     for a in actions:
         if isinstance(a, Aggregator):
-            for m in a.process(FinishMessage(f"Sources Exhausted")):
+            for m in a.process(FinishMessage("Sources Exhausted")):
                 yield m
 
 
@@ -68,7 +66,7 @@ def log_message_transmission(logger, msg, dest):
     logger.info(f"{prev_action} {str(msg)} --> {dest}")
 
 
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, MofNCompleteColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 
 def customProgress():
@@ -88,11 +86,13 @@ class DummyProgress():
     def update(self, *args, **kwargs): pass
 
 
-def singleprocess_pipeline(sources, actions, emit_partial: bool, simple_output : bool = False):
+def singleprocess_pipeline(sources, actions, emit_partial: bool, 
+                           simple_output : bool = False, 
+                           die_on_error: bool = False) -> list[Message]:
     logger.info("Starting single threaded execution...")
 
     source = roundrobin(sources)
-    source = chain(source, [FinishMessage(f"Sources Exhausted")])
+    source = chain(source, [FinishMessage("Sources Exhausted")])
 
     input_messages = []
     finished_messages = []
@@ -132,7 +132,7 @@ def singleprocess_pipeline(sources, actions, emit_partial: bool, simple_output :
 
                     # By default (i.e emit_partial == false) we just throw half filled message buckets away
                     if emit_partial:
-                        logger.warning(f"Initial messages consumed, emptying aggregators.")
+                        logger.warning("Initial messages consumed, emptying aggregators.")
                         input_messages.extend(empty_aggregators(actions))
                     aggregators_emptied = True
 
@@ -158,6 +158,8 @@ def singleprocess_pipeline(sources, actions, emit_partial: bool, simple_output :
                             input_messages.extend(dest.process(msg))
                         except Exception as e:
                             logger.warning(f"Failed to process {msg} with {dest} with exception {e}")
+                            if die_on_error:
+                                raise e
                             
                         matched = True
                 if not matched:

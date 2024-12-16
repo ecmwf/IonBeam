@@ -273,6 +273,7 @@ class ODCEncoder(Encoder):
                     output_data[name] = msg.data[name]
 
             # logger.warning(f"{output_data.keys() = }")
+        print(output_data['air_temperature_near_surface'])
         return pd.DataFrame(output_data)
 
     def encode(self, msg: TabularMessage | FinishMessage) -> Iterable[FileMessage]:

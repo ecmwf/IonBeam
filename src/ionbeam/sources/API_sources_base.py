@@ -139,6 +139,8 @@ class APISource(Source):
         for chunk in chunk_iterable:
             try:
                 messages = self.download_chunk(chunk)
+                if messages is None:
+                    continue
             except API_Error as e:
                 logger.warning(f"{self.__class__.__name__}.get_chunks failed for {chunk = }\n{e}")
                 continue

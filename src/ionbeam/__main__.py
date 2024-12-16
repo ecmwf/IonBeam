@@ -108,6 +108,12 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--die-on-error",
+        action="store_true",
+        help="Whether to abort on the first exception or keep going.",
+    )
+
+    parser.add_argument(
         "--init-db",
         action="store_true",
         help="(Re)initialise all the databases.",
@@ -246,6 +252,7 @@ if __name__ == "__main__":
             downstream_actions,
             emit_partial=args.emit_partial,
             simple_output=args.simple_output or args.debug,
+            die_on_error=args.die_on_error,
         )
     except Exception as e:
         if args.debug:

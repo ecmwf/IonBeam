@@ -83,7 +83,7 @@ def construct_sck_sensors(sck_source, session, sensors):
         yield sensor
 
 
-def construct_sck_metadata(sck_source, device):
+def construct_sck_metadata(sck_source, device, start_date : datetime, end_date : datetime):
     if device["last_reading_at"] is None:
         logger.warning(f"Skipping device {device['id']} as it has no last_reading_at = None")
         return None
@@ -93,8 +93,8 @@ def construct_sck_metadata(sck_source, device):
         if station is not None:
             # Update station
             logger.debug("Sck_metadata: Found existing station, updating")
-            station.earliest_reading = min(datetime.fromisoformat(device["created_at"]), station.earliest_reading_utc)
-            station.latest_reading = max(datetime.fromisoformat(device["last_reading_at"]), station.latest_reading_utc)
+            station.earliest_reading = min(start_date, station.earliest_reading_utc)
+            station.latest_reading = max(end_date, station.latest_reading_utc)
             session.add(station)
             session.commit()
 
@@ -111,8 +111,8 @@ def construct_sck_metadata(sck_source, device):
             description=device["description"],
             location=location_point.wkt,
             location_feature=location_point.wkt,
-            earliest_reading=datetime.fromisoformat(device["created_at"]),
-            latest_reading=datetime.fromisoformat(device["last_reading_at"]),
+            earliest_reading=start_date,
+            latest_reading=end_date,
             authors=[],
             sensors=list(construct_sck_sensors(sck_source, session, device["data"]["sensors"])),
             extra={

@@ -1,5 +1,6 @@
 import dataclasses
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
@@ -10,10 +11,9 @@ from cachetools import TTLCache, cachedmethod
 from cachetools.keys import hashkey
 
 from ...core.bases import TabularMessage, TimeSpan
-from ...core.time import round_datetime
+from ...core.time import split_time_interval_into_chunks
 from ..API_sources_base import RESTSource
 from .metadata import construct_sck_metadata
-from ...core.time import round_datetime, split_time_interval_into_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -145,10 +145,13 @@ class SmartCitizenKitSource(RESTSource):
         Unfortunately the readings returned by different sensors for a device are not
         guaranteed to be at the same time points, so we have to carefully merge them.
         """
-        return [
-            self.get_readings(chunk["device_id"], sensor["id"], chunk["start_date"], chunk["end_date"])
-            for sensor in chunk["device"]["data"]["sensors"]
-        ]
+        readings = []
+        for sensor in chunk["device"]["data"]["sensors"]:
+            readings.append(
+                self.get_readings(chunk["device_id"], sensor["id"], chunk["start_date"], chunk["end_date"])
+            )   
+            time.sleep(0.5)
+        return readings
 
     def download_chunk(self, chunk: dict):
         # Try to load data from the cache first
@@ -161,7 +164,7 @@ class SmartCitizenKitSource(RESTSource):
 
         # Construct the metadata for the station
         # and add it to the postgres database
-        station = construct_sck_metadata(self, chunk["device"])
+        station = construct_sck_metadata(self, chunk["device"], start_date = chunk["start_date"], end_date = chunk["end_date"])
 
         raw_metadata = {}
         raw_metadata["station"] = station

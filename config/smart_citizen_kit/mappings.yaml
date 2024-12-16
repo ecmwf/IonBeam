@@ -137,11 +137,11 @@
   unit: "ppb"
 
 - name: relative_humidity_near_surface 
-  key: ["Relative Humidity", "h", "ext_h"]
+  key: ["Relative Humidity", "h"]
   unit: "%"
 
 - name: air_temperature_near_surface
-  key: ["Air Temperature", "t", "ext_t"]
+  key: ["Air Temperature", "t"]
   unit: "ºC" # Yes, this degree symbol looks weird, this is actually the unicode character known as "MASCULINE ORDINAL INDICATOR", do not ask me why.
 
 # Don't ingest this data, just assert that is it data we expect to see and are happy to discard

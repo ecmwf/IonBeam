@@ -30,5 +30,6 @@ actions:
       - country
 
   - class: ODCEncoder
-    output: outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_span.start_time}.odb
+    split_data_columns: False
+    output: outputs/{source}/odb/{internal_id}_{start_time}.odb
     MARS_keys: !include MARS_keys.yaml
