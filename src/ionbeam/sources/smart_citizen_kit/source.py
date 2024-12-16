@@ -1,6 +1,6 @@
 import dataclasses
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 from unicodedata import normalize
@@ -13,6 +13,7 @@ from ...core.bases import TabularMessage, TimeSpan
 from ...core.time import round_datetime
 from ..API_sources_base import RESTSource
 from .metadata import construct_sck_metadata
+from ...core.time import round_datetime, split_time_interval_into_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class SmartCitizenKitSource(RESTSource):
     API Documentation: https://developer.smartcitizen.me/#summary
     """
 
+    source = "smart_citizen_kit"
     cache_directory: Path = Path("inputs/smart_citizen_kit")
     endpoint = "https://api.smartcitizen.me/v0"
     cache = TTLCache(maxsize=1e5, ttl=20 * 60)  # Cache API responses for 20 minutes
@@ -88,10 +90,9 @@ class SmartCitizenKitSource(RESTSource):
         logger.debug(f"Found {len(devices)} devices overall for I-CHANGE.")
         return devices
 
-    def get_chunks(self, start_date: datetime, end_date: datetime, _) -> Iterable[dict]:
+    def get_chunks(self, start_date: datetime, end_date: datetime, chunk_size: timedelta) -> Iterable[dict]:
         """
         Return an iterable of objects representing chunks of data we should download from the API
-        In this case (device_id, sensor_id) tuples
         """
         devices = self.get_ICHANGE_devices()
 
@@ -106,15 +107,19 @@ class SmartCitizenKitSource(RESTSource):
         devices_in_date_range = [d for d in devices if filter_by_dates(d)]
         logger.debug(f"{len(devices_in_date_range)} of those might have data in the requested date range.")
 
-        for device in devices_in_date_range:
-            logger.debug(f"Working on device with id {device['id']}")
-            yield dict(
-                key=f"device:{device['id']}_{start_date.isoformat()}_{end_date.isoformat()}.pickle",
-                device_id=device["id"],
-                start_date=start_date,
-                end_date=end_date,
-                device=device,
-            )
+        dates = split_time_interval_into_chunks(self.start_date, self.end_date, chunk_size)
+        date_ranges = list(zip(dates[:-1], dates[1:]))
+
+        for start_date, end_date in date_ranges:
+            for device in devices_in_date_range:
+                logger.debug(f"Working on device with id {device['id']}")
+                yield dict(
+                    key=f"device:{device['id']}_{start_date.isoformat()}_{end_date.isoformat()}.pickle",
+                    device_id=device["id"],
+                    start_date=start_date,
+                    end_date=end_date,
+                    device=device,
+                )
 
     def get_all_sensor_data(self, chunk: dict) -> list[dict]:
         """Get all the sensor readings in the rawest possible form,
@@ -202,8 +207,8 @@ class SmartCitizenKitSource(RESTSource):
 
         granularity = self.globals.ingestion_time_constants.granularity
         time_span = TimeSpan(
-            start = round_datetime(chunk["start_date"], round_to=granularity, method="floor"),
-            end = round_datetime(chunk["end_date"], round_to=granularity, method="ceil")
+            start = chunk["start_date"],
+            end = chunk["end_date"],
         )
 
         yield TabularMessage(

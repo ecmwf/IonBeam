@@ -91,9 +91,8 @@ def add_acronet_station_to_metadata_store(db_session, message):
         }
     )
 
-    db_session.add(station)
-    db_session.commit()
-    logger.info(f"Adding track {station}")
+    logger.info(f"Adding station {station}")
+    return station
     
 
 def update_acronet_station_in_metadata_store(db_session, message, station):
@@ -136,9 +135,13 @@ class AddAcronetMetadata(Parser):
         with Session(self.globals.sql_engine) as db_session:
             station = db_session.query(db.Station).where(db.Station.external_id == station["id"]).one_or_none()
             if station is None:
-                add_acronet_station_to_metadata_store(db_session, input_message)
+                station = add_acronet_station_to_metadata_store(db_session, input_message)
             else:
                 update_acronet_station_in_metadata_store(db_session, input_message, station)
+
+            db_session.add(station)
+            db_session.commit()
+            
 
         output_msg = TabularMessage(
             metadata=self.generate_metadata(

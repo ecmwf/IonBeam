@@ -29,25 +29,6 @@ actions:
       - city
       - country
 
-  - class: Splitter
-    identifying_keys:
-      - time
-      
-    metadata_keys:
-      - station_name
-      - author
-      - lat
-      - lon
-      - created_at
-      - city
-      - country
-
-
-  - class: NewTimeAggregator
-    granularity_hours: 1
-    min_emit_after_hours: 96
-    time_direction: forwards
-
   - class: ODCEncoder
     output: outputs/{source}/odb/{observation_variable}/{observation_variable}_{time_span.start_time}.odb
     MARS_keys: !include MARS_keys.yaml

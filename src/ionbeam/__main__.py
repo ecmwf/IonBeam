@@ -37,8 +37,8 @@ if __name__ == "__main__":
     #      the pre-processing configuration can change dynamically.
 
     parser = argparse.ArgumentParser(
-        prog="ECMWF IOT Observation Processor",
-        description="Put IOT data into the FDB",
+        prog="IonBeam",
+        description="Beam IoT data around",
         epilog="See https://github.com/ecmwf-projects for more info.",
     )
     parser.add_argument(
@@ -58,7 +58,12 @@ if __name__ == "__main__":
         help="Run in offline mode.",
     )
     parser.add_argument(
-        "--overwrite",
+        "--overwrite-fdb",
+        action="store_true",
+        help="If specified then overwrite data even if it already exists in the database.",
+    )
+    parser.add_argument(
+        "--overwrite-cache",
         action="store_true",
         help="If specified then overwrite data even if it already exists in the database.",
     )
@@ -140,7 +145,16 @@ if __name__ == "__main__":
         prompt = Prompt.ask
 
     if args.logfile:
-        handlers.append(logging.FileHandler(args.logfile))
+        file_handler = logging.FileHandler(args.logfile)
+        file_handler.setLevel(logging.WARNING)
+        # file_format = logging.Formatter(
+        #     "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        #     datefmt="[%Y-%m-%d %H:%M:%S]",
+        # )
+        # file_handler.setFormatter(file_format)
+        handlers.append(file_handler)
+
+
 
     # Set the log level, default is warnings, -v gives info, -vv for debug
     logging.basicConfig(
@@ -157,7 +171,8 @@ if __name__ == "__main__":
     config, actions = parse_config(
         args.config_folder,
         offline = args.offline,
-        overwrite = args.overwrite,
+        overwrite_fdb = args.overwrite_fdb,
+        overwrite_cache = args.overwrite_cache,
         environment = args.environment,
         sources = args.sources,
     )
@@ -175,7 +190,8 @@ if __name__ == "__main__":
     logger.info(f"    Config Path: {config.globals.config_path}")
     logger.info(f"    Data Path: {config.globals.data_path}")
     logger.info(f"    Offline: {config.globals.offline}")
-    logger.info(f"    Overwrite: {config.globals.overwrite}")
+    logger.info(f"    Overwrite FDB: {config.globals.overwrite_fdb}")
+    logger.info(f"    Overwrite Cache: {config.globals.overwrite_cache}")
 
     logger.info("Sources")
     for i, a in enumerate(sources):

@@ -109,8 +109,8 @@ def parse_globals(config_dir: Path, **overrides):
         loader_class=SafeLineLoader, base_dir=str(config_dir)
     )
 
-    logger.warning(f"Configuration Directory: {config_dir}")
-    logger.warning(f"Global config file: {global_config_file}")
+    logger.debug(f"Configuration Directory: {config_dir}")
+    logger.debug(f"Global config file: {global_config_file}")
 
     if not global_config_file.exists():
         raise ConfigError(f"Could not find config.yaml in {config_dir}")
@@ -209,7 +209,7 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
     sources = {}
     actions = []
     for name, file in action_source_files.items():
-        assert file.exists()
+        assert file.exists(), f"{file} does not exist!"
         logger.debug(f"Parsing {file}")
         source = parse_sub_config(file, globals=config.globals, schema=SubConfig)
         sources[name] = source

@@ -55,7 +55,7 @@ for package in ["requests_oauthlib", "urllib3"]:
     package_logger = logging.getLogger(package)
     package_logger.setLevel(logging.WARNING)
 
-
+# https://webdrops.cimafoundation.org/swagger/
 class CIMA_API:
     api_url = "https://webdrops.cimafoundation.org/app/"
     endpoints_url = "https://testauth.cimafoundation.org/auth/realms/webdrops/.well-known/openid-configuration"
@@ -410,20 +410,24 @@ class CIMA_API:
                     columns[sensor_name]["times"].extend(json_data["timeline"])
                     columns[sensor_name]["readings"].extend(json_data["values"])
 
-        dfs = [
-            pd.DataFrame(
-                        {
-                            f"{sensor_name} [{details['sensor'].unit}]": details["readings"],
-                            "time": pd.to_datetime(details["times"], format="%Y%m%d%H%M", utc = True),
-                        })
-            for sensor_name, details in columns.items()
-        ]
 
-        df = reduce(
+
+        dfs = []
+        for sensor_name, details in columns.items():
+            df = pd.DataFrame({
+                                f"{sensor_name} [{details['sensor'].unit}]": details["readings"],
+                                "time": pd.to_datetime(details["times"], format="%Y%m%d%H%M", utc = True),
+                            })
+            # Filter out all rows where the value of the second column is -9998.0
+            df = df[df.iloc[:, 0] > -9000.0]
+            dfs.append(df)
+
+        # Stick the dataframes together such that we puts NaNs in columns where there's no reading for that sensor
+        if dfs:
+            df = reduce(
                 lambda left, right: pd.merge(left, right, on="time", how="outer"),
                 dfs
             )
 
-        df.replace(to_replace=-9998.0, value=np.nan, inplace=True)
-
-        return df
+            return df
+        return None

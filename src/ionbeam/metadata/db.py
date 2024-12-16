@@ -227,16 +227,20 @@ class Station(Base):
             authors=[a.as_json() for a in self.authors],
         )
 
+        start = self.earliest_reading.strftime("%Y%m%d")
+        end = self.latest_reading.strftime("%Y%m%d")
+        if start == end: date = start
+        else: date = f"{start}/to/{end}/by/1"
+
         d["mars_request"] = {
             "class": "rd",
             "expver": "xxxx",
             "stream": "lwda",
             "aggregation_type": "tracked" if self.platform == "meteotracker" else "chunked",
+            "date":  date,
             "platform": self.platform,
             "internal_id": self.internal_id,
         }
-        if self.platform == "meteotracker":
-            d["mars_request"]["date"] = self.earliest_reading.strftime("%Y%m%d")
 
 
         if type == "full":

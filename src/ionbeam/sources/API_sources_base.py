@@ -71,6 +71,7 @@ class APISource(Source):
         assert path is not None
 
         if not self.use_cache: raise KeyError("Cache is disabled")
+        if not self.globals.overwrite_cache: raise KeyError("Cache is globally disabled")
         if not path.exists(): raise KeyError(f"Cache file {path} does not exist")
 
         try:

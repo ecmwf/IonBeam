@@ -24,7 +24,7 @@
 - name: platform
   dtype: STRING
   fill_method: constant
-  value: Acronet
+  value: acronet
   column_description: 'The aggregation platform that we retrieved this data from.'
 
 - name: aggregation_type

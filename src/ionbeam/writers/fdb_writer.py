@@ -134,7 +134,7 @@ class FDBWriter(Writer):
         request = input_message.metadata.mars_request.as_strings()
         # logger.warning(request)
 
-        if len(list(self.fdb.list(request))) > 0 and not self.globals.overwrite:
+        if len(list(self.fdb.list(request))) > 0 and not self.globals.overwrite_fdb:
             logger.debug("Dropping data because it's already in the database.")
         else:
             assert input_message.metadata.filepath is not None

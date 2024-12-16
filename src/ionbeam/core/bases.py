@@ -201,7 +201,8 @@ class Globals:
     secrets_file: Path = Path("secrets.yaml")
 
     offline: bool = False
-    overwrite: bool = False
+    overwrite_fdb: bool = False
+    overwrite_cache: bool = False
 
     split_data_columns: bool = True
     code_source: CodeSourceInfo | None = None

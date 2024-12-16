@@ -154,7 +154,11 @@ def singleprocess_pipeline(sources, actions, emit_partial: bool, simple_output :
                 for dest in actions:
                     if dest.matches(msg):
                         log_message_transmission(logger, msg, dest)
-                        input_messages.extend(dest.process(msg))
+                        try:
+                            input_messages.extend(dest.process(msg))
+                        except Exception as e:
+                            logger.warning(f"Failed to process {msg} with {dest} with exception {e}")
+                            
                         matched = True
                 if not matched:
                     logger.info(f"{str(msg)} --> Done")

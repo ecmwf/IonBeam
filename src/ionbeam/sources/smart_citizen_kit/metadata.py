@@ -5,7 +5,7 @@ from unicodedata import normalize
 from shapely.geometry import Point
 from sqlalchemy.orm import Session
 
-from ...metadata import db
+from ...metadata import db, id_hash
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,8 @@ def construct_sck_metadata(sck_source, device):
             logger.debug("Sck_metadata: Found existing station, updating")
             station.earliest_reading = min(datetime.fromisoformat(device["created_at"]), station.earliest_reading_utc)
             station.latest_reading = max(datetime.fromisoformat(device["last_reading_at"]), station.latest_reading_utc)
+            session.add(station)
+            session.commit()
 
             return station.as_json()
 
@@ -103,7 +105,8 @@ def construct_sck_metadata(sck_source, device):
         location_point = Point(device["location"]["longitude"], device["location"]["latitude"])
         station = db.Station(
             external_id=device["id"],
-            platform="Smart Citizen Kit",
+            internal_id=id_hash(str(device["id"])),
+            platform="smart_citizen_kit",
             name=device["name"],
             description=device["description"],
             location=location_point.wkt,

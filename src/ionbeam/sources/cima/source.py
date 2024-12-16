@@ -39,15 +39,31 @@ class AcronetSource(RESTSource):
                             cache_file=Path(self.cache_directory) / "cache.pickle",
                             headers = globals.secrets["headers"],)
 
+    def prepopulate_cache(self, date_ranges):
+        "Collect the requested date periods into 3D chunks to speed up the API calls"
+        pass
+        # for dt_range in date_ranges:
+
+
+        #     data = self.api.get_data_by_station(
+        #         station_name=station["name"],
+        #         start_date=chunk["start"],
+        #         end_date=chunk["end"],
+        #         aggregation_time_seconds=60,
+        #     )
+        #     self.save_data_to_cache(chunk, data)
+
 
     def get_chunks(self, start_date : datetime, end_date: datetime, chunk_size: timedelta) -> Iterable[dict]:
         """
         Return an iterable of objects representing chunks of data we should download from the API
-        """     
+        """
+
         dates = split_time_interval_into_chunks(self.start_date, self.end_date, chunk_size)
         date_ranges = list(zip(dates[:-1], dates[1:]))
 
         for start, end in date_ranges:
+            # for station in list(self.api.stations.values())[:1]:
             for station in self.api.stations.values():
                 yield dict(
                     key = f"{station.id}_{start.isoformat()}_{end.isoformat()}.pickle",
@@ -67,7 +83,12 @@ class AcronetSource(RESTSource):
                     end_date=chunk["end"],
                     aggregation_time_seconds=60,
                 )
-                self.save_data_to_cache(chunk, data)
+                
+                if data is not None: 
+                    self.save_data_to_cache(chunk, data)
+
+                if data is None:
+                    return None
 
             data["author"] = "Acronet"
 

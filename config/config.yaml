@@ -2,9 +2,9 @@ globals:
   # A list of observables with name, unit and other metadata that the incoming datastreams get mapped to.
   canonical_variables: !include canonical_variables.yaml
 
-  # Where to look for input data
   data_path: ../data/
   cache_path: ../data/cache/
+  fdb_root: ../data/fdb_root
 
   # The secrets file to use
   # Todo: add a mechanism to template values from this file into the config with a constructor like !secrets meteotracker.password
@@ -19,13 +19,14 @@ globals:
   # Whether sources should attempt to access external services or just use locally cached data
   # Can be overridden at the command line
   offline: false
-  overwrite: false
+  overwrite_fdb: false
+  overwrite_cache: false
 
  # Global constants that override things in the sources and timeaggregator
   ingestion_time_constants:
     query_timespan: 
-      - datetime.now(tz=timezone.utc) - timedelta(hours = 5)
-      - datetime.now(tz=timezone.utc)
+      - datetime.now(tz=timezone.utc) - timedelta(minutes = 15)
+      - datetime.now(tz=timezone.utc) - timedelta(minutes = 10)
     
     # How old a data granule must be before the aggregator considers it to be "complete"
     # This allows time for late data to arrive
@@ -46,19 +47,20 @@ sources:
 
 environments:
   local:
-    fdb_root: /Users/math/git/IonBeam_bundle/data/fdb_root
     api_hostname: ""
-    offline: true
-    overwrite: true
+    overwrite_cache: true
+    overwrite_fdb: true
     postgres_database:
       host: localhost
       port: 9875
 
   ewc:
-    fdb_root: /media/data/fdb_root
+    fdb_root: /media/data/fdb
+    data_path: /media/data/data
+    cache_path: /media/data/cache
     api_hostname: ""
-    offline: true
-    overwrite: true
+    overwrite_cache: true
+    overwrite_fdb: true
     postgres_database:
       host: localhost
       port: 9875
@@ -66,16 +68,12 @@ environments:
   dev:   
     api_hostname: http://iotdev-001:18201/api/v1/ # (requires an SSH tunnel)
     # api_hostname: https://ionbeam-dev.ecmwf.int/api/v1/ # Deployed Frontend (need to fix)
-    offline: false
-    overwrite: false
     postgres_database:
       host: iotdev-001
       port: 9875
 
   test: 
     api_hostname: https://ionbeam-test.ecmwf.int/api/v1
-    offline: false
-    overwrite: false
     postgres_database:
       host: iotdev-002
       port: 9875
