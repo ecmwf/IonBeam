@@ -133,6 +133,9 @@
 
 - name:
   key: "ext_h"
+  
+- name: relative_humidity_near_surface 
+  key: ["ext_h"]
   unit: "%"
   discard: true
 
@@ -145,6 +148,11 @@
   unit: "oC"
   discard: true
 
+# Discard for now because it clashes with the above
+- name: air_temperature_near_surface
+  key: ["ext_t"]
+  unit: "ºC" # Yes, this degree symbol looks weird, this is actually the unicode character known as "MASCULINE ORDINAL INDICATOR", do not ask me why.
+  discard: true
 
 # Don't ingest this data, just assert that is it data we expect to see and are happy to discard
 - name: battery_voltage
