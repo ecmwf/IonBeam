@@ -111,7 +111,7 @@
   unit: "#/0.1l"
 
 - name: particulate_matter_particle_number_5
-  key: ["PN5.0", "pm_pn5.0"]
+  key: ["PN5.0", "pm_pn5.0", "pm_a_pn5.0"]
   unit: ["#/0.1l", "#/0.1L"]
 
 - name: carbon_dioxide 
@@ -128,7 +128,7 @@
   unit: "ppb"
 
 - name: relative_humidity_near_surface 
-  key: ["Relative Humidity", "h"]
+  key: ["Relative Humidity", "h", "hum"]
   unit: "%"
 
 - name:
