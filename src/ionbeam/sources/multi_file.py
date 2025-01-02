@@ -8,12 +8,12 @@
 # # does it submit to any jurisdiction.
 # #
 
-import logging
-
-from ..core.bases import FileMessage, Source, MetaData
-from typing import Literal, List
 import dataclasses
+import logging
 from pathlib import Path
+from typing import List
+
+from ..core.bases import FileMessage, Source
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,8 @@ class MultiFileSource(Source):
     basepath: Path = Path(".")
     finish_after: int | None = None
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.basepath = self.resolve_path(self.basepath, type="data")
         logger.debug(f"{self.__class__.__name__}: resolved basepath to {self.basepath}")
 

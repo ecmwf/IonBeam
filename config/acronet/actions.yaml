@@ -1,27 +1,34 @@
 actions:
   - class: AcronetSource
     mappings: !include mappings.yaml
+
+  - class: DropEmpty
+
+  - class: ExtractMetaData
     copy_metadata_to_columns:
-      - station_id
-      - station_name
-      - lat
-      - lon
+      station_id: station.id
+      station_name: station.name
+      lat: station.lat
+      lon: station.lon
+      author : author
 
-  - class: CSVParser
+  - class: CanonicaliseColumns
     mappings: !include mappings.yaml
-    identifying_keys:
-      - time
-
-    metadata_keys:
-      - author
-      - station_id
-      - lat
-      - lon
 
   - class: AddAcronetMetadata
 
-  - class: ODCEncoder
-    split_data_columns: False
-    output: outputs/{source}/odb/{external_id}_{start_time}.odb
-    MARS_keys: !include MARS_keys.yaml
+  - class: ComputeDateTime
+
+  - class: ComputeMARSIdentifier
+    lookup:
+      class: const.rd
+      expver: const.xxxx
+      stream: const.lwda
+      aggregation_type: const.chunked
+      platform: const.acronet
+      date: metadata.date
+      internal_id: metadata.internal_id
+      time: metadata.time
+
+  - class: SimpleODCEncoder
 

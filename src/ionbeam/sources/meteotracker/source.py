@@ -12,14 +12,14 @@ import dataclasses
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Iterator
 
 import pandas as pd
 import shapely
 
 from ...core.bases import TabularMessage, TimeSpan
 from ...core.time import round_datetime
-from ..API_sources_base import RESTSource
+from ..API_sources_base import DataStream, RESTSource
 from .metadata import add_meteotracker_track_to_metadata_store
 from .meteotracker import MeteoTracker_API, MeteoTracker_API_Error
 
@@ -45,8 +45,8 @@ class MeteoTrackerSource(RESTSource):
     """
     author_patterns: dict[str, dict[str, str]] = dataclasses.field(default_factory=dict)
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
 
         assert(self.globals is not None)
         assert(self.globals.ingestion_time_constants is not None)
@@ -64,6 +64,7 @@ class MeteoTrackerSource(RESTSource):
 
         logger.debug(f"MeteoTracker cache_directory: {self.cache_directory}")
         logger.debug(f"Initialialised MeteoTracker source with {self.start_date=}, {self.end_date=}")
+        self.api = MeteoTracker_API(self.credentials, self.api_headers)
 
     def in_bounds(self, df):
         if self.wkt_bounding_polygon is None:
@@ -79,12 +80,10 @@ class MeteoTrackerSource(RESTSource):
             return False
 
         return True
-
-    def online_get_chunks_by_author(self, start_date : datetime, end_date: datetime) -> Iterable[dict]:
-        # Do  API requests in chunks larger than the data granularity, upto 3 days
-        self.api = MeteoTracker_API(self.credentials, self.api_headers)
-        timespan = (start_date, end_date)
-
+    
+    def get_cache_keys(self, time_span: TimeSpan) -> Iterator[DataStream]:
+        """Return the possible cache keys for this source, for this date range"""
+    
         # Set up the list of target authors
         authors = []
         for living_lab, patterns in self.author_patterns.items():
@@ -95,7 +94,7 @@ class MeteoTrackerSource(RESTSource):
 
         for living_lab, author in authors:
             try:
-                author_sessions = self.api.query_sessions(author=author, timespan=timespan, items=1000)
+                author_sessions = self.api.query_sessions(author=author, time_span=time_span, items=1000)
             except MeteoTracker_API_Error as e:
                 logger.warning(f"Query_sessions failed for author {author}\n{e}")
                 continue
@@ -104,54 +103,14 @@ class MeteoTrackerSource(RESTSource):
 
             for session in author_sessions:
                 session.living_lab = living_lab
-                yield dict(
-                    key = f"MeteoTracker_{session.id}.pickle",
-                    session=session,
+                yield DataStream(
+                    key = f"meteotracker:{session.id}",
+                    data=session,
                 )
-
-    def offline_get_chunks(self, start_date : datetime, end_date: datetime) -> Iterable[dict]:
-        for path in self.cache_directory.iterdir():
-            chunk, data = self.load_data_from_cache(path=path)
-
-            def filter_by_date(data):
-                if data.empty: return False
-                print(data.columns)
-                t = data.time.apply(pd.Timestamp)
-                return (t.min() <= end_date) and (t.max() >= start_date)
-            
-
-            if not filter_by_date(data):
-                continue
-            if not self.all_filters(path, data):
-                continue
-
-            yield dict(
-                key = path.name,
-                filepath=path,
-            )
-
-    def get_chunks(self, start_date : datetime, end_date: datetime, _) -> Iterable[dict]:
-        # Do  API requests in chunks larger than the data granularity, upto 3 days
-        if not self.globals.offline:
-            logger.debug("Starting in online mode...")
-            return self.online_get_chunks_by_author(start_date, end_date)
-        else:
-            logger.debug("Starting in offline mode...")
-            return self.offline_get_chunks(start_date, end_date)
-        
-    def download_chunk(self, chunk: dict): 
-        # Try to load data from the cache first
-        try:
-            chunk, data = self.load_data_from_cache(chunk)
-        except KeyError:
-            logger.debug(f"Downloading from API chunk with key {chunk['key']}")
-            try:
-                data = self.api.get_session_data(chunk["session"])
-            except MeteoTracker_API_Error as e:
-                logger.warning(f"get_session_data failed for session {chunk['session'].id}\n{e}")
-                return
-            self.save_data_to_cache(chunk, data)
-
+    
+    
+    def download_chunk(self, cache_key: DataStream, time_span: TimeSpan) -> pd.DataFrame:
+        chunk = cache_key.data
         if not self.all_filters(chunk["session"], data):
             return
         
@@ -172,5 +131,3 @@ class MeteoTrackerSource(RESTSource):
             data = data,
         )
 
-
-source = MeteoTrackerSource

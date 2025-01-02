@@ -8,26 +8,17 @@
 # # does it submit to any jurisdiction.
 # #
 
-from typing import Iterable, List, Literal
+import dataclasses
+import logging
+from typing import Iterable, List
 
 import pandas as pd
 
-import dataclasses
-
 from ..core.bases import (
-    Parser,
-    FileMessage,
-    TabularMessage,
     FinishMessage,
-    InputColumns,
+    Parser,
+    TabularMessage,
 )
-from unicodedata import normalize
-
-from ..core.converters import unit_conversions
-from ..core.html_formatters import make_section, action_to_html, dataframe_to_html
-from dataclasses import asdict
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +37,8 @@ class Splitter(Parser):
     identifying_keys: List[str] = dataclasses.field(default_factory=list)
     metadata_keys: List[str] = dataclasses.field(default_factory=list)
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.fixed_column_names = self.metadata_keys + self.identifying_keys
         self.canonical_variables_map = {c.name: c for c in self.globals.canonical_variables}
 

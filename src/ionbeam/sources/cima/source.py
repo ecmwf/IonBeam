@@ -10,13 +10,16 @@
 
 import dataclasses
 import logging
-from datetime import datetime, timedelta
+from collections import defaultdict
+from functools import reduce
 from pathlib import Path
 from typing import Iterable, List
 
-from ...core.bases import InputColumn, TabularMessage, TimeSpan
-from ...core.time import round_datetime, split_time_interval_into_chunks
-from ..API_sources_base import RESTSource
+import pandas as pd
+
+from ...core.bases import RawVariable, TabularMessage
+from ...core.time import TimeSpan, split_df_into_time_chunks
+from ..API_sources_base import DataChunk, DataStream, RESTSource
 from .cima import CIMA_API
 
 logger = logging.getLogger(__name__)
@@ -25,85 +28,143 @@ logger = logging.getLogger(__name__)
 @dataclasses.dataclass
 class AcronetSource(RESTSource):
     """
+    The retrieval here works like this:
+    1) Get list of stations, sensors and sensor_class (rain, wind, etc)
+    2) Construct sensor_id -> (station, sensor) mapping
+    3) Use `sensors/data/{sensor_class}/all` endpoint to get all data in a time range for one sensor class
+    4) 
+
     """
     source: str = "acronet"
-    cache_directory: Path = Path("inputs/acronet")
+    version = 1
     endpoint = "https://webdrops.cimafoundation.org/app/"
-    # endpoints_url = "https://testauth.cimafoundation.org/auth/realms/webdrops/.well-known/openid-configuration"
-    cache_version = 5 # increment this to invalidate the cache
-    mappings: List[InputColumn] = dataclasses.field(default_factory=list)
 
-    def init(self, globals):
-        super().init(globals)
+    mappings: List[RawVariable] = dataclasses.field(default_factory=list)
+
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.api = CIMA_API(globals.secrets["ACRONET"],
-                            cache_file=Path(self.cache_directory) / "cache.pickle",
+                            cache_file=Path(self.globals.cache_path) / "cima_cache.pickle",
                             headers = globals.secrets["headers"],)
-
-    def prepopulate_cache(self, date_ranges):
-        "Collect the requested date periods into 3D chunks to speed up the API calls"
-        pass
-        # for dt_range in date_ranges:
-
-
-        #     data = self.api.get_data_by_station(
-        #         station_name=station["name"],
-        #         start_date=chunk["start"],
-        #         end_date=chunk["end"],
-        #         aggregation_time_seconds=60,
-        #     )
-        #     self.save_data_to_cache(chunk, data)
+        
+        self.sensor_id_to_station = {
+            sensor.id : (station.name, sensor_name)
+            for station in self.api.stations.values()
+            for sensor_name, sensor in station.sensors.items()
+        }
 
 
-    def get_chunks(self, start_date : datetime, end_date: datetime, chunk_size: timedelta) -> Iterable[dict]:
-        """
-        Return an iterable of objects representing chunks of data we should download from the API
-        """
+    def get_data_streams(self, time_span: TimeSpan) -> Iterable[DataStream]:
+        for sensor_class_name, sensor_class in self.api.sensors.items():
+            yield DataStream(
+                source = self.source,
+                key = f"acronet:{sensor_class_name}",
+                version = self.version,
+                data = sensor_class,
+            )
 
-        dates = split_time_interval_into_chunks(self.start_date, self.end_date, chunk_size)
-        date_ranges = list(zip(dates[:-1], dates[1:]))
+    def download_chunk(self, data_stream: DataStream, time_span: TimeSpan) -> DataChunk:
+        sensor_class = data_stream.data
+        logger.debug(f"Downloading all data in timespan for sensor_class = {sensor_class.name}")
+        r = self.api.get(
+                self.api.api_url + f"sensors/data/{sensor_class.name}/all",
+                params={
+                "from":time_span.start.strftime("%Y%m%d%H%M"),
+                "to": time_span.end.strftime("%Y%m%d%H%M"),
+                "aggr": 60,
+                "date_as_string": True,
+        })
+        
+        r.raise_for_status()
+        json = r.json()
 
-        for start, end in date_ranges:
-            # for station in list(self.api.stations.values())[:1]:
-            for station in self.api.stations.values():
-                yield dict(
-                    key = f"{station.id}_{start.isoformat()}_{end.isoformat()}.pickle",
-                    station = dataclasses.asdict(station),
-                    start = start,
-                    end = end,
-                )
+        return DataChunk(
+            source=data_stream.source,
+            key = data_stream.key,
+            version = data_stream.version,
+            time_span = time_span,
+            json = json,
+            data = None,
+        )
 
-    def download_chunk(self, chunk: dict):
-            station = chunk["station"]
-            try:
-                _, data = self.load_data_from_cache(chunk)
-            except KeyError:
-                data = self.api.get_data_by_station(
-                    station_name=station["name"],
-                    start_date=chunk["start"],
-                    end_date=chunk["end"],
-                    aggregation_time_seconds=60,
-                )
+    def emit_messages(self, relevant_chunks, time_spans: list[TimeSpan]) -> Iterable[TabularMessage]:
+        data_by_sensor_id = defaultdict(lambda : defaultdict(list))
+        # Go through all the returned data group it by sensor_id
+        for chunk in relevant_chunks:
+            for data in chunk.json:
+                if data["sensorId"] not in self.sensor_id_to_station:
+                    continue
                 
-                if data is not None: 
-                    self.save_data_to_cache(chunk, data)
+                sensor_id = data["sensorId"]
+                data_by_sensor_id[sensor_id]["values"].extend(data["values"])
+                data_by_sensor_id[sensor_id]["timeline"].extend(data["timeline"])
 
-                if data is None:
-                    return None
+        # Regroup the data by station
+        data_by_station = defaultdict(list)
+        for sensor_id, data in data_by_sensor_id.items():
+            station_name, sensor_class = self.sensor_id_to_station[sensor_id]
+            sensor = self.api.sensors[sensor_class]
+            new_data = {}
+            new_data["station_name"] = station_name
+            new_data["sensor_class"] = sensor_class
+            new_data["sensor_unit"] = sensor.unit
+            new_data["values"] = data["values"]
+            new_data["timeline"] = data["timeline"]
+            data_by_station[station_name].append(new_data)
+        
+        station_dfs = self.make_dataframes(data_by_station)
+        
+        for station_name, df in station_dfs.items():
+            station = self.api.stations[station_name]
 
-            data["author"] = "Acronet"
+            metadata = dict(
+                            station = dataclasses.asdict(station),
+                            author = "acronet",
+                        )
+
+            for time_span, df_chunk in split_df_into_time_chunks(df, time_spans):
+                yield TabularMessage(
+                    metadata=self.generate_metadata(
+                        time_span=time_span,
+                        unstructured=metadata,
+                    ),
+                    data=df_chunk,
+                )
 
 
-            granularity = self.globals.ingestion_time_constants.granularity
-            time_span = TimeSpan(
-                start = round_datetime(chunk["start"], round_to=granularity, method="floor"),
-                end = round_datetime(chunk["end"], round_to=granularity, method="ceil")
-            )
+    
+    def make_dataframes(self, data_by_station: dict) -> dict[str, pd.DataFrame]:
+        station_dfs = {}
+        for station_name, data in data_by_station.items():
+            sensor_dfs = []
+            for d in data:
+                col_name = f"{d['sensor_class']} [{d['sensor_unit']}]"
+                
+                single_df = pd.DataFrame({
+                    col_name : d["values"],
+                    "time": pd.to_datetime(d["timeline"], format="%Y%m%d%H%M", utc = True),
+                })
 
-            yield TabularMessage(
-                metadata=self.generate_metadata(
-                    time_span = time_span,
-                    unstructured = dict(station = station, 
-                    start = chunk["start"], end = chunk["end"])
-                ),
-                data = data
-            )
+                # Values below -9000 (specifically -9998.0 but somehow sometimes others?)
+                # are used as a NaN sentinel value by Acronet
+                # Filter these rows out
+                single_df = single_df[single_df[col_name] != -9998.0]
+                single_df = single_df[~single_df[col_name].isnull()]
+                
+                # If this sensor has any data
+                if not single_df[col_name].isnull().all():
+                    sensor_dfs.append(single_df)
+
+            # If this station has at least one sensor with data
+            if sensor_dfs:
+                df = reduce(
+                    lambda left, right: pd.merge(left, right, on=["time"], how="outer"),
+                    sensor_dfs
+                )
+                # df["station_id"] =  self.api.stations[station_name].id
+                # df["station_name"] = station_name
+                # df["author"] = "acronet"
+                # df["lat"] = 
+                
+                station_dfs[station_name] = df
+        return station_dfs

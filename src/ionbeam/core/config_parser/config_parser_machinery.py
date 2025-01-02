@@ -4,6 +4,8 @@ from dataclasses import Field, dataclass, field
 from pathlib import Path
 from typing import Union, get_args, get_origin
 
+import Levenshtein
+
 from .common import ConfigError, ConfigMatchError
 
 # TYPE_KEY is a special key that determines which class or type to pick in ambiguous cases.
@@ -139,6 +141,12 @@ def is_overlay_dataclass(t):
 def is_post_init_field(f : Field):
     return "post_init" in getattr(f.type, "__metadata__", ())
 
+def is_custom_init_field(f : Field):
+    return "custom_init" in getattr(f.type, "__metadata__", ())
+
+def is_custom_init(f : Field):
+    return "custom_init" in getattr(f, "__metadata__", ())
+
 
 def determine_matching_dataclass(context, key, datacls, input_dict):
     "Check if we actaully want to use a subclass of datacls"
@@ -157,7 +165,8 @@ def determine_matching_dataclass(context, key, datacls, input_dict):
         cls_name = input_dict[TYPE_KEY]
         try:
             return subclasses[cls_name]
-        except KeyError as e:
+        except KeyError:
+            closest_matches = sorted(subclasses.keys(), key=lambda known_cls: Levenshtein.ratio(cls_name, known_cls), reverse=True)
             raise ConfigLineError(
                 context,
                 key,
@@ -165,8 +174,9 @@ def determine_matching_dataclass(context, key, datacls, input_dict):
                 input_dict,
                 f"Config yaml entry for section '{datacls.__name__}' invalid"
                 f" name: '{cls_name}' could not be found as a subclass of {datacls.__name__}"
+                f", did you mean one of {closest_matches[:3]}"
                 f"\n\nKnown subclasses: {subclasses.keys()}",
-            ) from e
+            ) from None
 
     return datacls
 
@@ -260,11 +270,16 @@ def parse_field(context, key, _type, value):
 
     """
     try:
-        # print(_type, value)
+        # print(f"parsing {key=}, {_type=}, {value=} {is_custom_init(_type)=}")
+        if is_custom_init(_type):
+            try:
+                return _type.parse(value)
+            except Exception as e:
+                raise e from None
+
         if is_dataclass(_type):
             # possibly use a subclass instead of the base class
             datacls = determine_matching_dataclass(context, key, _type, value)
-            # print(key, _type, value, datacls)
             return dataclass_from_dict(context, datacls, value)
 
         if is_union(_type):
@@ -279,13 +294,13 @@ def parse_field(context, key, _type, value):
         if is_dict(_type):
             return parse_dict(context, key, _type, value)
 
-        try:
-            result = _type(**{k : v for k,v in value.items() if k != "__line__"}) if isinstance(value, dict) else _type(value)
-        except Exception as e:
-            raise ConfigLineError(context, key, _type, value, str(e)) from e
+        result = _type(**{k : v for k,v in value.items() if k != "__line__"}) if isinstance(value, dict) else _type(value)
 
         return result
+
     except Exception as e:
+        if isinstance(e, ConfigMatchError):
+            raise e from None
         raise ConfigError(f"While parsing {key=}, {_type=}, {value=}") from e
 
 

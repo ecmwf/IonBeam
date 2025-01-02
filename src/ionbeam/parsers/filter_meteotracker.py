@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class FilterMeteoTracker(Parser):
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
 
 
     def process(self, input_message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
@@ -54,8 +54,8 @@ class FilterMeteoTracker(Parser):
 
 @dataclasses.dataclass
 class MeteoTrackerMarkIngested(Parser):
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
 
 
     def process(self, input_message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:

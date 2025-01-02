@@ -181,6 +181,7 @@ if __name__ == "__main__":
         overwrite_cache = args.overwrite_cache,
         environment = args.environment,
         sources = args.sources,
+        die_on_error = args.die_on_error,
     )
 
     sources, downstream_actions = [], []
@@ -193,7 +194,6 @@ if __name__ == "__main__":
     logger.info("Globals:")
     logger.info(f"    Environment: {config.globals.environment}")
     logger.info(f"    Data Path: {config.globals.data_path}")
-    logger.info(f"    Config Path: {config.globals.config_path}")
     logger.info(f"    Data Path: {config.globals.data_path}")
     logger.info(f"    Offline: {config.globals.offline}")
     logger.info(f"    Overwrite FDB: {config.globals.overwrite_fdb}")

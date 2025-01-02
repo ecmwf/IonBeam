@@ -8,16 +8,12 @@
 # # does it submit to any jurisdiction.
 # #
 
-from typing import Iterable, List, Literal
-
-import pandas as pd
-
 import dataclasses
-
-from ..core.bases import Writer, Message, FileMessage, FinishMessage
-from ..core.aviso import send_aviso_notification
-
 import logging
+from typing import Iterable
+
+from ..core.aviso import send_aviso_notification
+from ..core.bases import FileMessage, FinishMessage, Message, Writer
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +23,8 @@ class AVISONotifier(Writer):
     def __str__(self):
         return f"{self.__class__.__name__}()"
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.metadata = dataclasses.replace(self.metadata, state="aviso_notified")
 
     def process(self, message: FileMessage | FinishMessage) -> Iterable[Message]:

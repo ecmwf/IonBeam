@@ -262,12 +262,6 @@ class Station(Base):
         return session.query(Station).all()
 
 
-class IngestedChunk(Base):
-    __tablename__ = "ingested_chunk"
-    id = mapped_column(UUIDType, primary_key=True, default=uuid.uuid4)
-    source: Mapped[str]
-    cache_key: Mapped[str]
-
 
 def init_db(globals):
     "Create or recreate the database schema"

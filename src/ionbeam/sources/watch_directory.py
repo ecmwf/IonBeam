@@ -8,10 +8,10 @@
 # # does it submit to any jurisdiction.
 # #
 
+import dataclasses
 import os
 from queue import Queue
-from typing import List, Literal
-import dataclasses
+from typing import List
 
 from watchdog.events import PatternMatchingEventHandler
 from watchdog.observers import Observer
@@ -39,8 +39,8 @@ class WatchDirectorySource(PatternMatchingEventHandler, Source):
     case_sensitive: bool = True
     # @todo: Provide a sensible way of stopping the observer threads...
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
 
         self.paths = [os.path.abspath(p) for p in self.paths]
         # The output queue

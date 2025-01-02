@@ -4,7 +4,7 @@ from typing import Iterable
 
 from geoalchemy2.shape import to_shape
 from shapely import to_geojson
-from shapely.geometry import MultiPoint, box
+from shapely.geometry import Point
 from sqlalchemy.orm import Session
 
 from ...core.bases import (
@@ -69,20 +69,20 @@ def create_authors_if_necessary(db_session, authors):
 
 def add_acronet_station_to_metadata_store(db_session, message):
     station = message.metadata.unstructured["station"]
-    sensor = create_sensor_if_necessary(station, db_session, properties = message.metadata.observation_variable.split(","), name = station["name"])
+    properties = message.data.columns
+    sensor = create_sensor_if_necessary(station, db_session, properties = properties, name = station["name"])
 
     # Convert the lat lon to shapely object can calculate the bbox
-    feature = MultiPoint(message.data[["lon", "lat"]].values) 
-    bbox = box(*feature.bounds)
+    feature = Point(station["lon"], station["lat"])
     
     station = db.Station(
         external_id = station["id"],
-        internal_id = id_hash(station["id"]),
+        internal_id = message.metadata.internal_id,
         platform = "acronet",
         name = station["name"],
         description = "An Acronet station",
         sensors = [sensor,],
-        location = bbox.centroid.wkt,
+        location = feature.wkt,
         location_feature = to_geojson(feature),
         earliest_reading = message.data["time"].min(), 
         latest_reading = message.data["time"].max(),
@@ -96,13 +96,13 @@ def add_acronet_station_to_metadata_store(db_session, message):
     
 
 def update_acronet_station_in_metadata_store(db_session, message, station):
-    feature = MultiPoint(message.data[["lon", "lat"]].values) 
-    new_bbox = box(*feature.bounds)
+    metadata_station = message.metadata.unstructured["station"]
+    feature = Point(metadata_station["lon"], metadata_station["lat"])
 
     if station.location_feature:
-        union_geom = to_shape(station.location_feature).union(new_bbox)
+        union_geom = to_shape(station.location_feature).union(feature)
     else:
-        union_geom = new_bbox
+        union_geom = feature
 
     station.location_feature = to_geojson(union_geom)
     station.location = union_geom.centroid.wkt
@@ -122,33 +122,35 @@ def update_acronet_station_in_metadata_store(db_session, message, station):
 
 @dataclasses.dataclass
 class AddAcronetMetadata(Parser):
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
 
 
     def process(self, input_message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
         if isinstance(input_message, FinishMessage):
             return
-
+        
         station = input_message.metadata.unstructured["station"]
+
+        metadata = self.generate_metadata(
+            message=input_message,
+            internal_id = id_hash(station["id"]),
+            external_id = station["id"],
+        )
+
+        output_msg = TabularMessage(
+            metadata=metadata,
+            data=input_message.data,
+        )
 
         with Session(self.globals.sql_engine) as db_session:
             station = db_session.query(db.Station).where(db.Station.external_id == station["id"]).one_or_none()
             if station is None:
-                station = add_acronet_station_to_metadata_store(db_session, input_message)
+                station = add_acronet_station_to_metadata_store(db_session, output_msg)
             else:
-                update_acronet_station_in_metadata_store(db_session, input_message, station)
+                update_acronet_station_in_metadata_store(db_session, output_msg, station)
 
             db_session.add(station)
             db_session.commit()
-            
-
-        output_msg = TabularMessage(
-            metadata=self.generate_metadata(
-                message=input_message,
-                 time_span = input_message.metadata.time_span,
-            ),
-            data=input_message.data,
-        )
 
         yield self.tag_message(output_msg, input_message)

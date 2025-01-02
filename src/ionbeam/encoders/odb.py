@@ -20,6 +20,7 @@ from typing import Dict, Iterable, List, Literal
 
 import pandas as pd
 import pyodc as odc
+from pyodc.codec import select_codec
 
 from ..core.bases import Encoder, FileMessage, FinishMessage, TabularMessage
 from ..core.config_parser.config_parser_machinery import ConfigError
@@ -167,7 +168,7 @@ class MARS_Key:
             case "from_metadata":
                 val = getattr(msg.metadata, self.key)
             case "from_data":
-                return msg.data[self.key].astype(dtype)
+                return msg.data[self.key].astype(dtype).reset_index(drop=True)
             case "function":
                 if self.key not in globals():
                     raise ConfigError(f"Trying to fill the mars key '{self.name}' using function '{self.key}' but it isn't defined in the source code.")
@@ -176,7 +177,7 @@ class MARS_Key:
                     out = f(msg).astype(dtype)
                 except Exception as e:
                     raise ValueError(f"Error calling {f} with {msg} {f(msg) = }") from e
-                return out
+                return out.reset_index(drop=True)
             case _:
                 raise ValueError
 
@@ -205,8 +206,8 @@ class ODCEncoder(Encoder):
     seconds: bool = True
     minutes: bool = True
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
 
         self.metadata = dataclasses.replace(self.metadata, state="odc_encoded")
         self.fdb_schema = globals.fdb_schema
@@ -252,7 +253,7 @@ class ODCEncoder(Encoder):
                     mars_key.by_observation_variable[var.name] = getattr(var, mars_name)
 
     def create_output_df(self, msg: TabularMessage) -> pd.DataFrame:
-        output_data = {}
+        output_data = pd.DataFrame()
         for col in self.MARS_keys:
 
             # skip observed_value if we're not splitting data into multiple granules
@@ -260,10 +261,20 @@ class ODCEncoder(Encoder):
                 continue
 
             try:
-                output_data[col.name] = col.values(msg)
+                output = col.values(msg)
+                if len(output) != len(msg.data):
+                    raise ValueError(f"Length of output {len(output)} != length of data {len(msg.data)}")
+                
+                output_data[col.name] = output
             except ValueError as e:
-                print(col)
                 raise e
+            
+            logger.debug(f"Added {col.name} to output data\n"
+                         f"Fill Method: {col.fill_method}\n"
+                         f"Data Length   : {len(output)}\n"
+                         f"Length: {len(output_data[col.name])}\n"
+                         f"# Unique Values: {output_data[col.name].nunique()}\n"
+                         f"Values: {output_data[col.name]}")
 
         # Add in all the value columns
         if not self.split_data_columns:
@@ -272,44 +283,29 @@ class ODCEncoder(Encoder):
                 if name in msg.data and name not in output_data:
                     output_data[name] = msg.data[name]
 
-            # logger.warning(f"{output_data.keys() = }")
-        print(output_data['air_temperature_near_surface'])
-        return pd.DataFrame(output_data)
+        return output_data
 
     def encode(self, msg: TabularMessage | FinishMessage) -> Iterable[FileMessage]:
         if isinstance(msg, FinishMessage):
             return
 
-        if self.split_data_columns:
-            # Todo: think more about the case where we're emitting a variable like pressure both as an observation and an id'ing column
-            if isinstance(msg.data[msg.metadata.observation_variable], pd.DataFrame):
-                raise ValueError(f"Data columns contains duplicated entry! {msg.data[msg.metadata.observation_variable].columns}")
-            
-            obsval_dtype = msg.data[msg.metadata.observation_variable].dtype
-    
-            if str(obsval_dtype).startswith("str") or str(obsval_dtype) == "object":
-                logger.warning(
-                    f"Can't output {msg.metadata.observation_variable} \
-                                as observation variable because it has dtype {obsval_dtype}"
-                )
-                return
-
         output_df = self.create_output_df(msg)
+        logger.debug(f"Created output dataframe with columns {output_df.columns}")
+        logger.debug(f"Output dataframe has {len(output_df)} rows")
+        # logger.debug(f"{output_df = }")
 
         # Parse the odb file into a mars request
         # Grab the column name and value for every static column in the dataframe
         mars_request = {k: output_df[k].iloc[0] for k in output_df.columns if output_df[k].nunique() == 1}
         
         assert msg.metadata.time_span is not None
+        logger.debug(f"{msg.metadata.time_span = }")
         mars_request["date"] = msg.metadata.time_span.start.strftime("%Y%m%d")
         mars_request["time"] = msg.metadata.time_span.start.strftime("%H%M")
         logger.debug(mars_request)
 
         logger.debug(f"Generated MARS keys for {msg}")
         mars_request, schema_branch = self.fdb_schema.parse(mars_request)
-
-        # for k, v in mars_request.items():
-        #     logger.debug(v.info())
 
         # And encode the supplied data
         # logger.debug(f"Columns before encoding to ODC: {df.columns}")
@@ -363,10 +359,12 @@ class ODCEncoder(Encoder):
             self.output_file.unlink(missing_ok=True)
 
         # Check if odc is going to be happy with the dtype conversions
-        from pyodc.codec import select_codec
 
         for col in self.MARS_keys:
             data = output_df[col.name]
+
+            if pd.api.types.is_string_dtype(data.dtype) and data.hasnans:
+                raise ValueError(f"column `{col.name}` has NaNs in a string column {data}")
 
             if dtype_lookup[col.dtype] != data.dtype:
                 raise ValueError(
@@ -385,15 +383,31 @@ class ODCEncoder(Encoder):
 
                 codec = select_codec(col.name, data, col.dtype, None)
                 # logger.debug(f"Chose codec {codec} for {col.name}, {data.dtype=}, {col.dtype=}")
-            except AssertionError:
+            except AssertionError as e:
                 raise ValueError(
                     f"""
-                Could not figure out ODC types for pd.Series({data.dtype}) -> {col}
-                {data.hasnans=}
-                {data.nunique()=}
-                {data}
+Could not figure out ODC types for pd.Series({data.dtype}) -> {col}
+{data.hasnans=}
+{data.nunique()=}
+Column of interest:
+{data}
+
+Whole output_df:
+{output_df}
                 """
-                )
+                ) from e
+            
+        for col in output_df.columns:
+            try:
+                codec = select_codec(col, output_df[col], None, None)
+            except RuntimeError as e:
+                raise ValueError(
+                    f"Failed to select dtype or codec for column {col}\n"
+                    f"{output_df[col].dtype = }\n"
+                    f"{output_df[col].nunique() = }\n"
+                    f"{output_df[col].hasnans = }\n"
+                    f"{output_df[col] = }\n"
+                    f"{e}") from e
 
         with open(self.output_file, "wb" if self.one_file_per_granule else "ab") as fout:
             odc.encode_odb(

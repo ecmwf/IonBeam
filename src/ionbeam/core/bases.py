@@ -12,13 +12,14 @@ import dataclasses
 import itertools as it
 import re
 import uuid
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, fields
+from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Callable, Iterable, List, Literal, TypeVar
 from unicodedata import normalize
 
 import pandas
+from sqlalchemy.engine.base import Engine
 
 from .history import (
     ActionInfo,
@@ -28,6 +29,7 @@ from .history import (
 )
 from .html_formatters import action_to_html, dataclass_to_html, message_to_html
 from .mars_keys import FDBSchema, MARSRequest
+from .time import TimeSpan
 
 # from functools import partial
 # from pydantic.dataclasses import dataclass
@@ -37,10 +39,7 @@ from .mars_keys import FDBSchema, MARSRequest
 
 # dataclass = partial(dataclass, config=Config)
 
-@dataclass
-class TimeSpan:
-    start: datetime
-    end: datetime
+
 
 @dataclass(unsafe_hash=True)
 class MetaData:
@@ -51,8 +50,14 @@ class MetaData:
     time_span: TimeSpan | None = None
     encoded_format: str | None = None
     filepath: Path | None = None
-    mars_request: MARSRequest = dataclasses.field(default_factory=MARSRequest)
+    mars_id: MARSRequest = dataclasses.field(default_factory=MARSRequest)
     unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
+
+    internal_id: str | None = None
+    external_id: str | None = None
+
+    date: str | None = None
+    time: str | None = None
 
     def __str__(self):
         return f"{self.__class__.__name__}(source = {self.source}, variable = {self.observation_variable})"
@@ -89,7 +94,7 @@ class DataMessage(Message):
         for name, key in {
             "state": "state",
             "src": "source",
-            "obs": "observation_variable",
+            # "obs": "observation_variable",
             "timeslc": "time_span",
         }.items():
             val = getattr(self.metadata, key, None)
@@ -98,17 +103,19 @@ class DataMessage(Message):
 
         return f"{class_name}({', '.join(arg_string)})"
 
+@dataclass
+class TabularMessage(DataMessage):
+    data: pandas.DataFrame
+    columns: dict[str, "CanonicalVariable"] = dataclasses.field(default_factory=dict, kw_only=True)
+
 
 @dataclass
 class FileMessage(DataMessage):
     pass
 
-
 @dataclass
-class TabularMessage(DataMessage):
-    data: pandas.DataFrame
-    columns: list = dataclasses.field(default_factory=list, kw_only=True)
-
+class BytesMessage(DataMessage):
+    bytes: bytes
 
 MessageStream = Iterable[Message]
 GenerateFunction = Callable[[], Iterable[Message]]
@@ -140,14 +147,8 @@ class CanonicalVariable:
     desc: str | None = None
     unit: str | None = None
     CRS: str | None = None
-    WMO: bool = False
     dtype: str | None = "float64"
     output: bool = False
-
-    codetype: int | None = None
-    varno: int | None = None
-    obstype: int | None = None
-    reportype: int | None = None
 
     def __repr__(self):
         return f"CanonicalVariable(name={self.name!r}, unit={self.unit!r}, desc={self.desc!r})"
@@ -160,28 +161,16 @@ class CanonicalVariable:
 
 @dataclass
 class IngestionTimeConstants:
-    query_timespan: tuple[datetime, datetime]
-    emit_after_hours: int
+    # The time span of the data to try to download
+    query_timespan: Annotated[TimeSpan, "custom_init"]
+
+    # The timespan of data to emit messages for into the piplines
+    process_timespan: Annotated[TimeSpan, "custom_init"]
+
+    # What size chunks to use for the emitted messages
     granularity: timedelta
+
     time_direction: Literal["forwards", "backwards"] = "forwards"
-
-    def __post_init__(self):
-        def date_eval(s):
-            try:
-                return datetime.fromisoformat(s)
-            except:
-                pass
-            try:
-                return eval(
-                    s, dict(datetime=datetime, timedelta=timedelta, timezone=timezone)
-                )
-            except SyntaxError as e:
-                raise SyntaxError(f"{s} has a syntax error {e}")
-
-        def interval_eval(tup):
-            return tuple(sorted(map(date_eval, tup)))
-
-        self.query_timespan = interval_eval(self.query_timespan)
 
 
 @dataclass
@@ -190,7 +179,9 @@ class Globals:
     data_path: Path
     cache_path: Path
     ingestion_time_constants: IngestionTimeConstants
-    config_path: Path | None = None
+    source_path: Annotated[Path, "post_init"] = dataclasses.field(kw_only=True)
+
+    die_on_error: bool = False
     
     environment: str = "local"
 
@@ -212,6 +203,8 @@ class Globals:
     postgres_database: dict | None = None
     custom_mars_keys: list[str] | None = None
 
+    sql_engine: Annotated[Engine, "post_init"] = dataclasses.field(kw_only=True)
+
     # When a class hasn't been instantiated yet use a string, see https://peps.python.org/pep-0484/#forward-references
     actions: dict[uuid.UUID, "Action"] = dataclasses.field(default_factory=dict)
 
@@ -229,9 +222,13 @@ class Action:
     id: uuid.UUID = dataclasses.field(default_factory=uuid.uuid4, kw_only=True)
     globals: Annotated[Globals, "post_init"] = dataclasses.field(kw_only=True)
 
-    def init(self, globals: Globals):
+    "Path to the yaml file that defines this action" 
+    definition_path: Annotated[Path | None, "post_init"] = dataclasses.field(kw_only=True)
+
+    def init(self, globals: Globals, definition_path: Path | None = None):
         "Initialise self with access to the global config variables"
         self.globals = globals
+        self.definition_path = definition_path
         self.globals.actions[self.id] = self
         self.metadata.source_action_id = self.id
 
@@ -248,7 +245,7 @@ class Action:
         if type == "data":
             base = self.globals.data_path
         elif type == "config":
-            base = self.globals.config_path
+            base = self.globals.source_path
         else:
             raise ValueError(f"{type} must be 'config' or 'data'")
 
@@ -261,10 +258,13 @@ class Action:
     def generate_metadata(self, message: DataMessage | None = None, **explicit_keys):
         "Defines the semantics for combining metadata from multiple sources"
 
+        def shallow_asdict(d) -> dict:
+            return {field.name: getattr(d, field.name) for field in fields(d)}
+
         def filter_none(d) -> dict:
             if dataclasses.is_dataclass(d):
-                d = dataclasses.asdict(d)
-            return {k: v for k, v in d.items() if v is not None}
+                d = shallow_asdict(d)
+            return {k: v for k, v in d.items() if v is not None and v != {}} 
 
         message_keys = filter_none(message.metadata) if message else {}
         action_keys = filter_none(self.metadata)
@@ -403,8 +403,8 @@ class Parser(Processor):
     Changes message.metadata.state from raw to parsed.
     """
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         # Set the default value of parsed but let it be overridden
         self.metadata = dataclasses.replace(self.metadata, state="parsed")
 
@@ -443,7 +443,7 @@ class Writer(Processor):
 
 
 @dataclass
-class InputColumn:
+class RawVariable:
     """Represents a variable within an external stream of data
     and links it to our nice internal representation.
 
@@ -470,7 +470,7 @@ class InputColumn:
             self.unit = normalize("NFKD", str(self.unit))
 
 
-class InputColumns(list):
+class Mappings(list):
     """
     Implement a custom syntax for lists of InputColumns where input columns that look like this:
     ```
@@ -489,10 +489,10 @@ class InputColumns(list):
             value = d.get(k, default)
             return value if isinstance(value, list) else [value]
 
-        allowed = {f.name for f in dataclasses.fields(InputColumn)}
+        allowed = {f.name for f in dataclasses.fields(RawVariable)}
         super().__init__(
             [
-                InputColumn(
+                RawVariable(
                     **(
                         {k: v for k, v in col.items() if k in allowed}
                         | dict(key=key, unit=unit)
@@ -500,7 +500,7 @@ class InputColumns(list):
                 )
                 for col in iterable
                 for key, unit in it.product(
-                    l(col, "key", "__DEFAULT_TO_NAME__"), l(col, "unit", None)
+                    l(col, "key", col["name"]), l(col, "unit", None)
                 )
             ]
         )

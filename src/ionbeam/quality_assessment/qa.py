@@ -1,8 +1,8 @@
-from ..core.bases import Processor, TabularMessage, FinishMessage
-from typing import Iterable
 import dataclasses
-
 import logging
+from typing import Iterable
+
+from ..core.bases import FinishMessage, Processor, TabularMessage
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +15,8 @@ class QualityControl(Processor):
         return f"{self.__class__.__name__}({self.test_variable})"
 
     # Gets called by the config parsing code to create the action object
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.metadata = dataclasses.replace(self.metadata, state="quality_controlled")
 
     def process(self, incoming_message: TabularMessage) -> Iterable[TabularMessage]:

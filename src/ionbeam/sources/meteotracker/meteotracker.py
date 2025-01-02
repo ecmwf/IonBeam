@@ -8,19 +8,16 @@
 # # does it submit to any jurisdiction.
 # #
 
-from typing import Literal, ClassVar, Dict, NewType, Tuple, List
-
 import dataclasses
 import logging
-import yaml
+from datetime import datetime, timedelta
+from typing import ClassVar, Dict, List, Literal, NewType, Tuple
 
 import pandas
-
 import requests
-
 from shapely import geometry
 
-from datetime import datetime, timedelta
+from ...core.time import TimeSpan
 
 
 @dataclasses.dataclass
@@ -209,7 +206,7 @@ class MeteoTracker_API:
 
     def query_sessions(
         self,
-        timespan: Tuple[datetime, datetime] | None = None,
+        time_span: TimeSpan | None = None,
         type: MT_DataType = "all",
         items: int = 1000,
         page: int = 0,
@@ -224,8 +221,8 @@ class MeteoTracker_API:
         if author:
             params["by"] = author
 
-        if timespan is not None:
-            t1, t2 = (int(t.timestamp()) for t in timespan)
+        if time_span is not None:
+            t1, t2 = (int(t.timestamp()) for t in [time_span.start, time_span.end])
             if t2 < t1:
                 raise ValueError("The timespan must be ordered (earlier, later)")
             # This cannot contain any spaces and must use double quotes, hence the ugly f-string

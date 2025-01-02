@@ -1,167 +1,470 @@
 import dataclasses
 import logging
-import pickle
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Iterable
+import uuid
+from abc import ABC, abstractmethod
+from datetime import UTC, datetime, timedelta
+from typing import Any, Iterable, Self
 from urllib.parse import urljoin
 
+import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
+from sqlalchemy import JSON, Index
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Mapped, Session, mapped_column
+from sqlalchemy_utils import UUIDType
 from urllib3.util import Retry
 
-from ..core.bases import InputColumns, Message, Source
+from ..core.bases import Mappings, Source, TabularMessage
+from ..core.time import (
+    TimeSpan,
+)
+from ..metadata.db import Base
 
 logger = logging.getLogger(__name__)
 
-class API_Error(Exception): pass
+class APISourcesBaseException(Exception): pass
 
-def recursive_get(dictionary, query):
-    if dictionary is None or len(query) == 0: return dictionary
-    first, *rest = query
-    new_dictionary = dictionary.get(first, None)
-    return recursive_get(new_dictionary, rest)
+class API_Error(APISourcesBaseException): pass
+class ExistingDataException(APISourcesBaseException): pass
+
+class RateLimitedException(APISourcesBaseException):
+    """
+    e.g 429 Too Many Requests
+    The downstream api may also choose to raise this in other cases if rate limiting is detected.
+    Provide a retry_after datetime to indicate when the rate limit will be lifted if possible.
+    """
+    retry_at: datetime
+    def __init__(self, retry_at: datetime | None = None, 
+                 response: requests.Response | None = None):
+        self.response = response
+        
+        if retry_at is not None:
+            self.retry_at = retry_at
+
+        elif response is not None and "Retry-After" in response.headers:
+            retry_after = int(response.headers["Retry-After"])
+            self.retry_at = start_time + timedelta(seconds=retry_after)
+        
+        else:
+            self.retry_at = start_time + timedelta(minutes=5)
 
 @dataclasses.dataclass
-class APISource(Source):
+class DataChunk:
     """
-    A base class to contain generic logic related to sources that periodically query API endpoints.
+    Represents a chunk of a stream of data that has been downloaded from an API and stored in the db
+    source: a string that uniquely represents the source API
+    key: a string that unqiuely represents this stream of data within the API
+    version: an integer that represents the version of the data
+    time_span: the time range of the data
+    ingestion_time: when we retrieved or attempted to retrieve the data from the API
+    json: any metadata for the chunk that can't fit in the dataframe or the error message
+    data: a dataframe of the data
+    """
+    source: str
+    key: str
+    version: int
+    time_span: TimeSpan
+    ingestion_time: datetime = dataclasses.field(default_factory=datetime.now)
+    json: dict = dataclasses.field(repr=True, default_factory=dict)
+    data: pd.DataFrame | None = dataclasses.field(repr=False, default=None)
+    success: bool = True
+
+    @classmethod
+    def make_error_chunk(cls, data_stream : "DataStream", time_span : TimeSpan, error : Exception, json = {}) -> Self:
+        json = json.copy()
+        json.update({
+            "error": repr(error),
+        })
+        if isinstance(error, requests.exceptions.HTTPError):
+            json.update({
+                "status_code": error.response.status_code,
+                "response_text": error.response.text,
+            })
+            if error.response.status_code == 429:
+                error = RateLimitedException(response = error.response)
+                json["retry_at"] = error.retry_at.isoformat()
+        
+        return cls(
+                source=data_stream.source,
+                key=data_stream.key,
+                version=data_stream.version,
+                time_span=time_span,
+                success=False,
+                json = json,
+                data=None,
+            )
 
 
-    .generate() is defined by the this base class, derived classes should define the remaining methods:
-        - get_chunks
-        - download_chunk 
+    def get_overlapping(self, db_session) -> "Iterable[DBDataChunk]":
+        chunks = db_session.query(DBDataChunk).filter_by(
+            source=self.source,
+            key=self.key,
+            version=self.version,
+            ).filter(
+                DBDataChunk.start_datetime < self.time_span.end,
+                self.time_span.start < DBDataChunk.end_datetime).all()
+        return chunks
+
+    def write_to_db(self, db_session: Session, delete_previous_tries=True):
+        """Save to the database"""
+        overlapping = self.get_overlapping(db_session)
+        for chunk in overlapping:
+            if chunk.success:
+                raise ExistingDataException(f"Trying to ingest data chunk {self} over {chunk.to_data_chunk()}")
+            else:
+                if delete_previous_tries:
+                    db_session.delete(chunk)
+                
+
+        chunk = DBDataChunk(
+            source=self.source,
+            key=self.key,
+            version=self.version,
+            start_datetime=self.time_span.start,
+            end_datetime=self.time_span.end,
+            ingestion_time=self.ingestion_time,
+            success = self.success,
+            json = self.json,
+            data=self.data.to_parquet() if self.data is not None else None
+        )
+        db_session.add(chunk)
+        db_session.commit()
+
+# This is just a flattened version of DataChunk for storage in the SQL database
+class DBDataChunk(Base):
+    __tablename__ = "ingested_chunk"
+    id = mapped_column(UUIDType, primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] # Same as DataChunk.source
+    key: Mapped[str] # Same as DataChunk.key
+    version: Mapped[int] # Same as DataChunk.version
+    start_datetime: Mapped[datetime] # Same as DataChunk.time_span.start
+    end_datetime: Mapped[datetime] # Same as DataChunk.time_span.end
+    ingestion_time: Mapped[datetime] # Same as DataChunk.ingestion_time
+    success: Mapped[bool]
+    json: Mapped[dict] = mapped_column(JSON, nullable=True) # Same as DataChunk.json
+    data: Mapped[bytes] = mapped_column(nullable=True) # == DataChunk.data.toparquet()
+
+    __table_args__ = (
+        # Index for fast lookups on source, key, version
+        Index("ix_source_key_version", "source", "key", "version"),
+        # Composite index for time range queries
+        Index("ix_start_end_datetime", "start_datetime", "end_datetime"),
+    )
+
+    def to_data_chunk(self) -> DataChunk:
+            return DataChunk(
+                source=self.source,
+                key=self.key,
+                version=self.version,
+                time_span=TimeSpan(self.start_datetime.replace(tzinfo=UTC), self.end_datetime.replace(tzinfo=UTC)),
+                ingestion_time=self.ingestion_time.replace(tzinfo=UTC),
+                success=self.success,
+                json=self.json,
+                data=pd.read_parquet(self.data) if self.data is not None else None
+            )
+
+@dataclasses.dataclass(frozen=True)
+class DataStream:
     """
-    mappings: InputColumns
+    Represents a logical stream of data from an API with no time component. 
+    This could be a station, sensor or just the entire datasource as a single stream.
+    source: a string that uniquely represents the source API
+    key: a string that unqiuely represents this stream of data within the API
+    version: an integer that represents the version of the data
+    data: any additional information that the API needs to download the data
+
+    It is left to the API implementation to decide how to structure key and day.
+    """
+    source: str
+    key: str
+    version: int
+    data: Any = dataclasses.field(hash=False)
+
+    def query_db(self, db_session: Session, time_span : TimeSpan,
+                success: bool | None = None,
+                ingested_after : datetime | None = None):
+        
+        query = db_session.query(DBDataChunk).filter_by(
+            source=self.source,
+            key=self.key,
+            version=self.version,
+            ).filter(
+                DBDataChunk.start_datetime <= time_span.end,
+                time_span.start <= DBDataChunk.end_datetime
+            )
+        if success is not None:
+            query = query.filter(DBDataChunk.success == success)
+        if ingested_after is not None:
+            query = query.filter(DBDataChunk.ingestion_time > ingested_after)
+        return query
+
+    def get_timespans_from_db(self, db_session: Session, 
+                            time_span : TimeSpan,
+                            success: bool | None = None,
+                            ingested_after : datetime | None = None) -> Iterable[TimeSpan]:
+        filtered_query = self.query_db(db_session, time_span, success, ingested_after)
+        column_query = filtered_query.with_entities(DBDataChunk.start_datetime, DBDataChunk.end_datetime)
+        for start, end in column_query.all():
+            yield TimeSpan(start.replace(tzinfo=UTC), end.replace(tzinfo=UTC))
+
+    def get_chunks_from_db(self, db_session: Session, 
+                           time_span : TimeSpan,
+                            success: bool | None = None,
+                            ingested_after : datetime | None = None) -> Iterable[DataChunk]:
+        """Read the data from the database cache"""
+        filtered_query = self.query_db(db_session, time_span, success, ingested_after)
+        for db_chunk in filtered_query.all():
+            yield db_chunk.to_data_chunk()
+
+    def write_to_db(self, db_session, last_ingestion_time: datetime | None = None):
+        """Save to the database"""
+        # Perform an upsert, insert if (source, key, version) doesn't exist
+        # otherwise update the existing row
+
+        values_dict = dict(
+             source=self.source,
+            key=self.key,
+            version=self.version,
+            last_ingestion_time = datetime.now(UTC) if last_ingestion_time is None else last_ingestion_time
+        )
+
+        stmt = insert(DBDataStream).values(**values_dict)
+        stmt.on_conflict_do_update(
+            index_elements=["source", "key", "version"],
+            set_={"last_ingestion_time": values_dict["last_ingestion_time"]}
+        )
+
+        db_session.execute(stmt)
+        db_session.commit()
+
+# Database information per stream that is used to keep track of ingestion
+class DBDataStream(Base):
+    __tablename__ = "ingested_stream"
+    id = mapped_column(UUIDType, primary_key=True, default=uuid.uuid4)
+    source: Mapped[str]
+    key: Mapped[str]
+
+    # Keep track of when we last looked at the database
+    # Any DataChunk with ingestion_time > last_ingestion_time should be processed
+    # into the pipeline.
+    # This allows us to pick up updates to older date
+    last_ingestion_time: Mapped[datetime] # Same as DataChunk.ingestion_time
+
+    __table_args__ = (
+        # Index for fast lookups on source, key
+        Index("ix_source_key", "source", "key"),
+        # Composite index for time range queries
+        Index("ix_last_ingestion_time", "last_ingestion_time"),
+    )
+
+    def to_data_stream(self) -> DataStream:
+        return DataStream(
+            source=self.source,
+            key=self.key,
+            version=self.version,
+            data=None
+        )
+
+class AbstractDataSourceMixin(ABC):
+    """
+    A mixin class that defines the interface for a data source that downloads data from an API
+    """
+    source: str
+    cache_version: int
+    maximum_request_size = timedelta(days=10)
+
+    @abstractmethod
+    def get_data_streams(self, time_span: TimeSpan) -> Iterable[DataStream]:
+        """
+        Ask the API what datastreams exist for this time range
+        """
+        pass
+    
+    @abstractmethod
+    def download_chunk(self, data_stream: DataStream, time_span: TimeSpan) -> DataChunk:
+        """
+        Download a chunk of data from the API
+        """
+        pass
+
+    @abstractmethod
+    def emit_messages(self, relevant_chunks : list[DataChunk], ingest_time_spans: list[TimeSpan]) -> Iterable[TabularMessage]:
+        """
+        Emit messages corresponding to the data downloaded from the API in this time_span
+        This is separate from download_data_stream_chunks to allow for more complex processing.
+        This could for example involve merging data from multiple data streams.
+        This happens for the Acronet API where we can download data for each sensor class
+        but we want to emit messages for each station. So this method regroups the messages.
+        """
+        pass
+
+@dataclasses.dataclass
+class APISource(Source, AbstractDataSourceMixin):
+    """
+    The generic logic related to sources that periodically query API endpoints.
+    This includes:
+        - Organsing data into logical streams
+        - Downloading the data in each stream in time based chunks
+        - Storing those chunks in a database
+        - Retrying chunks if some chunks fail on the first attempt.
+        - Recombining chunks to form a complete dataset.
+    """
+    mappings: Mappings
 
     "The time interval to ingest, can be overridden by globals.source_timespan"
     finish_after: int | None = None
-
-    "A list of data to extract from the incoming API responses and add in as columns in the data"
-    copy_metadata_to_columns: list[str] = dataclasses.field(default_factory = list)
     
 
     cache_version: int = 3 # increment this to invalidate the cache
     use_cache: bool = True
+    source: str = "should be set by derived class"
+    maximum_request_size: timedelta = timedelta(days=10)
+    minimum_request_size: timedelta = timedelta(minutes=5)
 
-    def init(self, globals):
-        super().init(globals)
-        self.start_date, self.end_date = self.globals.ingestion_time_constants.query_timespan
-        self.cache_directory = globals.cache_path / self.source
-        self.mappings_dict = {column.name: column for column in self.mappings}
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
 
-    def get_chunks(self, start_date : datetime, end_date: datetime) -> Iterable[Any]:
+    def check_source_for_errors(self, db_session : Session, since: datetime) -> datetime:
+        error_chunks = db_session.query(DBDataChunk).filter_by(
+            source=self.source).filter(
+                DBDataChunk.ingestion_time > since,
+                DBDataChunk.success == False
+            ).all()
+        
+
+        retry_at = datetime.now(UTC) - timedelta(seconds=1)
+        for chunk in error_chunks:
+            if chunk.json.get("status_code") == 429:
+                # if the response has a retry after header, use that
+                # otherwise use the ingestion time + 5 minutes
+                if "retry_at" in chunk.json:
+                    retry_at = max(datetime.fromisoformat(chunk.json["retry_at"]), retry_at)
+                else :
+                    retry_at = max(chunk.ingestion_time.replace(tzinfo=UTC) + timedelta(minutes=5), retry_at)
+            
+
+        return retry_at
+
+
+    def gaps_in_database(self, db_session: Session, data_stream: DataStream, time_span : TimeSpan
+                     ) -> list[TimeSpan]:
+        """Given a DataStream and a time span, return any gaps in the time span that need to be downloaded"""
+        
+        # Get all the timespan of all chunks that have been ingested sucessfully
+        chunks_time_spans =  list(data_stream.get_timespans_from_db(db_session, time_span, success=True))
+        chunks_to_ingest = time_span.remove(chunks_time_spans)
+        split_chunks = [
+            c 
+            for chunk in chunks_to_ingest
+            for c in chunk.split(self.maximum_request_size)
+        ]
+
+        # Remove the last chunk if
+        # * there are any
+        # * it's too close to recent side of the requested time interval
+        # * it's too small
+        if split_chunks \
+            and (split_chunks[-1].start + self.minimum_request_size) > time_span.end \
+            and split_chunks[-1].delta() < self.minimum_request_size:
+            logger.debug(f"Removing last chunk because its time interval is too small. ({split_chunks[-1].delta()}")
+            split_chunks = split_chunks[:-1]
+
+        return split_chunks
+
+    def fail(self, error):
+        if isinstance(error, Exception): raise error
+        else: raise Exception("Forced failure")
+
+    def download_data(self, data_streams: Iterable[DataStream], 
+                      query_time_span, 
+                      fail = False,
+                      max_time_downloading: timedelta = timedelta(minutes = 5)) -> Iterable[DataChunk]:
+        
+        start_time = datetime.now(UTC)
+        
+        with Session(self.globals.sql_engine) as db_session:
+            # Check if the source has been rate limited recently
+            retry_at = self.check_source_for_errors(db_session, since = start_time - timedelta(days=1))
+            if retry_at > start_time:
+                logger.info(f"Source {self.source} was rate limited, waiting until {retry_at} ({retry_at - start_time})")
+                return
+
+            # Download any data we need for each data stream
+            for data_stream in data_streams:
+                for gap in self.gaps_in_database(db_session, data_stream, query_time_span):
+                    if start_time - start_time > max_time_downloading:
+                        logger.info(f"Stopping downloads after {max_time_downloading}")
+                        return
+                    
+                    # Begin a nested session
+                    # This let's us rollback just this bit (automatically)
+                    # if an unexpected failure occurs in here
+                    with db_session.begin_nested():
+                        try:
+                            if fail: self.fail(fail)
+                            data_chunk = self.download_chunk(data_stream, gap)
+                            data_chunk.write_to_db(db_session)
+                            logger.debug(f"Downloaded data and wrote to db for {data_stream.key} {gap}")
+                            yield data_chunk
+                        
+                        except ExistingDataException:
+                            logger.debug(f"Data already exists in db for {data_stream.key} {gap}")
+                            if self.globals.die_on_error: raise
+
+                        except Exception as e:
+                            logger.warning(f"Failed to download chunk {data_stream.key} {gap} {e}")
+                            error_chunk = DataChunk.make_error_chunk(data_stream, gap, e)
+                            error_chunk.write_to_db(db_session)
+                            if self.globals.die_on_error: raise
+                            yield error_chunk
+
+                            # Completely give up for now if we are rate limited
+                            if isinstance(e, RateLimitedException):
+                                return
+
+    def generate(self) -> Iterable[TabularMessage]:
         """
         Return an iterable of objects representing chunks of data we should download from the API
-        The return type can be an iterable of anything, eg strings representing session IDs
-        It could also be the raw data if the API is structured that way.
         """
-        raise NotImplementedError
+        query_time_span = self.globals.ingestion_time_constants.query_timespan
+        process_time_span = self.globals.ingestion_time_constants.process_timespan
+        granularity = self.globals.ingestion_time_constants.granularity
 
-    def download_chunk(self, chunk : Any) -> Iterable[Message]:
-        """
-        Take a chunk generated by get_chunks and download it to produce a message or messages.
-        """
-        raise NotImplementedError
-    
-    def load_data_from_cache(self, chunk=None, path: Path | None = None) -> Any:
-        if chunk and path: raise ValueError("Only one of chunk or path should be provided")
-        if not chunk and not path: raise ValueError("Either chunk or path should be provided")
-        if chunk: path = Path(self.cache_directory) / chunk["key"]
-        assert path is not None
+        data_streams = list(self.get_data_streams(query_time_span))
+        logger.debug(f"Got data streams {data_streams}")
 
-        if not self.use_cache: raise KeyError("Cache is disabled")
-        if not self.globals.overwrite_cache: raise KeyError("Cache is globally disabled")
-        if not path.exists(): raise KeyError(f"Cache file {path} does not exist")
+        data_chunks = list(self.download_data(data_streams, query_time_span))
 
-        try:
-            with open(path, "rb") as f:
-                d = pickle.load(f)
-        except Exception as e:
-            logger.debug(f"Cache file {path} could not be read: {e}")
-            raise KeyError
-
-        if not isinstance(d, dict) or "version" not in d:
-            logger.debug(f"Cache file {path} is not in the expected format")
-            raise KeyError
-        
-        if d["version"] != self.cache_version: 
-            logger.debug(f"Cache file {path} has version {d['version']} but we are expecting {self.cache_version}")
-            raise KeyError
-        
-        if chunk and d["cache_key"] != chunk["key"]:
-            logger.debug(f"Cache file {path} has cache_key {d['cache_key']} but we are expecting {chunk['key']}")
-            raise KeyError
-        
-        return d["chunk"], d["data"]
-        
-    def save_data_to_cache(self, chunk : dict, data : Any):
-        path = Path(self.cache_directory) / chunk["key"]
-        path.parent.mkdir(parents = True, exist_ok = True)        
-        with open(path, "wb") as f:
-            pickle.dump(dict(
-                version = self.cache_version,
-                chunk = chunk,
-                data = data,
-                cache_key = chunk["key"],
-                ), f)
-
-    # def query_chunk_ingested(self, cache_key : str) -> bool:
-    #     """
-    #     Query the database to see if this chunk has already been ingested.
-    #     """
-    #     with Session(self.sql_engine) as session:
-    #         return session.query(IngestedChunk).where(
-    #             IngestedChunk.source == self.metadata.source,
-    #             IngestedChunk.cache_key == cache_key,
-    #         ).one_or_none()
-        
-    def offline_chunks(self):
-        """
-        Return an iterable of chunks that have already been ingested
-        """
-        for path in self.cache_directory.glob("*.pickle"):
-            try:
-                chunk, _ = self.load_data_from_cache(path=path)
-            except KeyError:
-                continue
-            yield chunk
-
-    def generate(self) -> Iterable[Message]:
+        # Let the API implementation do any additional processing
+        # and emit the messages
         emitted_messages = 0
 
-        if self.globals.offline:
-            chunk_iterable = self.offline_chunks()
-        else:
-            chunk_iterable = self.get_chunks(self.start_date, self.end_date, self.globals.ingestion_time_constants.granularity)
+        # Split the ingest time span into chunks that are rounded to the size boundary
+        # i.e granularity = timedelta(minutes = 5) gives (12:00-12:05), (12:05-12:10) etc
+        ingest_time_spans = process_time_span.split_rounded(granularity)
+        
+        with Session(self.globals.sql_engine) as db_session:
+            relevant_chunks = [
+                data_chunk
+                for data_stream in data_streams
+                for data_chunk in data_stream.get_chunks_from_db(db_session, process_time_span) 
+            ]
+        
+        for msg in self.emit_messages(relevant_chunks, ingest_time_spans):
+            yield msg
+            emitted_messages += 1
+            if self.finish_after is not None and emitted_messages >= self.finish_after:
+                return
 
 
-        for chunk in chunk_iterable:
-            try:
-                messages = self.download_chunk(chunk)
-                if messages is None:
-                    continue
-            except API_Error as e:
-                logger.warning(f"{self.__class__.__name__}.get_chunks failed for {chunk = }\n{e}")
-                continue
-
-            # Yield the messages until we reach the limit or the end of the data
-            for message in messages:
-                for column_name in self.copy_metadata_to_columns:
-                    column = self.mappings_dict[column_name]
-                    message.data[column.name] = recursive_get(message.metadata.unstructured, column.key.split(".")) 
-
-                yield message
-                emitted_messages += 1
-                if self.finish_after is not None and emitted_messages >= self.finish_after:
-                    return
                 
 @dataclasses.dataclass
 class RESTSource(APISource):
     endpoint = "scheme://example.com/api/v1" # Override this in derived classes
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.session = requests.Session()
 
         # Add retry for HTTP requests
@@ -185,4 +488,5 @@ class RESTSource(APISource):
         r = self.session.get(urljoin(self.endpoint, url), *args, **kwargs)
         r.raise_for_status()
         return r.json()
-    
+
+

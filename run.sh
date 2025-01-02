@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 export ODC_ENABLE_WRITING_LONG_STRING_CODEC=1
 python -m ionbeam ./config -vvvv \
-    --env ewc \
-    --sources smart_citizen_kit \
-    --overwrite-cache \
-    --finish-after=1
-    # --init-db
+    --env local \
+    --sources acronet \
+    --die-on-error
+    # --finish-after=2 \
+    # --init-db \
+    # --overwrite-cache 
+    
+    
+        # --finish-after=5 \
+    
     
 
     # --overwrite-cache 

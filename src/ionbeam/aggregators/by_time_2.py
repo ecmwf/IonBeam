@@ -55,8 +55,8 @@ class NewTimeAggregator(Aggregator):
     def __repr__(self):
         return f"{self.__class__.__name__}({self.match}, {self.granularity}, {self.time_direction})"
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.metadata = dataclasses.replace(self.metadata, state="time_aggregated")
 
         if self.globals.ingestion_time_constants is not None:

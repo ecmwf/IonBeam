@@ -84,7 +84,7 @@ def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
 
     # Let all the actions initialise themselves with access to the global config
     for action in config.actions:
-        action.init(globals)
+        action.init(globals, definition_path=yaml_file)
 
     # For actions where match has not been specified,
     # we will match with the previous action by default
@@ -95,7 +95,7 @@ def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
     return config
 
 
-def parse_globals(config_dir: Path, **overrides):
+def parse_globals(config_dir: Path, **overrides) -> Config:
     if not config_dir.exists():
         raise ConfigError(f"{config_dir} does not exist!")
 
@@ -122,6 +122,7 @@ def parse_globals(config_dir: Path, **overrides):
             del overrides["sources"]
 
         config = parse_config_from_dict(Config, data, filepath=global_config_file)
+        config.globals.source_path = config_dir
 
     # Based on the environment =dev/test/prod/local merge config into globals
     env = overrides.get("environment", config.globals.environment)
@@ -136,9 +137,6 @@ def parse_globals(config_dir: Path, **overrides):
     config.globals = merge_overlay(config.globals, globals_override)
 
     logger.debug("Loaded global config...")
-
-    if config.globals.config_path is None:
-        config.globals.config_path = config_dir
 
     # Resolve the paths in the global config relative to the current directory
     for name in [
@@ -219,7 +217,7 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
     return config, actions
 
 
-def parse_single_action(config_dir: Path, action_input: Path | str | dict, **overrides):
+def parse_single_action(config_dir: Path, action_input: Path | str | dict, **overrides) -> tuple[Config, Action]:
     config = parse_globals(config_dir, **overrides)
 
     if isinstance(action_input, Path):
@@ -228,15 +226,51 @@ def parse_single_action(config_dir: Path, action_input: Path | str | dict, **ove
         )
         with open(action_input) as f:
             action_dict = yaml.load(f, Loader=SafeLineLoader)
+        definition_path = action_input
 
     elif isinstance(action_input, str):
         action_dict = yaml.safe_load(action_input)
+        definition_path = None
 
     else:
         action_dict = action_input
+        definition_path = None
 
     action = parse_config_from_dict(Action, action_dict)
 
-    action.init(config.globals)
+    action.init(config.globals, definition_path=definition_path)
+
+    return config, action
+
+def reload_action(config : Config, action : Action) -> tuple[Config, Action]:
+    """
+    Attempts to hot reload an action.
+    """
+    assert action.definition_path is not None, "Cannot reload an action with no yaml source file on disk"
+    definition_path = action.definition_path
+
+    logger.debug(f"Reloading {action} from {action.definition_path}")
+    config = parse_globals(config.globals.source_path)
+
+    # Allow includes from adjacent files
+    YamlIncludeConstructor.add_to_loader_class(
+        loader_class=SafeLineLoader, base_dir=str(action.definition_path.parent)
+    )
+
+    # Load the yaml file that will have multiple actions in it
+    with open(action.definition_path) as f:
+        actions = yaml.load(f, Loader=SafeLineLoader)
+
+    matches = [a for a in actions["actions"] if a["class"] == type(action).__name__]
+
+    if len(matches) == 0:
+        raise ConfigError(f"Could not find action {action} in {action.definition_path}")
+    elif len(matches) > 1:
+        raise ConfigError(f"Found multiple actions {action} in {action.definition_path}, give them ids to disambiguate (TODO implement this)")
+    
+    action_dict = matches[0]
+
+    action = parse_config_from_dict(Action, action_dict)
+    action.init(config.globals, definition_path=definition_path)
 
     return config, action

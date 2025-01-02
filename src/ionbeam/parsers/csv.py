@@ -19,12 +19,13 @@ import pandas as pd
 from ..core.bases import (
     FileMessage,
     FinishMessage,
-    InputColumns,
+    Mappings,
     Parser,
     TabularMessage,
 )
 from ..core.converters import unit_conversions
 from ..core.html_formatters import action_to_html, dataframe_to_html, make_section
+from ..core.time import TimeSpan
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class CSVParser(Parser):
     """
 
     # Map key names and paths within external data sources to internal canonical names
-    mappings: InputColumns
+    mappings: Mappings
 
     identifying_keys: List[str] = dataclasses.field(default_factory=list)
     metadata_keys: List[str] = dataclasses.field(default_factory=list)
@@ -60,8 +61,8 @@ class CSVParser(Parser):
         ]
         return action_to_html(self, extra_sections=extra_sections)
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.mappings = [c for c in self.mappings if not c.discard]
         self.mapping_names = {c.name for c in self.mappings}
         self.mapping_keys = {c.key for c in self.mappings}
@@ -197,13 +198,12 @@ class CSVParser(Parser):
             )
 
         df = self.format_dataframe(df)
-        logging.debug(f"Processed: {df.columns}")
+        if not isinstance(rawdata.metadata.time_span, TimeSpan):
+            raise ValueError(f"{rawdata.metadata.time_span = } is not a TimeSpan")
 
         metadata = self.generate_metadata(
             message=rawdata,
-            time_span = rawdata.metadata.time_span,
             observation_variable= ",".join(v.name for v in self.value_columns),
-            unstructured=rawdata.metadata.unstructured,
             filepath=None,
         )
 
@@ -214,23 +214,6 @@ class CSVParser(Parser):
         )
 
         yield self.tag_message(output_msg, rawdata)
-
-        # if self.globals.split_data_columns:
-        #     # Split the data into data frames for each of the value types
-        #     for variable_column, df in self.split_columns(df):
-        #         metadata = self.generate_metadata(
-        #             message=rawdata,
-        #             observation_variable=variable_column.name,
-        #             filepath=None,
-        #         )
-
-        #         output_msg = TabularMessage(
-        #             metadata=metadata,
-        #             columns=[c.canonical_variable for c in self.fixed_columns + [variable_column]],
-        #             data=df,
-        #         )
-
-        #         yield self.tag_message(output_msg, rawdata)
 
 
 parser = CSVParser

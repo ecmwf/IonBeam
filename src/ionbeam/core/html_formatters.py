@@ -1,6 +1,7 @@
 import random
 import string
 from dataclasses import fields, is_dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO
 
@@ -48,7 +49,7 @@ def column_metadata_to_html(columns):
                 Unit=c.unit or "",
                 Description=c.desc or "",
             )
-            for c in columns
+            for k, c in columns.items()
         ]
     )
     return dataframe_to_html(df)
@@ -219,6 +220,13 @@ def message_to_html(message):
 
     if hasattr(message, "metadata") and getattr(message.metadata, "filepath", None) is not None:
         file_section = summarise_file(message.metadata.filepath)
+        if file_section:
+            sections.append(file_section)
+
+    if hasattr(message, "bytes") \
+        and getattr(message.metadata, "encoded_format", None) == "odb":
+
+        file_section = make_section("ODB File (In Memory)", odb_to_html(BytesIO(message.bytes)))
         if file_section:
             sections.append(file_section)
 

@@ -72,116 +72,68 @@
   dtype: object
 
 - name: air_temperature_near_surface
-  output: true
   unit: K
-  codetype: 35 # Land TEMP
-  varno: 39 # 2m temperature (K)
-  obstype: 5 # TEMP
-  reportype: 1
 
 - name: relative_humidity_near_surface
-  output: true
   unit: "%"
-  WMO: true # indicates this exact name is defined by the WMO
-  codetype: 14 # Automatic Land SYNOP
-  varno: 58 # 2m rel. humidity
-  obstype: 1 # SYNOP
-  reportype: 2
 
 - name: humidity_index
-  output: true
   unit: K
-  reportype: 3
 
 - name: internal_temperature
-  output: true
   unit: K
   desc: The internal temperature of the sensor.
-  reportype: 4
 
 - name: vertical_temperature_gradient
-  output: true
   desc: 
   unit: "°C/100m"
-  reportype: 5
+
 
 - name: air_pressure_near_surface
-  output: true
   unit: Pa
-  WMO: False #the WMO use hPa as the unit
-  reportype: 6
 
 - name: pressure_sealevel
   unit: Pa
-  reportype: 7
 
 - name: co2
-  output: true
   unit: ppm
-  WMO: true
-  reportype: 8
 
 - name: wind_gust
-  output: true
   unit: "m/s"
-  WMO: true
-  reportype: 9
 
 - name: wind_gust_direction
-  output: true
   unit: "°"
-  reportype: 10
 
 - name: dew_point_temperature
-  output: true
   unit: K
-  WMO: true
-  reportype: 11
 
 - name: wind_direction_near_surface
-  output: true
   unit: "°"
-  WMO: true
-  reportype: 12
 
 - name: wind_speed_near_surface
-  output: true
   unit: "m/s"
-  WMO: true
-  reportype: 13
 
 - name: rain
-  output: true
   unit: "mm"
-  reportype: 14
 
 - name: wind_direction
-  output: true
   unit: "Degrees"
-  reportype: 15
 
 - name: anemometer
-  output: true
   unit: "m/s"
-  reportype: 16
 
 
 - name: radiometer
   unit: "W/m^2"
 - name: battery_level
   unit: "V"
-  reportype: 17
 
 
 - name: thermometer_min
-  output: true
   unit: K
-  reportype: 18
 
 - name: thermometer_max
-  output: true
   unit: K
-  reportype: 19
 
 - name: signal_strength
   unit: "CSQ"

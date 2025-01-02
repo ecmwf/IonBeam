@@ -24,8 +24,8 @@ class MultiFileSource(Source):
     path: Path = Path(".")
     finish_after: int | None = None
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.path = self.resolve_path(self.path, type="data")
         logger.debug(f"{self.__class__.__name__}: resolved path to {self.path}")
 

@@ -181,8 +181,8 @@ class TimeAggregator(Aggregator):
             keys.append(make_section(", ".join(key), dataframe_to_html(df)))
         return action_to_html(self, extra_sections=[make_section("Contents (by key)", "\n".join(keys))])
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.bucket_containers: Dict[tuple, BucketContainer] = {}
         self.metadata = dataclasses.replace(self.metadata, state="time_aggregated")
 

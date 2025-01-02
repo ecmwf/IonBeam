@@ -17,6 +17,7 @@ TODO: Currently the geowindow and stationgroup used are hardcoded, that might ne
 import itertools
 import logging
 import pickle
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from functools import cached_property, reduce
@@ -24,7 +25,6 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import Levenshtein
-import numpy as np
 import pandas as pd
 import requests
 from munch import Munch
@@ -59,6 +59,7 @@ for package in ["requests_oauthlib", "urllib3"]:
 class CIMA_API:
     api_url = "https://webdrops.cimafoundation.org/app/"
     endpoints_url = "https://testauth.cimafoundation.org/auth/realms/webdrops/.well-known/openid-configuration"
+    token: dict | None = None
 
     def __init__(
         self,
@@ -70,8 +71,8 @@ class CIMA_API:
         self.logger = logging.getLogger(__name__)
 
         assert cache_file is not None
-        self.cache_file = Path(cache_file)
-        logger.info(f"Looking for cache file at {cache_file}")
+        self.cache_file = Path(cache_file).resolve()
+        logger.info(f"Looking for cache file at {self.cache_file}")
         try:
             with cache_file.open("rb") as f:
                 self.cache = pickle.load(f)
@@ -95,19 +96,23 @@ class CIMA_API:
             self.endpoints = self.cache["endpoints"]
 
         # let oauth-requests handle all the Open-ID/OAuth2 authentication stuff
+        def token_updater(token):
+            logger.debug("Refreshing token...")
+            self.token = token
+
         self.oauth = OAuth2Session(
             client=LegacyApplicationClient(client_id=self.credentials.client_id),
             auto_refresh_url=self.endpoints.token_endpoint,
             auto_refresh_kwargs=dict(
-                client_id=self.credentials.client_id, client_secret=self.credentials.client_secret
+                client_id=self.credentials.client_id, 
+                client_secret=self.credentials.client_secret
             ),
+            token_updater=token_updater,
         )
 
         # OAuth2Session is a subclass of requests.Session so see that documentation for generic usage
         # Update the headers for all our requests so that
         self.oauth.headers.update(headers)
-
-        # self.logger.debug(f"Token: {self.oauth.token}")
 
         # Grab a list of sensors names in italian
         if "sensor_names" not in self.cache:
@@ -121,38 +126,36 @@ class CIMA_API:
         if set(self.sensor_names.IT) != set(self.sensor_name_translations_IT2EN.keys()):
             self.logger.warning("The translation tables need updating!")
 
-    def refresh_token(self) -> None:
-        "Refresh the OAuth2 token, tokens generally expire after 30 minutes for this API"
-        self.logger.info("Refreshing the token...")
-        self.oauth.refresh_token(self.endpoints.token_endpoint)
-        self.logger.debug(f"Token: {self.oauth.token}")
+    # def refresh_token(self) -> None:
+    #     "Refresh the OAuth2 token, tokens generally expire after 30 minutes for this API"
+    #     self.logger.info("Refreshing the token...")
+    #     self.oauth.refresh_token(self.endpoints.token_endpoint)
+    #     self.logger.debug(f"Token: {self.oauth.token}")
 
     def authenticate(self) -> None:
-        self.logger.info("Fetching the token...")
-        self.logger.info(f"{self.endpoints.token_endpoint=}")
-        self.oauth.fetch_token(
-            token_url=self.endpoints.token_endpoint,
-            username=self.credentials.username,
-            password=self.credentials.password,
-            client_id=self.credentials.client_id,
-            client_secret=self.credentials.client_secret,
-        )
+        "Authenticate if necessary"
+        if self.token is None or time.time() >= self.token["expires_at"]:
+            self.logger.info("Fetching the token...")
+            self.token = self.oauth.fetch_token(
+                token_url=self.endpoints.token_endpoint,
+                username=self.credentials.username,
+                password=self.credentials.password,
+                client_id=self.credentials.client_id,
+                client_secret=self.credentials.client_secret,
+            )
 
     def get(self, *args, **kwargs) -> requests.Response:
         "Wrap the get command of the underlying oauth object"
-        # Tell oauth-requests to grab a token using username/password credentials
-        # Usually this step would open a browser window where you would manually log in
-        # But for this particular API they're just eneabled straight user/pass authentication
-        # hence the use of 'LegacyApplicationClient' above
-        if not self.oauth.token:
-            self.authenticate()
-
-        r = self.oauth.get(*args, **kwargs)
-        if r.headers["Content-Type"] != "application/json":
-            self.logger.info(f"Failed request ({r.status_code}) to {r.url}")
-            self.logger.debug(f"Response: {r.text}")
-            raise CIMA_API_Error(f"Request failed, code {r.status_code}")
-        return r
+        
+        self.authenticate()
+        try:
+            r = self.oauth.get(*args, **kwargs)
+            r.raise_for_status()
+            return r
+        
+        except requests.exceptions.HTTPError as e:
+            self.logger.info(f"Failed request to {r.url} {e} {r.text}")
+            raise e
 
     @classmethod
     def match_sensor_names(cls, s: SensorName) -> SensorName:

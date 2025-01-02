@@ -4,21 +4,17 @@
 
 - name: author
 - name: station_id
-  key: station.id
 
 - name: start_time
   key: start
 
 - name: station_name
-  key: station.name
 
 - name: lat
   unit: EPSG:4326
-  key: station.lat
 
 - name: lon
   unit: EPSG:4326
-  key: station.lon
 
 - name: rain
   key: "PLUVIOMETRO [mm]"

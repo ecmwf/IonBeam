@@ -19,7 +19,7 @@ import findlibs
 import yaml
 from jinja2 import Template
 
-from ..core.bases import FileMessage, FinishMessage, Message, Writer
+from ..core.bases import BytesMessage, DataMessage, FileMessage, FinishMessage, Message, Writer
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +86,8 @@ class FDBWriter(Writer):
     def __str__(self):
         return f"{self.__class__.__name__}()"
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.metadata = dataclasses.replace(self.metadata, state="written")
         self.metkit_language_template = globals.metkit_language_template
 
@@ -125,23 +125,33 @@ class FDBWriter(Writer):
         
         return pyfdb.FDB(self.config)
 
-    def process(self, input_message: FileMessage | FinishMessage) -> Iterable[Message]:
+    def process(self, input_message: FileMessage | BytesMessage | FinishMessage) -> Iterable[Message]:
         if isinstance(input_message, FinishMessage):
             return
+        
+        assert input_message.metadata.mars_id is not None
+        mars_id = input_message.metadata.mars_id.as_strings()
 
-        assert input_message.metadata.filepath is not None
-
-        request = input_message.metadata.mars_request.as_strings()
-        # logger.warning(request)
-
-        if len(list(self.fdb.list(request))) > 0 and not self.globals.overwrite_fdb:
+        if len(list(self.fdb.list(mars_id))) > 0 and not self.globals.overwrite_fdb:
             logger.debug("Dropping data because it's already in the database.")
-        else:
+            return
+
+        if isinstance(input_message, BytesMessage):
+            bytes = input_message.bytes
+            
+        elif isinstance(input_message, FileMessage):
             assert input_message.metadata.filepath is not None
             with open(input_message.metadata.filepath, "rb") as f:
-                self.fdb.archive_single(f.read(), request)
-                self.fdb.flush()
+                bytes = f.read()
 
-        metadata = self.generate_metadata(input_message, mars_request=input_message.metadata.mars_request)
-        output_msg = FileMessage(metadata=metadata)
+
+        else:
+            raise ValueError(f"Unexpected message type {type(input_message)}")
+        
+        self.fdb.archive_single(bytes, mars_id)
+        self.fdb.flush()
+
+
+        metadata = self.generate_metadata(input_message)
+        output_msg = DataMessage(metadata=metadata)
         yield self.tag_message(output_msg, input_message)
