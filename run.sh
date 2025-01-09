@@ -2,29 +2,20 @@
 export ODC_ENABLE_WRITING_LONG_STRING_CODEC=1
 python -m ionbeam ./config -vvvv \
     --env local \
-    --sources acronet \
-    --die-on-error
-    # --finish-after=2 \
-    # --init-db \
-    # --overwrite-cache 
-    
-    
-        # --finish-after=5 \
-    
-    
+    --sources meteotracker \
+    --die-on-error  \
+    --overwrite-fdb \
+    --init-db 
+        # --overwrite-fdb \
 
+
+
+    # --finish-after=20 
     # --overwrite-cache 
     # --overwrite-fdb
-    # --init-db
-        # --finish-after=3 \
     # --overwrite
-   
-    
-    # --finish-after=3
-    
-    # --env=local   #--overwrite --offline 
-        # --finish-after=5 \
-            # --init-db \
+    # --overwrite --offline 
+
 
 
 # To drop into a debugger on error, enable the -simple-output option first

@@ -1,11 +1,8 @@
-import pandas as pd
 import dataclasses
-from typing import Iterable
-import zipfile
-
-from ..core.bases import Processor, FileMessage, FinishMessage, TabularMessage
-
 import logging
+from typing import Iterable
+
+from ..core.bases import FinishMessage, Processor, TabularMessage
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +13,7 @@ class TimeSplitter(Processor):
     finish_after: int | None = None
 
     def process(self, input_message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
-        if isinstance(input_message, FinishMessage):
-            return
+
 
         chunks = 0
         for key, chunk in input_message.data.resample(rule = self.granularity, on = "time"):

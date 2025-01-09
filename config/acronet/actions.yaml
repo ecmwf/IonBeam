@@ -14,8 +14,13 @@ actions:
 
   - class: CanonicaliseColumns
     mappings: !include mappings.yaml
-
-  - class: AddAcronetMetadata
+    move_to_front:
+      - station_id
+      - station_name
+      - author
+      - datetime
+      - lat
+      - lon
 
   - class: ComputeDateTime
 
@@ -30,5 +35,6 @@ actions:
       internal_id: metadata.internal_id
       time: metadata.time
 
+  - class: AddAcronetMetadata
   - class: SimpleODCEncoder
 

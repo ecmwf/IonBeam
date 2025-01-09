@@ -126,8 +126,7 @@ class FDBWriter(Writer):
         return pyfdb.FDB(self.config)
 
     def process(self, input_message: FileMessage | BytesMessage | FinishMessage) -> Iterable[Message]:
-        if isinstance(input_message, FinishMessage):
-            return
+
         
         assert input_message.metadata.mars_id is not None
         mars_id = input_message.metadata.mars_id.as_strings()

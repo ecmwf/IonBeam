@@ -179,8 +179,7 @@ class CSVParser(Parser):
             yield column_name, df[list(self.fixed_column_names) + [column_name]]
 
     def process(self, rawdata: FileMessage | FinishMessage) -> Iterable[TabularMessage]:
-        if isinstance(rawdata, FinishMessage):
-            return
+
 
         if hasattr(rawdata, "data"):
             df = rawdata.data

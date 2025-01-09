@@ -84,8 +84,8 @@ def add_acronet_station_to_metadata_store(db_session, message):
         sensors = [sensor,],
         location = feature.wkt,
         location_feature = to_geojson(feature),
-        earliest_reading = message.data["time"].min(), 
-        latest_reading = message.data["time"].max(),
+        earliest_reading = message.data["datetime"].min(), 
+        latest_reading = message.data["datetime"].max(),
         authors = create_authors_if_necessary(db_session, ["acronet"]),
         extra = {
         }
@@ -107,8 +107,8 @@ def update_acronet_station_in_metadata_store(db_session, message, station):
     station.location_feature = to_geojson(union_geom)
     station.location = union_geom.centroid.wkt
 
-    new_earliest = message.data["time"].min()
-    new_latest = message.data["time"].max()
+    new_earliest = message.data["datetime"].min()
+    new_latest = message.data["datetime"].max()
 
     if station.earliest_reading is None:
         station.earliest_reading = new_earliest
@@ -127,8 +127,7 @@ class AddAcronetMetadata(Parser):
 
 
     def process(self, input_message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
-        if isinstance(input_message, FinishMessage):
-            return
+
         
         station = input_message.metadata.unstructured["station"]
 

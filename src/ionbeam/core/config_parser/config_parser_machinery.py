@@ -351,8 +351,9 @@ def merge_overlay(object, overlay):
     if not is_dataclass(object):
         return overlay if overlay is not MISSING_OVERLAY else object
     
-    for field in fields(object):
-        merged = merge_overlay(getattr(object, field.name), getattr(overlay, field.name, MISSING_OVERLAY))
-        setattr(object, field.name, merged)
+    replacements = {
+        field.name: merge_overlay(getattr(object, field.name), getattr(overlay, field.name, MISSING_OVERLAY))
+        for field in fields(object)
+    }
 
-    return object
+    return dataclasses.replace(object, **replacements)

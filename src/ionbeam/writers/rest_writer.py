@@ -76,8 +76,7 @@ class RESTWriter(Writer):
         
 
     def process(self, input_message: FileMessage | FinishMessage) -> Iterable[Message]:
-        if isinstance(input_message, FinishMessage):
-            return
+
 
         assert input_message.metadata.filepath is not None
 

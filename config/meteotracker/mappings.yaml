@@ -1,23 +1,26 @@
 # See https://app.meteotracker.com/html/api-docs/#numericPoint for mapping
 
-- name: time
+- name: datetime
   key: time
   type: datetime
 
 - name: start_time
   type: datetime
 
-- name: author
-  key: session.author
+- name: external_id
+  key: id
 
 - name: offset_tz
-  key: session.offset_tz
 
-- name: track_id
-  key: session.id
+- name: external_id
+
+- name: author
 
 - name: lat
   unit: EPSG:4326
+
+- name: offset_tz
+  discard: true
 
 - name: lon
   unit: EPSG:4326
@@ -108,5 +111,6 @@
 - name: ozone
   key: O3
   unit: "ppb"
+
 - name: observation_id
   key: _id

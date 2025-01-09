@@ -22,7 +22,7 @@ import pandas as pd
 import pyodc as odc
 from pyodc.codec import select_codec
 
-from ..core.bases import Encoder, FileMessage, FinishMessage, TabularMessage
+from ..core.bases import Encoder, FileMessage, TabularMessage
 from ..core.config_parser.config_parser_machinery import ConfigError
 from ..metadata import id_hash
 
@@ -285,9 +285,8 @@ class ODCEncoder(Encoder):
 
         return output_data
 
-    def encode(self, msg: TabularMessage | FinishMessage) -> Iterable[FileMessage]:
-        if isinstance(msg, FinishMessage):
-            return
+    def encode(self, msg: TabularMessage) -> Iterable[FileMessage]:
+
 
         output_df = self.create_output_df(msg)
         logger.debug(f"Created output dataframe with columns {output_df.columns}")

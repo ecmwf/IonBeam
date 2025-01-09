@@ -11,14 +11,14 @@
 import dataclasses
 import logging
 from collections import defaultdict
-from functools import reduce
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable
 
 import pandas as pd
 
-from ...core.bases import RawVariable, TabularMessage
-from ...core.time import TimeSpan, split_df_into_time_chunks
+from ...core.bases import TabularMessage
+from ...core.time import TimeSpan
 from ..API_sources_base import DataChunk, DataStream, RESTSource
 from .cima import CIMA_API
 
@@ -38,8 +38,10 @@ class AcronetSource(RESTSource):
     source: str = "acronet"
     version = 1
     endpoint = "https://webdrops.cimafoundation.org/app/"
+    maximum_request_size: timedelta = timedelta(minutes = 20)
+    max_time_downloading: timedelta = timedelta(seconds = 5)
 
-    mappings: List[RawVariable] = dataclasses.field(default_factory=list)
+    # mappings: List[RawVariable] = dataclasses.field(default_factory=list)
 
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
@@ -78,6 +80,15 @@ class AcronetSource(RESTSource):
         r.raise_for_status()
         json = r.json()
 
+        times = set(datetime.strptime(t, "%Y%m%d%H%M")
+                            for readings in json
+                            for t in readings["timeline"])
+
+        time_span = TimeSpan(
+            start = min(times).replace(tzinfo=UTC),
+            end = max(times).replace(tzinfo=UTC),
+        )
+
         return DataChunk(
             source=data_stream.source,
             key = data_stream.key,
@@ -87,18 +98,32 @@ class AcronetSource(RESTSource):
             data = None,
         )
 
-    def emit_messages(self, relevant_chunks, time_spans: list[TimeSpan]) -> Iterable[TabularMessage]:
+    def emit_messages(self, relevant_chunks : Iterable[DataChunk], time_span: TimeSpan) -> Iterable[TabularMessage]:
         data_by_sensor_id = defaultdict(lambda : defaultdict(list))
+        
         # Go through all the returned data group it by sensor_id
+        relevant_chunks = list(relevant_chunks)
+        logger.debug(f"Processing {len(relevant_chunks)} chunks")
         for chunk in relevant_chunks:
             for data in chunk.json:
                 if data["sensorId"] not in self.sensor_id_to_station:
                     continue
                 
                 sensor_id = data["sensorId"]
-                data_by_sensor_id[sensor_id]["values"].extend(data["values"])
-                data_by_sensor_id[sensor_id]["timeline"].extend(data["timeline"])
+                for time, value in zip(data["timeline"], data["values"]):
+                    # Filter out NaN values
+                    if value < -9000:
+                        continue
 
+                    if not time_span.start <= datetime.strptime(time, "%Y%m%d%H%M").replace(tzinfo=UTC) < time_span.end:
+                        continue
+
+                    data_by_sensor_id[sensor_id]["values"].append(value)
+                    data_by_sensor_id[sensor_id]["timeline"].append(time)
+
+        del relevant_chunks
+
+        logger.debug("Regrouping data by station")
         # Regroup the data by station
         data_by_station = defaultdict(list)
         for sensor_id, data in data_by_sensor_id.items():
@@ -112,7 +137,9 @@ class AcronetSource(RESTSource):
             new_data["timeline"] = data["timeline"]
             data_by_station[station_name].append(new_data)
         
+        logger.debug("Making dataframes")
         station_dfs = self.make_dataframes(data_by_station)
+        del data_by_station
         
         for station_name, df in station_dfs.items():
             station = self.api.stations[station_name]
@@ -122,49 +149,34 @@ class AcronetSource(RESTSource):
                             author = "acronet",
                         )
 
-            for time_span, df_chunk in split_df_into_time_chunks(df, time_spans):
-                yield TabularMessage(
-                    metadata=self.generate_metadata(
-                        time_span=time_span,
-                        unstructured=metadata,
-                    ),
-                    data=df_chunk,
-                )
+
+            yield TabularMessage(
+                metadata=self.generate_metadata(
+                    time_span=time_span,
+                    unstructured=metadata,
+                ),
+                data=df,
+            )
+            # break
 
 
-    
     def make_dataframes(self, data_by_station: dict) -> dict[str, pd.DataFrame]:
         station_dfs = {}
+
         for station_name, data in data_by_station.items():
-            sensor_dfs = []
+            by_time = defaultdict(lambda: {"time": None})
             for d in data:
                 col_name = f"{d['sensor_class']} [{d['sensor_unit']}]"
-                
-                single_df = pd.DataFrame({
-                    col_name : d["values"],
-                    "time": pd.to_datetime(d["timeline"], format="%Y%m%d%H%M", utc = True),
-                })
+                for time, value in zip(d["timeline"], d["values"]):
+                    by_time[time]["time"] = time
+                    by_time[time][col_name] = value
 
-                # Values below -9000 (specifically -9998.0 but somehow sometimes others?)
-                # are used as a NaN sentinel value by Acronet
-                # Filter these rows out
-                single_df = single_df[single_df[col_name] != -9998.0]
-                single_df = single_df[~single_df[col_name].isnull()]
-                
-                # If this sensor has any data
-                if not single_df[col_name].isnull().all():
-                    sensor_dfs.append(single_df)
-
-            # If this station has at least one sensor with data
-            if sensor_dfs:
-                df = reduce(
-                    lambda left, right: pd.merge(left, right, on=["time"], how="outer"),
-                    sensor_dfs
-                )
-                # df["station_id"] =  self.api.stations[station_name].id
-                # df["station_name"] = station_name
-                # df["author"] = "acronet"
-                # df["lat"] = 
-                
+            # Merge all sensor data for the station
+            if by_time:
+                df = pd.DataFrame.from_records(list(by_time.values()))
+                df["time"] = pd.to_datetime(df["time"], format="%Y%m%d%H%M", utc = True)
+                df = df.sort_values("time").reset_index(drop=True)
                 station_dfs[station_name] = df
+
+
         return station_dfs

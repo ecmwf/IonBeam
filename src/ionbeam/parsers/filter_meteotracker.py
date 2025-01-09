@@ -31,8 +31,7 @@ class FilterMeteoTracker(Parser):
 
 
     def process(self, input_message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
-        if isinstance(input_message, FinishMessage):
-            return
+
 
         external_id = input_message.metadata.unstructured["session"]["id"]
 
@@ -59,8 +58,7 @@ class MeteoTrackerMarkIngested(Parser):
 
 
     def process(self, input_message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
-        if isinstance(input_message, FinishMessage):
-            return
+
 
         external_id = input_message.metadata.mars_request["external_id"].value
 

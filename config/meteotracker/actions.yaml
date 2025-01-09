@@ -1,13 +1,10 @@
 actions:
-  - class: MeteoTrackerSource #Can use either MeteoTrackerOfflineSource or MeteoTrackerSource
+  - class: MeteoTrackerSource
     metadata:
       source: meteotracker
-    cache_directory: inputs/meteotracker
+
     mappings: !include mappings.yaml
-    copy_metadata_to_columns:
-      -  author
-      -  offset_tz
-      -  track_id
+    cache_directory: cache/meteotracker
 
     # wkt_bounding_polygon: "POLYGON ((7.008125020793557 45.56326584931264, 7.008125020793557 38.29891947585193, 10.582293217633804 38.29891947585193, 10.582293217633804 45.56326584931264, 7.008125020793557 45.56326584931264))"
     author_patterns:
@@ -31,24 +28,31 @@ actions:
       Jerusalem:
           jerusalem_living_lab_{}: range(1,16)
 
-  # - class: FilterMeteoTracker
-  
-  - class: CSVParser
-    mappings: !include mappings.yaml
-    identifying_keys:
-      -  time
+  - class: ExtractMetaData
+    copy_metadata_to_columns:
+      author: author
 
-    metadata_keys:
+  - class: CanonicaliseColumns
+    mappings: !include mappings.yaml
+    move_to_front:
+      - datetime
+      -  external_id
       -  author
-      -  offset_tz
-      -  track_id
       -  lat
       -  lon
-      -  air_pressure_near_surface
 
-  - class: ODCEncoder
-    split_data_columns: False
-    output: outputs/{source}/odb/by_id/{external_id}.odb
-    MARS_keys: !include MARS_keys.yaml
+  - class: ComputeDateTime
 
-  # - class: MeteoTrackerMarkIngested
+  - class: ComputeMARSIdentifier
+    lookup:
+      class: const.rd
+      expver: const.xxxx
+      stream: const.lwda
+      aggregation_type: const.tracked
+      platform: const.meteotracker
+      date: metadata.date
+      internal_id: metadata.internal_id
+      time: metadata.time
+
+  - class: AddMeteotrackerMetadata
+  - class: SimpleODCEncoder

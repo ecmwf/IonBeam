@@ -13,7 +13,7 @@ import logging
 from typing import Iterable
 
 from ..core.aviso import send_aviso_notification
-from ..core.bases import FileMessage, FinishMessage, Message, Writer
+from ..core.bases import FileMessage, Message, Writer
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +27,9 @@ class AVISONotifier(Writer):
         super().init(globals, **kwargs)
         self.metadata = dataclasses.replace(self.metadata, state="aviso_notified")
 
-    def process(self, message: FileMessage | FinishMessage) -> Iterable[Message]:
-        if isinstance(message, FinishMessage):
-            return
-
+    def process(self, message: FileMessage) -> Iterable[Message]:
         request = {"database": "fdbdev", "class": "rd"}
-        request |= message.metadata.mars_request.as_strings()
+        request |= message.metadata.mars_id.as_strings()
 
         # Send a notification to AVISO that we put this data into the DB
         logger.debug(f"Sending to aviso {request}")
@@ -40,8 +37,8 @@ class AVISONotifier(Writer):
         logger.debug(f"Aviso response {response}")
 
         # TODO: the explicit mars_keys should not be necessary here.
-        metadata = self.generate_metadata(message, mars_request=message.metadata.mars_request)
+        metadata = self.generate_metadata(message, mars_id=message.metadata.mars_id)
         output_msg = FileMessage(metadata=metadata)
 
-        assert output_msg.metadata.mars_request is not None
+        assert output_msg.metadata.mars_id is not None
         yield self.tag_message(output_msg, message)

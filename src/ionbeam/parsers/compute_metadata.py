@@ -1,7 +1,8 @@
 import dataclasses
 from typing import Iterable
 
-from ..core.bases import FinishMessage, Parser, TabularMessage
+from ..core.bases import Parser, TabularMessage
+from ..metadata import id_hash
 
 
 def parse_key(message, key):
@@ -26,8 +27,7 @@ class ComputeDateTime(Parser):
 
 
     def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
-        if isinstance(msg, FinishMessage):
-            return
+
         
         assert msg.metadata.time_span is not None
 
@@ -46,8 +46,7 @@ class ComputeMARSIdentifier(Parser):
 
 
     def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
-        if isinstance(msg, FinishMessage):
-            return
+
         
         assert msg.metadata.time_span is not None
 
@@ -60,5 +59,13 @@ class ComputeMARSIdentifier(Parser):
         metadata = self.generate_metadata(msg)
         metadata.mars_id = mars_request
 
+        output_msg = TabularMessage(data=msg.data, metadata=metadata)
+        yield self.tag_message(output_msg, msg)
+
+@dataclasses.dataclass
+class ComputeInternalID(Parser):
+    def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
+        metadata = self.generate_metadata(msg)
+        metadata.internal_id = id_hash(metadata.external_id)
         output_msg = TabularMessage(data=msg.data, metadata=metadata)
         yield self.tag_message(output_msg, msg)

@@ -1,11 +1,11 @@
-import pandas as pd
 import dataclasses
-from typing import Iterable
-import zipfile
-
-from ..core.bases import Processor, FileMessage, FinishMessage, TabularMessage
-
 import logging
+import zipfile
+from typing import Iterable
+
+import pandas as pd
+
+from ..core.bases import FileMessage, FinishMessage, Processor, TabularMessage
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +18,7 @@ class CSVChunker(Processor):
 
     def process(self, input_message: FileMessage | FinishMessage) -> Iterable[TabularMessage]:
         logger.debug(f"CSV Chunker got {input_message}")
-        if isinstance(input_message, FinishMessage):
-            return
+
         assert input_message.metadata.filepath is not None
 
         chunks = 0

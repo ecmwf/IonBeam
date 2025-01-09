@@ -7,7 +7,7 @@ from typing import Iterable, Self
 import pandas as pd
 
 
-@dataclass
+@dataclass(eq=True, frozen=True)
 class TimeSpan:
     start: datetime
     end: datetime
@@ -23,13 +23,31 @@ class TimeSpan:
         
     @classmethod
     def parse(cls, value: dict[str, str]) -> Self:
+        """
+        Takes a dict of the form: {start : python expression involving datetime and timedelta, end : ...} and outputs a time span
+        """
         def f(s): return eval(
                     s, dict(datetime=datetime, timedelta=timedelta, timezone=timezone)
                 )
         return cls(f(value["start"]), f(value["end"]))
     
     @classmethod
+    def from_json(cls, value: dict[str, str]) -> Self:
+        """
+        Takes a dict of the form: {start : isodatetime, end : isodatetime} and outputs a time span
+        """
+        f = datetime.fromisoformat
+        return cls(f(value["start"]), f(value["end"]))
+    
+    def to_json(self) -> dict[str, str]:
+        """
+        Outputs a dict of the form: {start : isoformat, end : isoformat}
+        """
+        return {"start": self.start.isoformat(), "end": self.end.isoformat()}
+    
+    @classmethod
     def last(cls, days=0, seconds=0, microseconds=0, milliseconds=0, minutes=0, hours=0, weeks=0):
+        "Return a time span that ends now and starts the given time before now i.e TimeSpan.last(days=1) returns the last 24 hours"
         now = datetime.now(UTC)
         delta = timedelta(
                 days=days,
@@ -40,6 +58,7 @@ class TimeSpan:
         return cls(now - delta, now)
         
     def delta(self) -> timedelta:
+        """Return the duration of the time span as a timedelta"""
         return self.end - self.start
         
     def remove(self, coverage: list[Self]) -> list[Self]:

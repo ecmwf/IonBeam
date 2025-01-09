@@ -14,7 +14,7 @@ globals:
   fdb_schema_path: config/schema
   metkit_language_template: config/language.yaml.template
   custom_mars_keys: ["platform", "observation_variable", "external_id","internal_id", "aggregation_type"]
-
+  echo_sql_commands: false
 
   # Whether sources should attempt to access external services or just use locally cached data
   # Can be overridden at the command line
@@ -25,16 +25,12 @@ globals:
  # Global constants that override things in the sources and timeaggregator
   ingestion_time_constants:
     query_timespan: 
-      start: datetime.now(tz=timezone.utc) - timedelta(minutes = 120)
-      end: datetime.now(tz=timezone.utc) - timedelta(minutes = 10)
-
-    process_timespan: 
-      start: datetime.now(tz=timezone.utc) - timedelta(minutes = 20)
+      start: datetime.now(tz=timezone.utc) - timedelta(hours = 5)
       end: datetime.now(tz=timezone.utc) - timedelta(minutes = 10)
 
     # How big a data granule should be
     granularity:
-      minutes: 5
+      minutes: 20
 
     # In what direction the time aggregator expects data to arrive. 
     time_direction: forwards

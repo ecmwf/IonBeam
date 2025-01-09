@@ -9,7 +9,7 @@
 #
 
 from .canonicalise import CanonicaliseColumns
-from .compute_mars_id import ComputeDateTime, ComputeMARSIdentifier
+from .compute_metadata import ComputeDateTime, ComputeInternalID, ComputeMARSIdentifier
 from .csv import CSVParser
 from .csv_file_chunker import CSVChunker
 from .drop_empty import DropEmpty

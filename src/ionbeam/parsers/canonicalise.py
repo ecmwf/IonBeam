@@ -50,6 +50,7 @@ class CanonicaliseColumns(Parser):
 
     """
     mappings: Mappings
+    move_to_front: list[str] = dataclasses.field(default_factory=list)
 
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
@@ -75,7 +76,7 @@ class CanonicaliseColumns(Parser):
             # Find the canonical variable that corresponds to each mapping
             try:
                 mapping.canonical_variable = self.canonical_variables[mapping.name]
-            except ValueError:
+            except KeyError:
                 all = [col for col in self.mappings if col.name not in self.canonical_variables]
                 yaml = "".join(
                     f'- name: {col.name}\n  unit: "{col.unit}"\n\n' if col.unit else f"- name: {col.name}\n\n"
@@ -126,10 +127,14 @@ class CanonicaliseColumns(Parser):
 
         # Check all the columns are actually mapped
         for col in df.columns:
-            if col not in self.known_mappings and col not in self.canonical_variables:
+            if col not in self.known_mappings:
                 did_you_mean = sorted(self.known_mappings.keys(), key=lambda c: Levenshtein.ratio(col, c))[:3]
                 raise ValueError(f"{col} not in CanonicaliseColumns mappings! Did you mean {did_you_mean}?")
 
+        # Remove columns that are marked as discard
+        for col in df.columns:
+            if self.known_mappings[col].discard:
+                del df[col]
 
         # Do the type conversions
         df = df.astype(dtype = {col : self.known_mappings[col].canonical_variable.dtype for col in df.columns},
@@ -141,24 +146,31 @@ class CanonicaliseColumns(Parser):
 
         # Rename the columns
         df.rename(columns=self.rename_dict, inplace=True)
+
+        # reorder the columns
+        for col_name in self.move_to_front[::-1]:
+            if col_name not in df.columns: 
+                continue
+            col = df.pop(col_name)
+            df.insert(0, col_name, col)
         
         return df, {c : self.canonical_variables[c] for c in df.columns}
 
 
     def process(self, rawdata: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
-        if isinstance(rawdata, FinishMessage):
-            return
+
 
         df, column_metadata = self.format_dataframe(rawdata.data)
 
         metadata = self.generate_metadata(
             message=rawdata,
+            columns=column_metadata,
         )
 
         output_msg = TabularMessage(
             metadata=metadata,
-            columns=column_metadata,
             data=df,
         )
+
 
         yield self.tag_message(output_msg, rawdata)

@@ -2,7 +2,7 @@ import dataclasses
 import logging
 from typing import Iterable
 
-from ..core.bases import FinishMessage, Processor, TabularMessage
+from ..core.bases import Processor, TabularMessage
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +20,6 @@ class QualityControl(Processor):
         self.metadata = dataclasses.replace(self.metadata, state="quality_controlled")
 
     def process(self, incoming_message: TabularMessage) -> Iterable[TabularMessage]:
-        # Stop everything and just return!
-        if isinstance(incoming_message, FinishMessage):
-            return
-
         # modify the csv data of the message
         new_data = incoming_message.data
         new_data["P1"] = 100

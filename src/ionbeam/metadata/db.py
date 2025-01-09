@@ -218,12 +218,14 @@ class Station(Base):
             location_feature.bounds
         )  # Optional bbox, see https://datatracker.ietf.org/doc/html/rfc7946#section-5
 
+        location = to_shape(self.location).centroid
+
         d.update(
-            location=tuple(to_shape(self.location).coords)[0],
-            time_span=[
-                self.earliest_reading.isoformat() + "Z",
-                self.latest_reading.isoformat() + "Z",
-            ],
+            location= {"lat" : location.y, "lon" : location.x},
+            time_span={
+                "start" : self.earliest_reading.isoformat() + "Z",
+                "end" : self.latest_reading.isoformat() + "Z",
+            },
             authors=[a.as_json() for a in self.authors],
         )
 
@@ -269,6 +271,7 @@ def init_db(globals):
 
     # Clear out all the tables and recreate them
     logger.warning("Deleting all SQL tables")
+    db_engine.dispose()
     Base.metadata.drop_all(db_engine)
        
     logger.warning("Running CREATE EXTENSION IF NOT EXISTS postgis;")
@@ -313,13 +316,13 @@ def init_db(globals):
         session.commit()
 
 
-def create_sql_engine(**kwargs):
+def create_sql_engine(echo = False, **kwargs):
     engine = create_engine(
         URL.create("postgresql+psycopg2", database="postgres", **kwargs),
         connect_args={
             "options": "-c timezone=utc"
         },  # Tell postgres to return all dates in UTC
-        echo=False,
+        echo=echo,
     )
 
     return engine

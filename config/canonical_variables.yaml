@@ -12,9 +12,9 @@
   dtype: object
   desc: The name of the sensor that made the observation.
 
-- name: time
+- name: datetime
   dtype: datetime64[ns, UTC]
-  desc: The time that the observation was made.
+  desc: The date and time that the observation was made.
 
 - name: start_time
   dtype: datetime64[ns, UTC]
@@ -71,6 +71,10 @@
   desc: A unique identifer for a stationary sensor.
   dtype: object
 
+- name: external_id
+  desc: The identifier used by the observation source.
+  dtype: object
+
 - name: air_temperature_near_surface
   unit: K
 
@@ -113,18 +117,12 @@
 - name: wind_speed_near_surface
   unit: "m/s"
 
-- name: rain
+- name: rainfall
   unit: "mm"
 
 - name: wind_direction
   unit: "Degrees"
 
-- name: anemometer
-  unit: "m/s"
-
-
-- name: radiometer
-  unit: "W/m^2"
 - name: battery_level
   unit: "V"
 
@@ -137,6 +135,9 @@
 
 - name: signal_strength
   unit: "CSQ"
+
+- name: solar_radiation
+  unit: "W/m^2"
 
 - name: solar_radiation_index
   unit: 1

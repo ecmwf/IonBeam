@@ -53,6 +53,8 @@ class MetaData:
     mars_id: MARSRequest = dataclasses.field(default_factory=MARSRequest)
     unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
 
+    columns: dict[str, "CanonicalVariable"] = dataclasses.field(default_factory=dict, kw_only=True)
+
     internal_id: str | None = None
     external_id: str | None = None
 
@@ -106,7 +108,6 @@ class DataMessage(Message):
 @dataclass
 class TabularMessage(DataMessage):
     data: pandas.DataFrame
-    columns: dict[str, "CanonicalVariable"] = dataclasses.field(default_factory=dict, kw_only=True)
 
 
 @dataclass
@@ -164,9 +165,6 @@ class IngestionTimeConstants:
     # The time span of the data to try to download
     query_timespan: Annotated[TimeSpan, "custom_init"]
 
-    # The timespan of data to emit messages for into the piplines
-    process_timespan: Annotated[TimeSpan, "custom_init"]
-
     # What size chunks to use for the emitted messages
     granularity: timedelta
 
@@ -188,6 +186,8 @@ class Globals:
     metkit_language_template: Path | None = None
     fdb_schema_path: Path | None = None
     fdb_root: Path | None = None
+
+    echo_sql_commands: bool = False
 
     secrets_file: Path = Path("secrets.yaml")
 

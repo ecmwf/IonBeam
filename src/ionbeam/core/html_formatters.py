@@ -192,13 +192,13 @@ def message_to_html(message):
     if hasattr(message, "metadata"):
         sections.append(make_section("Metadata", dataclass_to_html(message.metadata), open=True))
 
-    if hasattr(message, "columns") and message.columns:
-        sections.append(
-            make_section(
-                "Column Metadata",
-                column_metadata_to_html(message.columns),
+        if hasattr(message.metadata, "columns") and message.metadata.columns:
+            sections.append(
+                make_section(
+                    "Column Metadata",
+                    column_metadata_to_html(message.metadata.columns),
+                )
             )
-        )
 
     if getattr(message, "history", []):
         sections.append(

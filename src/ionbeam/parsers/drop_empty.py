@@ -12,7 +12,7 @@ import dataclasses
 import logging
 from typing import Iterable
 
-from ..core.bases import FinishMessage, Parser, TabularMessage
+from ..core.bases import Parser, TabularMessage
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +23,7 @@ class DropEmpty(Parser):
 
     """
 
-    def process(self, msg: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
-        if isinstance(msg, FinishMessage):
-            return
-
+    def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
         if len(msg.data) == 0:
             return
         

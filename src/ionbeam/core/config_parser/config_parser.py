@@ -162,6 +162,7 @@ def parse_globals(config_dir: Path, **overrides) -> Config:
         **config.globals.secrets.get("postgres_database", {}),
         host=config.globals.postgres_database["host"],
         port=config.globals.postgres_database["port"],
+        echo = config.globals.echo_sql_commands,
     )
 
     # Parse the global fdb schema file

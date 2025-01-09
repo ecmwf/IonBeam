@@ -1,40 +1,31 @@
+import dataclasses
 import logging
+from typing import Iterable
 
 from shapely import to_geojson
 from shapely.geometry import MultiPoint, box
 from sqlalchemy.orm import Session
 
-from ...metadata import db, id_hash
+from ...core.bases import Parser, TabularMessage
+from ...metadata import db
 
 logger = logging.getLogger(__name__)
 
-def get_db_properties(mt_source, session, keys):
+def get_db_properties(db_session, properties):
     "Given a list of observed property names, extract them from the database and return them as ORM objects"
-    key_to_property= {c.key : c for c in mt_source.mappings}
-    properties = []
-    for property_name in keys:
-        try:
-            property = key_to_property[property_name]
-        except KeyError:
-            logger.warning(f"Could not find variable with key {property_name} in the value_columns of Meteotracker Source")
-            continue
-
-        # Skip if this variable is marked to be discarded
-        if property.discard: continue
-
-        # Lookup the canonical variable in the database        
-        canonical_property = session.query(db.Property).filter_by(name = property.name).one_or_none()
+    for property in properties:
+        canonical_property = db_session.query(db.Property).filter_by(name = property).one_or_none()
 
         if canonical_property is None:
-            raise RuntimeError(f"A Property (canonical variable) with name={property.name!r} does not exist in the database")
+            raise RuntimeError(f"A Property (canonical variable) with name={property} does not exist in the database")
 
-        properties.append(canonical_property)
+        yield canonical_property
 
     return properties
 
-def create_sensor_if_necessary(mt_source, db_session, name, properties):
+def create_sensor_if_necessary(db_session, name, properties):
      # Get all the sensors from the database that correspond to this particular set of properties
-    properties = get_db_properties(mt_source, db_session, properties)
+    properties = list(get_db_properties(db_session, properties))
 
     # Find all the sensors that contain all of the above properties
     candidates = db_session.query(db.Sensor).filter(*(db.Sensor.properties.contains(p) for p in properties)).all()
@@ -68,38 +59,55 @@ def create_authors_if_necessary(db_session, authors):
         ORM_authors.append(author)
     return ORM_authors
 
-def add_meteotracker_track_to_metadata_store(mt_source, mt_session, data):
-    with Session(mt_source.globals.sql_engine) as db_session:
-        track = db_session.query(db.Station).where(db.Station.external_id == mt_session.id).one_or_none()
-        if track:
-            logger.info(f"Track with external_id == {mt_session.id} already in the database {track.ingested = }")
-            return True, track
+def add_meteotracker_track_to_metadata_store(db_session, msg):
+    track = db_session.query(db.Station).where(db.Station.internal_id == msg.metadata.internal_id).one_or_none()
+    if track:
+        logger.info(f"Track with {db.Station.internal_id = } already in the database.")
+        return True, track
 
-        sensor = create_sensor_if_necessary(mt_source, db_session, properties = data.columns, name = "Meteotracker Sensor")
+    sensor = create_sensor_if_necessary(db_session, properties = msg.data.columns, name = "Meteotracker Sensor")
 
-        # Convert the lat lon to shapely object can calculate the bbox
-        feature = MultiPoint(data[["lon", "lat"]].values) 
-        bbox = box(*feature.bounds)
+    # Convert the lat lon to shapely object can calculate the bbox
+    feature = MultiPoint(msg.data[["lon", "lat"]].values) 
+    bbox = box(*feature.bounds)
+    
+    track = db.Station(
+        external_id = msg.metadata.internal_id,
+        internal_id = msg.metadata.external_id,
+        platform = "meteotracker",
+        name = "MeteoTracker Track",
+        description = "A MeteoTracker Track.",
+        sensors = [sensor,],
+        location = bbox.centroid.wkt,
+        location_feature = to_geojson(bbox),
+        earliest_reading = msg.data["datetime"].min(), 
+        latest_reading = msg.data["datetime"].max(),
+        authors = create_authors_if_necessary(db_session, ["meteotracker", msg.metadata.author]),
+        extra = {
+        }
+    )
+
+    db_session.add(track)
+    db_session.commit()
+    logger.info(f"Adding track {track}")
+
+    return False, track
+
+
+@dataclasses.dataclass
+class AddMeteotrackerMetadata(Parser):
+    def process(self, input_message: TabularMessage) -> Iterable[TabularMessage]:
         
-        track = db.Station(
-            external_id = mt_session.id,
-            internal_id = id_hash(mt_session.id),
-            platform = "meteotracker",
-            name = "MeteoTracker Track",
-            description = "A MeteoTracker Track.",
-            sensors = [sensor,],
-            location = bbox.centroid.wkt,
-            location_feature = to_geojson(feature),
-            earliest_reading = data["time"].min(), 
-            latest_reading = data["time"].max(),
-            authors = create_authors_if_necessary(db_session, ["meteotracker", mt_session.author]),
-            extra = {
-            "offset_tz": mt_session.offset_tz,
-            }
+        with Session(self.globals.sql_engine) as db_session:
+            already_there, track = add_meteotracker_track_to_metadata_store(db_session, input_message)
+
+        if already_there:
+            logger.info(f"Meteotracker with {track.external_id = } already in the metadata database. Skipping.")
+            return
+        
+        output_msg = TabularMessage(
+            metadata=input_message.metadata,
+            data=input_message.data,
         )
 
-        db_session.add(track)
-        db_session.commit()
-        logger.info(f"Adding track {track}")
-
-        return False, track
+        yield self.tag_message(output_msg, input_message)

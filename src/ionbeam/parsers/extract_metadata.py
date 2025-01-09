@@ -13,7 +13,6 @@ import logging
 from typing import Iterable
 
 from ..core.bases import (
-    FinishMessage,
     Parser,
     TabularMessage,
 )
@@ -40,10 +39,7 @@ class ExtractMetaData(Parser):
         super().init(globals, **kwargs)
 
 
-    def process(self, message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
-        if isinstance(message, FinishMessage):
-            return
-        
+    def process(self, message: TabularMessage) -> Iterable[TabularMessage]:
         # So we can modify the data without modifying the original message
         message.data = message.data.copy()
         
@@ -70,25 +66,4 @@ class ExtractMetaData(Parser):
         )
 
         yield self.tag_message(output_msg, message)
-
-
-# move to parser
-# # Check that this variable,unit pair is known to us.
-# variable, unit = readings["sensor_key"], normalize("NFKD", sensor["unit"])
-# canonical_form = self.mappings_variable_unit_dict.get((variable, unit))
-
-# # If not emit a warning, though in future this will be a message sent to an operator
-# if canonical_form is None:
-#     logger.warning(
-#         f"Variable ('{variable}', '{unit}') not found in mappings for Smart Citizen Kit\n\n"
-#         f"Sensor: {sensor}\n"
-#     )
-#     continue
-
-# # If this data has been explicitly marked for discarding, silently drop it.
-# if canonical_form.discard:
-#     continue
-
-
-
 

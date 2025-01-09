@@ -11,29 +11,15 @@
 import dataclasses
 import logging
 import os
-from contextlib import contextmanager
+import tempfile
 from typing import Dict, Iterable
 
 # import codc as odc
 import pyodc as odc
 
-from ..core.bases import BytesMessage, Encoder, FinishMessage, TabularMessage
+from ..core.bases import BytesMessage, Encoder, TabularMessage
 
 logger = logging.getLogger(__name__)
-
-# codc wants to write data to something with a file descriptor
-# This is a context manager that creates a pipe and returns the ends as file objects
-@contextmanager
-def Pipe():
-    read_fd, write_fd = os.pipe()
-    try:
-        with os.fdopen(write_fd, 'wb') as fout, os.fdopen(read_fd, 'rb') as fin:
-            yield fout, fin
-    finally:
-        try: os.close(read_fd)
-        except OSError: pass
-        try: os.close(write_fd)
-        except OSError: pass
 
 @dataclasses.dataclass
 class SimpleODCEncoder(Encoder):
@@ -93,8 +79,7 @@ class SimpleODCEncoder(Encoder):
         
 
     def encode(self, msg: TabularMessage) -> Iterable[BytesMessage]:
-        if isinstance(msg, FinishMessage):
-            return
+
         
         odb_file_metadata = self.compute_file_metadata(msg)
 
@@ -105,20 +90,30 @@ class SimpleODCEncoder(Encoder):
                 .dt.tz_convert('UTC') \
                 .dt.strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
 
-        with Pipe() as (write_end, read_end):
-            odc.encode_odb(
-                df,
-                write_end,
-                properties=odb_file_metadata,
-            )
-            write_end.close()
-            payload = read_end.read()
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_filename = temp_file.name
 
-        output_msg = BytesMessage(
-            metadata=self.generate_metadata(
-                msg, 
-                encoded_format="odb", 
-            ),
-            bytes = payload,
-        )
-        yield self.tag_message(output_msg, msg)
+        try:
+            with open(temp_filename, 'wb') as write_end:
+                odc.encode_odb(
+                    df,
+                    write_end,
+                    properties=odb_file_metadata,
+                )
+
+            with open(temp_filename, 'rb') as read_end:
+                payload = read_end.read()
+
+            output_msg = BytesMessage(
+                metadata=self.generate_metadata(
+                    msg,
+                    encoded_format="odb",
+                ),
+                bytes=payload,
+            )
+            yield self.tag_message(output_msg, msg)
+        finally:
+            try:
+                os.remove(temp_filename)
+            except OSError:
+                pass
