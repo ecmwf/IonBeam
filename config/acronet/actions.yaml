@@ -1,40 +1,61 @@
 actions:
   - class: AcronetSource
     mappings: !include mappings.yaml
-
-  - class: DropEmpty
-
-  - class: ExtractMetaData
     copy_metadata_to_columns:
-      station_id: station.id
-      station_name: station.name
-      lat: station.lat
-      lon: station.lon
-      author : author
+      external_station_id: id
+      station_name: name
+      lat: lat
+      lon: lon
+
+  - class: SetConstants
+    set:
+      platform: acronet
+      aggregation_type: chunked
+
+  - class: ComputeStationId
+  - class: ComputeChunkDateTime
 
   - class: CanonicaliseColumns
     mappings: !include mappings.yaml
     move_to_front:
       - station_id
+      - external_station_id
       - station_name
       - author
+      - aggregation_type
+      - chunk_date
+      - platform
+      - chunk_time
       - datetime
       - lat
       - lon
 
-  - class: ComputeDateTime
+  - class: UpdateStationMetadata      
+
+  - class: SplitOnColumnValue
+    column: station_id
+
+  - class: DropNaNColumns
+  - class: DropNaNRows
+  - class: DropEmpty
 
   - class: ComputeMARSIdentifier
     lookup:
       class: const.rd
       expver: const.xxxx
       stream: const.lwda
-      aggregation_type: const.chunked
-      platform: const.acronet
-      date: metadata.date
-      internal_id: metadata.internal_id
-      time: metadata.time
+      aggregation_type: data.aggregation_type
+      platform: data.platform
+      date: data.chunk_date
+      internal_id: data.station_id
+      time: data.chunk_time
+      version: const.1
 
-  - class: AddAcronetMetadata
-  - class: SimpleODCEncoder
+    forward_to_names: ["final_processing"]
+
+      
+
+
+
+
 

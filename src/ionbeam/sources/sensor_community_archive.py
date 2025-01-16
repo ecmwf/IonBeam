@@ -31,7 +31,7 @@ class MultiFileSource(Source):
 
     def __str__(self):
         cls = self.__class__.__name__
-        return f"{cls}({self.path}, source = '{self.metadata.source}')"
+        return f"{cls}({self.path}, source = '{self.set_metadata.source}')"
 
     def generate(self):
         emitted_messages = 0

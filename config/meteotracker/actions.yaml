@@ -1,8 +1,5 @@
 actions:
   - class: MeteoTrackerSource
-    metadata:
-      source: meteotracker
-
     mappings: !include mappings.yaml
     cache_directory: cache/meteotracker
 
@@ -31,28 +28,34 @@ actions:
   - class: ExtractMetaData
     copy_metadata_to_columns:
       author: author
+      living_lab: living_lab
+    copy_to_metadata:
+       external_id: id
 
   - class: CanonicaliseColumns
     mappings: !include mappings.yaml
     move_to_front:
-      - datetime
+      -  datetime
       -  external_id
       -  author
       -  lat
       -  lon
 
-  - class: ComputeDateTime
+  - class: ComputeChunkDateTime
+  - class: ComputeStationId
 
   - class: ComputeMARSIdentifier
     lookup:
       class: const.rd
       expver: const.xxxx
       stream: const.lwda
-      aggregation_type: const.tracked
+      aggregation_type: data.aggregation_type
       platform: const.meteotracker
       date: metadata.date
       internal_id: metadata.internal_id
       time: metadata.time
+      version: const.1
 
   - class: AddMeteotrackerMetadata
-  - class: SimpleODCEncoder
+    forward_to_names: ["final_processing"]
+

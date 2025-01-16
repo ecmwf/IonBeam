@@ -1,3 +1,4 @@
+import json
 import random
 import string
 from dataclasses import fields, is_dataclass
@@ -12,9 +13,12 @@ import pyodc as odc
 def random_id(n):
     return "".join(random.choices(string.hexdigits, k=n))
 
+def json_to_html(d):
+    return f"<pre>{json.dumps(d, indent = 4)}>/pre>"
+    # return JSON(d)
 
-def dataframe_to_html(data: pd.DataFrame, max_colwidth=100, **kwargs):
-    kwargs = dict(index=False, notebook=True, render_links=True, max_rows=20) | kwargs
+def dataframe_to_html(data: pd.DataFrame, max_colwidth=1000, **kwargs) -> str:
+    kwargs = dict(index=False, notebook=True, render_links=True, max_rows=50) | kwargs
 
     with pd.option_context("display.max_colwidth", max_colwidth):
         return data.to_html(**kwargs)
@@ -25,7 +29,7 @@ def dict_to_html(d: dict):
     return dataframe_to_html(df)
 
 
-def dataclass_to_html(dc):
+def dataclass_to_html(dc, exclude = {}, header = True):
     df = pd.DataFrame.from_records(
         [
             dict(
@@ -34,41 +38,74 @@ def dataclass_to_html(dc):
                 value=getattr(dc, field.name),
             )
             for field in fields(dc)
-            if getattr(dc, field.name, None)
+            if field.name not in exclude and getattr(dc, field.name, None)
         ],
     )
-    return dataframe_to_html(df)
+    return dataframe_to_html(df, header=header)
 
 
-def column_metadata_to_html(columns):
+
+def mappings_to_html(mappings):
     df = pd.DataFrame.from_records(
         [
             dict(
-                Name=c.name,
-                Datatype=c.dtype,
-                Unit=c.unit or "",
-                Description=c.desc or "",
+                name = v.name,
+                key = v.key,
+                type = v.type,
+                unit = v.unit,
+                discard = v.discard,
             )
-            for k, c in columns.items()
+            for v in mappings
         ]
     )
     return dataframe_to_html(df)
 
+def column_metadata_to_html(columns: dict, values : dict | None):
+    if not columns:
+        return "<p>No column metadata</p>"
+    example = columns[next(iter(columns))]
 
-def summarise_metadata(m):
-    return ", ".join(
-        str(v) for k in ["source", "observation_variable", "time_span", "encoded_format"] if (v := getattr(m, k))
-    )
+    if example.__class__.__name__ == "CanonicalVariable":
+        df = pd.DataFrame.from_records(
+            [
+                dict(
+                    Name=c.name,
+                    Datatype=c.dtype,
+                    Unit=c.unit or "",
+                    FirstValue=values.get(c.name, "Not present") if values is not None else "",
+                    Description=c.description or "",
+                )
+                for k, c in columns.items()
+            ]
+        )
+        return dataframe_to_html(df)
+    elif example.__class__.__name__ == "RawVariable":
+        df = pd.DataFrame.from_records(
+            [
+                dict(
+                    Name=c.name,
+                    Key=c.key,
+                    Type=c.type,
+                    Unit=c.unit or "",
+                    FirstValue=values.get(c.key, "Not present")  if values is not None else "",
+                    Discard=c.discard,
+                )
+                for k, c in columns.items()
+            ]
+        )
+        return dataframe_to_html(df)
+    else:
+        return f"<p>Unknown column metadata type {columns[0].__class__.__name__}</p>"
+
 
 
 def previous_action_info_to_html(action_info):
     if action_info.message is not None:
         msg_name = action_info.message.name
-        msg_details = summarise_metadata(action_info.message.metadata)
         return f"""
             <li>
                 <details>
-                <summary>{msg_name}({msg_details}) → {action_info.action.name}</summary>
+                <summary>{msg_name} → {action_info.action.name}</summary>
                     Previous Message
                     {dataclass_to_html(action_info.message)}
                     Action
@@ -178,6 +215,53 @@ def summarise_file(filepath: Path):
             size = human_readable_bytes(filepath.stat().st_size)
         return make_section(f"File Data ({size})", data)
 
+css = """
+    <style>
+    #{container_id} summary:hover {{
+            background: var(--jp-rendermime-table-row-hover-background);
+        }}
+
+    #{container_id} summary {{
+        display: list-item !important;
+    }}
+    #{container_id} table.dataframe {{
+        width: 100% !important;
+        table-layout: auto !important;
+    }}
+    #{container_id} td,th {{
+            text-align: left !important;
+        }}
+    #{container_id} h4 {{
+        text-align: center;
+        background-color: black;
+        color: white;
+        padding: 5px;
+        margin: 0px !important;
+    }}
+
+    #{container_id} {{
+        display: inline-flex;
+        flex-direction: column;
+        border: solid black 1px;
+        border-radius: 5px;
+        min-width: 100%;
+        margin-top: 1em;
+        margin-bottom: 1em;
+    }}
+
+    #{inner_container_id} {{
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }}
+
+    details {{
+    margin-left: 1em;
+    }}
+    </style>
+"""
+
 
 def message_to_html(message):
     # Link the CSS and HTML using random ids so that if multiple
@@ -190,15 +274,19 @@ def message_to_html(message):
         sections.append(make_section("Reason", message.reason, open=True))
 
     if hasattr(message, "metadata"):
-        sections.append(make_section("Metadata", dataclass_to_html(message.metadata), open=True))
+        sections.append(make_section("Metadata", dataclass_to_html(message.metadata, exclude = ["columns","unstructured", "mars_id"], header = False), open=True))
 
         if hasattr(message.metadata, "columns") and message.metadata.columns:
             sections.append(
                 make_section(
                     "Column Metadata",
-                    column_metadata_to_html(message.metadata.columns),
+                    column_metadata_to_html(message.metadata.columns, message.data.iloc[0].to_dict() if hasattr(message, "data") else None)
                 )
             )
+
+        if hasattr(message.metadata, "unstructured") and isinstance(message.metadata.unstructured, dict):
+            html = json_to_html(message.metadata.unstructured)
+            sections.append(make_section("Unstructured Metadata", html))
 
     if getattr(message, "history", []):
         sections.append(
@@ -212,13 +300,13 @@ def message_to_html(message):
     if hasattr(message, "data"):
         rows, columns = message.data.shape
         size = human_readable_bytes(message.data.memory_usage().sum())
-        title = f"Tabular Data ({rows} rows x {columns} columns) ({size})"
+        title = f"Data (Pandas DataFrame, {rows} rows x {columns} columns, size: {size})"
         sections.append(make_section(title, dataframe_to_html(message.data)))
 
-    if hasattr(message, "metadata") and getattr(message.metadata, "mars_request", {}):
-        sections.append(make_section("Mars Request", message.metadata.mars_request._repr_html_()))
+    if hasattr(message, "metadata") and getattr(message.metadata, "mars_id", {}):
+        sections.append(make_section("Mars Request", message.metadata.mars_id._repr_html_()))
 
-    if hasattr(message, "metadata") and getattr(message.metadata, "filepath", None) is not None:
+    if hasattr(message, "filepath") and getattr(message, "filepath", None) is not None:
         file_section = summarise_file(message.metadata.filepath)
         if file_section:
             sections.append(file_section)
@@ -231,52 +319,10 @@ def message_to_html(message):
             sections.append(file_section)
 
     newline = "\n"
-    details = f"({summarise_metadata(message.metadata)})" if hasattr(message, "metadata") else ""
     return f"""
-        <style>
-        #{container_id} summary:hover {{
-                background: var(--jp-rendermime-table-row-hover-background);
-            }}
-
-        #{container_id} summary {{
-            display: list-item !important;
-        }}
-        #{container_id} td {{
-                text-align: left !important;
-            }}
-        #{container_id} h4 {{
-            text-align: center;
-            background-color: black;
-            color: white;
-            padding: 5px;
-            margin: 0px !important;
-        }}
-
-        #{container_id} {{
-            display: inline-flex;
-            flex-direction: column;
-            border: solid black 1px;
-            border-radius: 5px;
-            min-width: 100%;
-            margin-top: 1em;
-            margin-bottom: 1em;
-        }}
-
-        #{inner_container_id} {{
-            width: 100%;
-            padding: 10px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }}
-
-        details {{
-        margin-left: 1em;
-        }}
-        </style>
-
+        {css.format(container_id=container_id, inner_container_id=inner_container_id)}
         <div id="{container_id}">
-        <h4>{message.__class__.__name__}{details}</h4>
+        <h4>{type(message).__name__}</h4>
         <div id="{inner_container_id}">
             {newline.join(sections)}
             </div>
@@ -295,6 +341,12 @@ def action_to_html(action, extra_sections=[]):
         value = getattr(action, field.name, None)
         if is_dataclass(value):
             sections.append(make_section(field.name.capitalize(), dataclass_to_html(value)))
+
+        elif field.name == "next" and isinstance(value, list): 
+            upstream_actions = [action.globals.actions_by_id[v] for v in value]
+            attributes.append([field.name, [str(a) for a in upstream_actions]])
+        elif field.name == "mappings":
+            sections.append(make_section("Variable Mappings", mappings_to_html(value)))
         else:
             attributes.append([field.name, value])
 
@@ -306,52 +358,10 @@ def action_to_html(action, extra_sections=[]):
     sections.insert(0, make_section("Attributes", html, open=True))
 
     newline = "\n"
-    details = f"({summarise_metadata(action.metadata)})" if hasattr(action, "metadata") else ""
     return f"""
-        <style>
-        #{container_id} summary:hover {{
-                background: var(--jp-rendermime-table-row-hover-background);
-            }}
-
-        #{container_id} summary {{
-            display: list-item !important;
-        }}
-        #{container_id} td {{
-                text-align: left !important;
-            }}
-        #{container_id} h4 {{
-            text-align: center;
-            background-color: black;
-            color: white;
-            padding: 5px;
-            margin: 0px !important;
-        }}
-
-        #{container_id} {{
-            display: inline-flex;
-            flex-direction: column;
-            border: solid black 1px;
-            border-radius: 5px;
-            min-width: 100%;
-            margin-top: 1em;
-            margin-bottom: 1em;
-        }}
-
-        #{inner_container_id} {{
-            width: 100%;
-            padding: 10px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }}
-
-        details {{
-        margin-left: 1em;
-        }}
-        </style>
-
+        {css.format(container_id=container_id, inner_container_id=inner_container_id)}
         <div id="{container_id}">
-        <h4>{action.__class__.__name__}{details}</h4>
+        <h4>{str(action)}</h4>
         <div id="{inner_container_id}">
             {newline.join(str(s) for s in sections)}
             </div>

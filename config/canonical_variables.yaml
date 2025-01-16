@@ -8,48 +8,72 @@
 # for dtype use object aliases from https://pandas.pydata.org/docs/user_guide/basics.html#basics-dtypes
 # default dtype is float64
 
+- name: platform
+  dtype: object
+  description: The platform that made the observation, e.g. acronet, meteotracker, smart_citizen_kit
+
+- name: aggregation_type
+  dtype: object
+  description: The type of aggregation of the data, e.g. chunked or whole
+
 - name: sensor_name
   dtype: object
-  desc: The name of the sensor that made the observation.
+  description: The name of the sensor that made the observation.
 
 - name: datetime
   dtype: datetime64[ns, UTC]
-  desc: The date and time that the observation was made.
+  description: The date and time that the observation was made.
 
 - name: start_time
   dtype: datetime64[ns, UTC]
-  desc: For chunked data files, the logical begining of the time period of the chunk, possibly rounded.
+  description: For chunked data files, the logical begining of the time period of the chunk, possibly rounded.
   
 - name: offset_tz
-  desc: Uncertain what this means in the Meteotracker data.
+  description: Uncertain what this means in the Meteotracker data.
   dtype: object
 
 - name: lat
   unit: "EPSG:4326"
-  desc: "The lattitude of the observation, referenced to WGS84 (EPSG: 4326)"
+  description: "The lattitude of the observation, referenced to WGS84 (EPSG: 4326)"
 
 - name: lon
   unit: "EPSG:4326"
-  desc: "The longitude of the observation, referenced to WGS84 (EPSG: 4326)"
+  description: "The longitude of the observation, referenced to WGS84 (EPSG: 4326)"
 
 - name: altitude
   unit: "EPSG:4326"
-  desc: "The altitude of the observation, referenced to WGS84 (EPSG: 4326)"
+  description: "The altitude of the observation, referenced to WGS84 (EPSG: 4326)"
 
 - name: author
   dtype: object
-  desc: The author field from the Meteotracker data
+  description: The author field from the Meteotracker data
+
+- name: author_uuid
+  dtype: object
+  description: A uuid for the author from the external data source
+
+- name: chunk_date
+  dtype: object
+  description: The date of the chunk of data in the format YYYYMMDD
+
+- name: chunk_time
+  dtype: object
+  description: The time of the chunk of data in the format HHMM
+
+- name: living_lab
+  dtype: object
+  description: The living lab associated with this data
 
 - name: track_id
-  desc: A unique identifer for a single recorded track from a mobile sensor.
+  description: A unique identifer for a single recorded track from a mobile sensor.
   dtype: object
 
 - name: station_name
-  desc: A human readable name for a station or device. Not necessarily unique.
+  description: A human readable name for a station or device. Not necessarily unique.
   dtype: object
 
 - name: station_id
-  desc: A unique identifer for a station, sensor or device.
+  description: A unique identifer for a station, sensor or device.
   dtype: object
 
 - name: created_at
@@ -67,12 +91,16 @@
 - name: location
   dtype: int
 
+- name: location_exposure
+  dtype: object
+  description: The exposure of the sensor, e.g. indoor, outdoor, roadside.
+
 - name: observation_id
-  desc: A unique identifer for a stationary sensor.
+  description: A unique identifer for a stationary sensor.
   dtype: object
 
-- name: external_id
-  desc: The identifier used by the observation source.
+- name: external_station_id
+  description: The identifier for a station used by the observation source.
   dtype: object
 
 - name: air_temperature_near_surface
@@ -86,10 +114,10 @@
 
 - name: internal_temperature
   unit: K
-  desc: The internal temperature of the sensor.
+  description: The internal temperature of the sensor.
 
 - name: vertical_temperature_gradient
-  desc: 
+  description: 
   unit: "°C/100m"
 
 

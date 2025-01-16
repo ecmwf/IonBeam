@@ -57,7 +57,7 @@ class NewTimeAggregator(Aggregator):
 
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
-        self.metadata = dataclasses.replace(self.metadata, state="time_aggregated")
+        self.set_metadata = dataclasses.replace(self.set_metadata, state="time_aggregated")
 
         if self.globals.ingestion_time_constants is not None:
             self.granularity = self.globals.ingestion_time_constants.granularity
@@ -70,7 +70,7 @@ class NewTimeAggregator(Aggregator):
         data = [m.data for m in bucket]
         print(data)
         return TabularMessage(
-            metadata=self.metadata,
+            metadata=self.set_metadata,
             data=pd.concat(data),
         )
 

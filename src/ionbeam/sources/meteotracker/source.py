@@ -10,7 +10,7 @@
 
 import dataclasses
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, List
 
@@ -19,14 +19,14 @@ import shapely
 
 from ...core.bases import RawVariable, TabularMessage
 from ...core.time import TimeSpan
-from ..API_sources_base import DataChunk, DataStream, RESTSource
-from .meteotracker import MeteoTracker_API, MeteoTracker_API_Error
+from ..API_sources_base import AbstractDataSourceMixin, DataChunk, DataStream, RESTSource
+from .api import MeteoTracker_API, MeteoTracker_API_Error
 
 logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
-class MeteoTrackerSource(RESTSource):
+class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
     """
     The retrieval here works like this:
 
@@ -50,7 +50,7 @@ class MeteoTrackerSource(RESTSource):
     cache_directory: Path = dataclasses.field(default_factory=Path)
     author_patterns: dict[str, dict[str, str]] = dataclasses.field(default_factory=dict)
 
-    maximum_request_size: timedelta = timedelta(hours = 6)
+    maximum_request_size: timedelta = timedelta(days = 10)
     max_time_downloading: timedelta = timedelta(seconds = 10)
     
 
@@ -105,11 +105,13 @@ class MeteoTrackerSource(RESTSource):
                 logger.warning(f"Query_sessions failed for author {author}\n{e}")
                 continue
 
-            if author_sessions:
-                logger.debug(f"Retrieved {len(author_sessions)} sessions for {author=}")
 
 
             for session in author_sessions:
+                # Can for example find tracks for author = 'genova_living_lab_28'  with the search 'genova_living_lab_2'
+                if session.id in sessions:
+                    continue
+
                 logger.debug(f"Retrieved session {session.id} for {author=}")
                 data = self.api.get_session_data(session)
                 data["id"] = session.id
@@ -117,10 +119,12 @@ class MeteoTrackerSource(RESTSource):
 
                 session = dataclasses.asdict(session)
                 session["living_lab"] = living_lab
-                sessions[session["id"]] = session
                 session["start_time"] = session["start_time"].isoformat()
                 session["end_time"] = session["end_time"].isoformat() if session["end_time"] is not None else None
+                sessions[session["id"]] = session
         
+        logger.debug(f"Retrieved {len(sessions)} in total.")
+
         return DataChunk(
             key = "meteotracker:all",
             time_span=time_span,
@@ -130,20 +134,28 @@ class MeteoTrackerSource(RESTSource):
             json=sessions,
             data=all_session_data,
         )
+    
+    def affected_time_spans(self, chunk: DataChunk, granularity: timedelta) -> Iterable[TimeSpan]:
+        assert chunk.source == self.source, f"{chunk.source} != {self.source}"
+        for session_id, session in chunk.json.items():
+            start_time = datetime.fromisoformat(session["start_time"])
+            yield TimeSpan.from_point(start_time, granularity)
 
-    def emit_messages(self, relevant_chunks : Iterable[DataChunk], time_span: TimeSpan) -> Iterable[TabularMessage]:
+    def emit_messages(self, relevant_chunks : Iterable[DataChunk], time_spans: Iterable[TimeSpan]) -> Iterable[TabularMessage]:
+        time_spans = set(time_spans)
         for chunk in relevant_chunks:
             for session_id, session in chunk.json.items():
                 assert chunk.data is not None
+
                 data = chunk.data[chunk.data.id == session_id].copy()
                 data["time"] = pd.to_datetime(data["time"])
 
                 start_time = data["time"].min()
                 end_time = data["time"].max()
-                time_span = TimeSpan(start=start_time, end=end_time)
+                data_time_span = TimeSpan(start=start_time, end=end_time)
 
-                if not (time_span.start <= start_time < time_span.end):
-                    logger.debug(f"Skipping {session_id} because it's not in time span")
+                if not any(start_time in ts for ts in time_spans):
+                    logger.debug(f"Skipping {session_id} with {start_time = } because it's not in any of the time spans")
                     continue
 
                 if not self.in_bounds(data):
@@ -153,7 +165,8 @@ class MeteoTrackerSource(RESTSource):
     
                 yield TabularMessage(
                     metadata=self.generate_metadata(
-                        time_span=time_span,
+                        external_id=session_id,
+                        time_span=data_time_span,
                         unstructured=session,
                     ),
                     data=data,

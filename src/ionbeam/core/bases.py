@@ -13,13 +13,15 @@ import itertools as it
 import re
 import uuid
 from dataclasses import dataclass, fields
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Callable, Iterable, List, Literal, TypeVar
 from unicodedata import normalize
+from uuid import UUID
 
-import pandas
+import pandas as pd
 from sqlalchemy.engine.base import Engine
+from sqlalchemy.orm.session import Session
 
 from .history import (
     ActionInfo,
@@ -50,10 +52,10 @@ class MetaData:
     time_span: TimeSpan | None = None
     encoded_format: str | None = None
     filepath: Path | None = None
-    mars_id: MARSRequest = dataclasses.field(default_factory=MARSRequest)
+    mars_id: MARSRequest | None = None
     unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
 
-    columns: dict[str, "CanonicalVariable"] = dataclasses.field(default_factory=dict, kw_only=True)
+    columns: dict[str, "CanonicalVariable | RawVariable"] = dataclasses.field(default_factory=dict, kw_only=True)
 
     internal_id: str | None = None
     external_id: str | None = None
@@ -71,10 +73,23 @@ class MetaData:
 @dataclass
 class Message:
     "Base Message Class from which FinishMessage and DataMessage inherit"
+    next: List[UUID] | None = dataclasses.field(default=None, kw_only=True)
 
     def _repr_html_(self):
         return message_to_html(self)
-
+    
+    def find_matches(self, actions : dict[UUID, "Processor"]) -> Iterable["Action"]:
+        "Find all the actions that match this message"
+        
+        # Shortcut for simply connecting to the previous action
+        if self.next is not None:
+            for a_id in self.next:
+                yield actions[a_id]
+            return 
+            
+        for a in actions.values():
+            if a.matches(self):
+                yield a
 
 @dataclass
 class FinishMessage(Message):
@@ -97,7 +112,7 @@ class DataMessage(Message):
             "state": "state",
             "src": "source",
             # "obs": "observation_variable",
-            "timeslc": "time_span",
+            # "timeslc": "time_span",
         }.items():
             val = getattr(self.metadata, key, None)
             if val is not None:
@@ -107,22 +122,27 @@ class DataMessage(Message):
 
 @dataclass
 class TabularMessage(DataMessage):
-    data: pandas.DataFrame
+    data: pd.DataFrame
 
 
 @dataclass
 class FileMessage(DataMessage):
-    pass
+    filepath: Path
+    def data_bytes(self):
+        return self.filepath.read_bytes()
 
 @dataclass
 class BytesMessage(DataMessage):
     bytes: bytes
+    def data_bytes(self):
+        return self.bytes
 
 MessageStream = Iterable[Message]
 GenerateFunction = Callable[[], Iterable[Message]]
 ProcessFunction = Callable[[Message], Iterable[Message]]
 
-# used to indicate that a function accepts a subclass of DataMessage and returns that same subclass
+# used to indicate that a function accepts a subclass of X and returns that same subclass
+MessageVar = TypeVar("MessageVar", bound=Message)
 DataMessageVar = TypeVar("DataMessageVar", bound=DataMessage)
 
 
@@ -145,19 +165,25 @@ class CanonicalVariable:
     """
 
     name: str
-    desc: str | None = None
+    description: str | None = None
     unit: str | None = None
     CRS: str | None = None
     dtype: str | None = "float64"
     output: bool = False
+    raw_variable: "RawVariable | None" = None
 
     def __repr__(self):
-        return f"CanonicalVariable(name={self.name!r}, unit={self.unit!r}, desc={self.desc!r})"
+        return f"CanonicalVariable(name={self.name!r}, unit={self.unit!r}, desc={self.description!r})"
 
     def __post_init__(self):
         # Make a best effort to deal with unicode characters that look the same but have different code points
         if self.unit:
             self.unit = normalize("NFKD", self.unit)
+
+    # for compatability with RawVariables, CanonicalVariables have the same key as name
+    @property
+    def key(self):
+        return self.name
 
 
 @dataclass
@@ -191,9 +217,12 @@ class Globals:
 
     secrets_file: Path = Path("secrets.yaml")
 
-    offline: bool = False
+    download: bool = True
+    ingest_to_pipeline : bool = True
     overwrite_fdb: bool = False
-    overwrite_cache: bool = False
+
+    reingest_from: datetime | None = None
+    finish_after: int | None = None
 
     split_data_columns: bool = True
     code_source: CodeSourceInfo | None = None
@@ -204,9 +233,11 @@ class Globals:
     custom_mars_keys: list[str] | None = None
 
     sql_engine: Annotated[Engine, "post_init"] = dataclasses.field(kw_only=True)
+    sql_session: Annotated[Session, "post_init"] = dataclasses.field(kw_only=True)
 
     # When a class hasn't been instantiated yet use a string, see https://peps.python.org/pep-0484/#forward-references
-    actions: dict[uuid.UUID, "Action"] = dataclasses.field(default_factory=dict)
+    actions_by_id: dict[uuid.UUID, "Action"] = dataclasses.field(default_factory=dict)
+    actions_by_name: dict[str, "Action"] = dataclasses.field(default_factory=dict)
 
     def _repr_html_(self):
         return dataclass_to_html(self)
@@ -216,10 +247,18 @@ class Globals:
 class Action:
     "The base class for actions, from which Source and Processor inherit"
 
-    # kw_only is necessary so that classes that inherit from this one can have positional fields
-    metadata: MetaData = dataclasses.field(default_factory=MetaData, kw_only=True)
+    # Unique human readable name
+    name: str | None = dataclasses.field(default = None, kw_only=True)
+
+    # A list of names of actions to forward messages to next
+    forward_to_names: List[str] | None = dataclasses.field(default = None, kw_only=True)
+
+    # Metadata to set on outgoing messages
+    set_metadata: MetaData = dataclasses.field(default_factory=MetaData, kw_only=True)
+
     # code_source: CodeSourceInfo | None = dataclasses.field(default=None, kw_only=True)
     id: uuid.UUID = dataclasses.field(default_factory=uuid.uuid4, kw_only=True)
+    next: List[UUID] | None = dataclasses.field(default=None, kw_only=True)
     globals: Annotated[Globals, "post_init"] = dataclasses.field(kw_only=True)
 
     "Path to the yaml file that defines this action" 
@@ -229,14 +268,14 @@ class Action:
         "Initialise self with access to the global config variables"
         self.globals = globals
         self.definition_path = definition_path
-        self.globals.actions[self.id] = self
-        self.metadata.source_action_id = self.id
+        self.globals.actions_by_id[self.id] = self
+        self.set_metadata.source_action_id = self.id
 
     def _repr_html_(self):
         return action_to_html(self)
 
     def __str__(self):
-        return f"{self.__class__.__name__}"
+        return f"{self.__class__.__name__}(id = ...{str(self.id)[-5:]})"
 
     def resolve_path(
         self, path: str | Path, type: Literal["data", "config"] = "data"
@@ -267,7 +306,7 @@ class Action:
             return {k: v for k, v in d.items() if v is not None and v != {}} 
 
         message_keys = filter_none(message.metadata) if message else {}
-        action_keys = filter_none(self.metadata)
+        action_keys = filter_none(self.set_metadata)
 
         # sources to the right override keys from earlier sources
         keys = message_keys | action_keys | explicit_keys
@@ -275,7 +314,7 @@ class Action:
 
     def tag_message(
         self, msg: DataMessageVar, previous_msg: DataMessage | MessageInfo | None
-    ) -> DataMessageVar:
+    ) -> MessageVar:
         """
         Update the message history, using the current message and the previous message
         If there is no logical previous message, such as when doing TimeAggregation,
@@ -287,11 +326,11 @@ class Action:
             )
         elif isinstance(previous_msg, MessageInfo):
             message = previous_msg
+        elif previous_msg is None:
+            message = None
         else:
-            raise ValueError(
-                f"previous_msg was of type {type(previous_msg)} not DataMessage or MessageInfo"
-            )
-
+            raise ValueError(f"Unknown previous message type {type(previous_msg)}")
+        
         msg.history = (
             previous_msg.history.copy() if isinstance(previous_msg, DataMessage) else []
         )
@@ -303,28 +342,8 @@ class Action:
                 message=message,
             )
         )
+        msg.next = self.next
         return msg
-
-
-@dataclass
-class Source(Action):
-    "An Action which only outputs messages."
-
-    def __post_init__(self):
-        # Set the dafault value of parsed but let it be overridden
-        self.metadata = dataclasses.replace(self.metadata, state="raw")
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        if not hasattr(self, "_generator"):
-            self._generator = iter(self.generate())
-        assert self._generator is not None
-        return next(self._generator)
-
-    def generate(self) -> Iterable[Message]:
-        raise NotImplementedError
 
 
 @dataclass
@@ -383,7 +402,8 @@ class Processor(Action):
             return True
 
         assert isinstance(message, DataMessage)
-        assert self.match is not None
+        if self.match is None:
+            return False
 
         # Fast path for just matching an message from a particular action
         if isinstance(self.match, uuid.UUID):
@@ -405,8 +425,6 @@ class Parser(Processor):
 
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
-        # Set the default value of parsed but let it be overridden
-        self.metadata = dataclasses.replace(self.metadata, state="parsed")
 
 
 class Aggregator(Processor):
@@ -430,7 +448,7 @@ class Encoder(Processor):
         return self.encode(parsed_data)
 
     def __post_init__(self):
-        self.metadata = dataclasses.replace(self.metadata, state="encoded")
+        self.set_metadata = dataclasses.replace(self.set_metadata, state="encoded")
 
 
 @dataclass
@@ -439,7 +457,9 @@ class Writer(Processor):
         raise NotImplementedError("Implement encode() in derived class")
 
     def __post_init__(self):
-        self.metadata = dataclasses.replace(self.metadata, state="written")
+        self.set_metadata = dataclasses.replace(self.set_metadata, state="written")
+
+from ..core.converters import unit_conversions
 
 
 @dataclass
@@ -458,8 +478,11 @@ class RawVariable:
     key: str = "__DEFAULT_TO_NAME__"
     type: str | None = None
     unit: str | None = None
+    description: str | None = None
     discard: bool = False
-    canonical_variable: CanonicalVariable | None = None
+    canonical_variable: Annotated[CanonicalVariable, "post_init"] = dataclasses.field(default=None)
+    converter: Callable[[pd.Series], pd.Series] | None = None
+    metadata: dict = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
         if self.key == "__DEFAULT_TO_NAME__":
@@ -469,10 +492,17 @@ class RawVariable:
         if self.unit:
             self.unit = normalize("NFKD", str(self.unit))
 
+    def make_canonical(self) -> CanonicalVariable:
+        assert self.canonical_variable is not None
+        return dataclasses.replace(
+            self.canonical_variable,
+            raw_variable=self,
+        )
+
 
 class Mappings(list):
     """
-    Implement a custom syntax for lists of InputColumns where input columns that look like this:
+    Implement a custom syntax for lists of RawVariables where input columns that look like this:
     ```
     - name: equivalent_carbon_dioxide
     key:
@@ -504,3 +534,22 @@ class Mappings(list):
                 )
             ]
         )
+
+    def link(self, canonical_variables):
+        canonical_variables = {c.name: c for c in canonical_variables}
+        for col in self:
+            if col.discard: continue
+            try:
+                col.canonical_variable = canonical_variables[col.name]
+            except KeyError:
+                raise ValueError(f"Could not find canonical variable for {col.name}")
+
+            if (col.unit is not None) and (col.unit != col.canonical_variable.unit):
+                try:
+                    self.converter = unit_conversions[
+                                normalize("NFKD", f"{col.unit.strip()} -> {col.canonical_variable.unit.strip()}")
+                            ]
+                except KeyError:
+                        raise ValueError(
+                            f"No unit conversion registered for {col.name}: {col.unit} -> {col.canonical_variable.unit}"
+                        )

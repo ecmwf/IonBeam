@@ -8,6 +8,6 @@
 # # does it submit to any jurisdiction.
 # #
 
-from .cima import CIMA_API, CIMA_API_Error
+from .api import CIMA_API, CIMA_API_Error
 from .metadata import AddAcronetMetadata
 from .source import AcronetSource

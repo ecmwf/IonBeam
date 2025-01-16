@@ -8,5 +8,5 @@
 # does it submit to any jurisdiction.
 #
 
+from .metadata import AddSmartCitizenKitMetadata
 from .source import SmartCitizenKitSource
-__all__ = ["SmartCitizenKitSource"]

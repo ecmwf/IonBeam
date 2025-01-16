@@ -23,7 +23,8 @@ from bs4 import BeautifulSoup
 from requests.exceptions import RequestException
 from tqdm.auto import tqdm
 
-from ..core.bases import FileMessage, Message, Source
+from ..core.bases import FileMessage, Message
+from ..core.source import Source
 
 logger = logging.getLogger(__name__)
 

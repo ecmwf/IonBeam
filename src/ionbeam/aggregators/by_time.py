@@ -184,7 +184,7 @@ class TimeAggregator(Aggregator):
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
         self.bucket_containers: Dict[tuple, BucketContainer] = {}
-        self.metadata = dataclasses.replace(self.metadata, state="time_aggregated")
+        self.set_metadata = dataclasses.replace(self.set_metadata, state="time_aggregated")
 
         if self.globals.ingestion_time_constants is not None:
             self.granularity = self.globals.ingestion_time_constants.granularity

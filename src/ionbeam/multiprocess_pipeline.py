@@ -9,70 +9,91 @@
 # #
 
 import logging
+import multiprocessing
 import sys
-from copy import deepcopy
-from itertools import cycle, islice
+from itertools import chain
+from pathlib import Path
+from queue import Empty, Queue
 from time import time
-from typing import Iterable, Sequence
+from typing import Iterable
 
-from .bases import DataMessage, Globals, Message, MessageStream, Processor
+from .core.bases import FinishMessage, Message, Source
+from .core.config_parser import Config, load_action_from_paths
 
 logger = logging.getLogger(__name__)
 
 
-def roundrobin(iterables: Sequence[MessageStream], finish_after : int | None = None) -> MessageStream:
-    if finish_after is not None:
-        iterables = [islice(it, finish_after) for it in iterables]
+def source_worker(config_path : Path, source_path: Path, source_class : str, out_queue : Queue):
+    logger = logging.getLogger(__name__)
+    config, source = load_action_from_paths(config_path, source_path, source_class)
 
-    pending = len(iterables)
-    nexts = cycle(iter(it).__next__ for it in iterables)
-    while pending:
-        try:
-            for next in nexts:
-                yield next()
-        except StopIteration:
-            pending -= 1
-            nexts = cycle(islice(nexts, pending))
+    try:
+        for msg in source.generate():
+            out_queue.put(msg)
+    except KeyboardInterrupt:
+        pass
 
-def fully_process_message(msg: DataMessage, globals: Globals) -> tuple[list[Message], int]:
+
+def multi_process_sources(config: Config, sources: list[Source]) -> Iterable[Message]:
     """
-    Take a message and keep working on its children until they're all finished.
+    Launch each source in its own subprocess, read from them in a non-blocking
+    manner, and yield messages as they arrive.
     """
-    number_processed = 0
+    processes = []
+    queues = []
+
+    # 1. Create a process & queue for each source
+    for src in sources:
+        q = multiprocessing.Queue()
+        args = (config.globals.source_path, src.definition_path, src.__class__.__name__, q)
+        p = multiprocessing.Process(target=source_worker, args=args)
+        p.start()
+        processes.append(p)
+        queues.append(q)
+
+    # 2. Poll the queues in a loop
+    while queues:
+        finished_queues = []
+        for q in queues:
+            # Attempt to get everything currently in the queue (non-blocking)
+            while True:
+                try:
+                    msg = q.get(timeout = 0.01)
+                except Empty:
+                    break
+
+                # If we see a FinishMessage, that means one source is done
+                if isinstance(msg, FinishMessage):
+                    logger.info(f"Source {msg} exhausted.")
+                    finished_queues.append(q)
+                    break
+                else:
+                    # Yield normal messages
+                    yield msg
+
+        for fq in finished_queues:
+            if fq in queues:
+                queues.remove(fq)
+
+    # 3. Clean up processes
+    for p in processes:
+        p.join()
+
+
+def fully_process_message(msg: Message, actions) -> list[Message]:
     input_messages = [msg]
     finished_messages = []
     while input_messages:
         msg = input_messages.pop()
-        matches = msg.find_matches(globals.actions_by_id)
-
-        for i, action in enumerate(matches):
-            assert isinstance(action, Processor), f"Expected a Processor Action, got {action}"
-
-            # The first action to process the message gets the original message, the rest get a copy.
-            # This speeds up the common case where a message is consumed by only one action.
-            if i > 0: 
-                msg = deepcopy(msg)         
-
-            try:
+        for dest in msg.find_matches(actions):
+            if dest.matches(msg):
                 t0 = time()
-                output_messages = process_message(msg, action)
-
-                if globals.finish_after is not None:
-                    output_messages = islice(output_messages, globals.finish_after)
-
-                input_messages.extend(output_messages)
-                log_message_transmission(logger, msg, action, time() - t0)
-                number_processed += 1
-
-            except Exception as e:
-                logger.warning(f"Failed to process {msg} with {action} with exception {e}")
-                if globals.die_on_error:
-                    raise e
-        if not matches:
-            logger.info(f"{str(msg)} --> Done")
+                input_messages.extend(dest.process(msg))
+                log_message_transmission(logger, msg, dest, time() - t0)
+                matched = True
+        if not matched:
             finished_messages.append(msg)
-
-    return finished_messages, number_processed
+    return finished_messages
 
 def fmt_time(t):
     units = ["s", "ms", "us", "ns"]
@@ -109,24 +130,14 @@ class DummyProgress():
     def add_task(self, *args, **kwargs): pass
     def update(self, *args, **kwargs): pass
 
-def process_message(msg: DataMessage, action: Processor) -> Iterable[DataMessage]:
-    for out_msg in action.process(msg):
-        # Updates the history metadata of the output message
-        assert isinstance(out_msg, DataMessage), f"Expected a DataMessage, got {out_msg}"
-        action.tag_message(out_msg, msg)
-        yield out_msg
 
-
-def singleprocess_pipeline(config, sources, actions, emit_partial: bool, 
+def multiprocess_pipeline(config, sources, actions, emit_partial: bool, 
                            simple_output : bool = False, 
                            die_on_error: bool = False) -> list[Message]:
-    logger.info("Starting single threaded execution...")
-    globals = config.globals
+    logger.info("Starting multiprocess execution...")
 
-    if globals.finish_after is not None:
-        logger.debug(f"Stopping after each action has emitted {globals.finish_after} messages")
-
-    source = roundrobin(sources, globals.finish_after)
+    source = multi_process_sources(config, sources)
+    source = chain(source, [FinishMessage("Sources Exhausted")])
 
     input_messages = []
     finished_messages = []
@@ -166,14 +177,28 @@ def singleprocess_pipeline(config, sources, actions, emit_partial: bool,
 
                 # Pop a message off the queue and process it
                 msg = input_messages.pop()
+                processed_messages += 1
 
-                # Take this message and keep working on the output until they're all fully processed
-                # Doing it in this order helps to catch errors in the processing chain early
-                finished_messages, number_processed = fully_process_message(msg, globals)
-                finished_messages.extend(finished_messages)
-                processed_messages += number_processed
+                # We don't want to send a FinshMessage to the aggregators before all messages have had a chance to get there.
+                if isinstance(msg, FinishMessage):
+                    continue
 
+                # fully_process_message(msg)
+                # If the message doesn't match any actions, we move it to the finished queue.
+                matches = msg.find_matches(globals.actions_by_id)
 
+                for action in matches:                        
+                    try:
+                        t0 = time()
+                        input_messages.extend(action.process(msg))
+                        log_message_transmission(logger, msg, action, time() - t0)
+                    except Exception as e:
+                        logger.warning(f"Failed to process {msg} with {action} with exception {e}")
+                        if die_on_error:
+                            raise e
+                if not matches:
+                    logger.info(f"{str(msg)} --> Done")
+                    finished_messages.append(msg)
 
             # logger.info(f"Finshed messages: {finished_messages}")
             except KeyboardInterrupt:

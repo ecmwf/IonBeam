@@ -21,6 +21,9 @@ class TimeSpan:
         if self.start.tzinfo is not UTC or self.end.tzinfo is not UTC:
             raise ValueError("start and end must be in UTC")
         
+    def union(self, other: Self) -> Self:
+        return type(self)(min(self.start, other.start), max(self.end, other.end))
+    
     @classmethod
     def parse(cls, value: dict[str, str]) -> Self:
         """
@@ -39,7 +42,7 @@ class TimeSpan:
         f = datetime.fromisoformat
         return cls(f(value["start"]), f(value["end"]))
     
-    def to_json(self) -> dict[str, str]:
+    def as_json(self) -> dict[str, str]:
         """
         Outputs a dict of the form: {start : isoformat, end : isoformat}
         """
@@ -102,6 +105,19 @@ class TimeSpan:
         return [type(self)(start = start + (i * size),
                            end  = start + ((i + 1) * size))
                             for i in range(n_points)]
+    @classmethod
+    def from_point(cls, dt: datetime, granularity: timedelta) -> Self:
+        start = round_datetime(dt, round_to = granularity, method="floor")
+        end = start + granularity
+        return cls(start, end)
+    
+
+    def __contains__(self, other: datetime) -> bool:
+        if not isinstance(other, datetime):
+            raise TypeError('Tried to do "o in TimeSpan()" where d was not a datetime object')
+        if not other.tzinfo:
+            raise ValueError('Tried to do "o in TimeSpan()" where o was a naive datetime object')
+        return self.start <= other < self.end
 
 def round_datetime(dt: datetime, round_to: timedelta, method: str = "floor") -> datetime:
     if round_to.total_seconds() <= 0:

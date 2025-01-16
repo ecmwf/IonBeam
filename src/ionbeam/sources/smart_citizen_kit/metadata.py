@@ -1,10 +1,13 @@
+import dataclasses
 import logging
 from datetime import datetime
-from unicodedata import normalize
+from typing import Iterable
 
+from geoalchemy2.shape import from_shape, to_shape
 from shapely.geometry import Point
 from sqlalchemy.orm import Session
 
+from ...core.bases import CanonicalVariable, DataMessage, Mappings, Parser, TabularMessage
 from ...metadata import db, id_hash
 
 logger = logging.getLogger(__name__)
@@ -23,106 +26,127 @@ def construct_sck_authors(session, device):
     ]
 
 
-def construct_sck_sensors(sck_source, session, sensors):
-    key_unit_to_property = {(c.key, c.unit): c for c in sck_source.mappings}
-    db_sensors = {}
-    for s in sensors:
-        m = s["measurement"]
-        property_name = m["name"]
-        unit = normalize("NFKD", s["unit"])
-        # Some of the sck sensors have a hierarchy, that looks like this:
-        #            |-- "DHT11 - Temperature"
-        # - "DHT22" -|
-        #            |-- "DHT11 - Humidity"
-        # This is a little redundant, as the child sensors don't really carry any more information
-        # except the measurement that we extract above
-        if s["ancestry"] is not None:
-            s = sck_source.get_sensor(s["ancestry"])
-
-        # Lookup this name/unit combo in the mappings of the Smart Citizen Kit source
-        # eg "Barometric Pressure", kPa gives us the entry:
-        # - name: air_pressure_near_surface
-        #   key: "Barometric Pressure"
-        #   unit: "kPa"
-        # This tells us the canonical property is called air_pressure_near_surface and the source unit is kPa
-        try:
-            property = key_unit_to_property[(property_name, unit)]
-        except KeyError:
-            logger.warning(
-                f"Could not find variable with key {(property_name, unit)} in the mappings of Smart Citizen Kit source"
-            )
-            continue
-
-        # Skip if this variable is marked to be discarded
-        if property.discard:
+def construct_sck_sensors(session : Session, message : DataMessage):
+    assert message.metadata.columns is not None
+    for canonical_variable in message.metadata.columns.values():
+        assert isinstance(canonical_variable, CanonicalVariable)
+        raw_variable = canonical_variable.raw_variable
+        assert raw_variable is not None
+        
+        if raw_variable.metadata is None or raw_variable.metadata == {}: 
+            logger.warning(f"Skipping raw variable {raw_variable.name} as it has no metadata")
             continue
 
         # Lookup the canonical variable in the database
-        canonical_property = session.query(db.Property).filter_by(name=property.name).one_or_none()
+        db_canonical_variable = session.query(db.Property).filter_by(name=canonical_variable.name).one_or_none()
 
-        if canonical_property is None:
-            raise RuntimeError(
-                f"A Property (canonical variable) with name={property.name!r} does not exist in the database"
+        if db_canonical_variable is None:
+            logger.debug(f"Creating new canonical property {canonical_variable.name} unit = {canonical_variable.unit}")
+            db_canonical_variable = db.Property(
+                name=canonical_variable.name,
+                description=canonical_variable.description,
+                unit=canonical_variable.unit,
             )
+            session.add(db_canonical_variable)
 
-        # We only want to make one DHT22 sensor and append two properties to it
-        if s["name"] in db_sensors:
-            sensor.properties.append(canonical_property)
-        else:
-            sensor = db.Sensor(
-                name=s["name"],
-                description=s["description"],
-                external_id=s["id"],
-                platform="Smart Citizen Kit",
-                url="",
-                properties=[canonical_property],
-            )
+        # logger.debug(f"{raw_variable.metadata = }")
+        sensor = db.Sensor(
+            name=raw_variable.metadata["name"],
+            description=raw_variable.metadata["description"],
+            external_id=raw_variable.metadata["id"],
+            platform="Smart Citizen Kit",
+            url="",
+            properties=[db_canonical_variable],
+        )
 
-            db_sensors[sensor.name] = sensor
         session.add(sensor)
         yield sensor
 
 
-def construct_sck_metadata(sck_source, device, start_date : datetime, end_date : datetime):
+def construct_sck_metadata(
+        db_session : Session, 
+        output_message : DataMessage,
+        device : dict,
+        start_date : datetime, end_date : datetime):
     if device["last_reading_at"] is None:
         logger.warning(f"Skipping device {device['id']} as it has no last_reading_at = None")
         return None
 
-    with Session(sck_source.globals.sql_engine) as session:
-        station = session.query(db.Station).filter_by(external_id=str(device["id"])).one_or_none()
-        if station is not None:
-            # Update station
-            logger.debug("Sck_metadata: Found existing station, updating")
-            station.earliest_reading = min(start_date, station.earliest_reading_utc)
-            station.latest_reading = max(end_date, station.latest_reading_utc)
-            session.add(station)
-            session.commit()
+    station = db_session.query(db.Station).filter_by(external_id=str(device["id"])).one_or_none()
+    if station is not None:
+        # Update station
+        logger.debug("Sck_metadata: Found existing station, updating")
+        feature = Point(device["location"]["longitude"], device["location"]["latitude"])
 
-            return station.as_json()
+        if station.location_feature:
+            union_geom = to_shape(station.location_feature).union(feature)
+        else:
+            union_geom = feature
 
-        # authors = []
-        # sensors = construct_sck_sensors(session, device["sensors"])
-        location_point = Point(device["location"]["longitude"], device["location"]["latitude"])
-        station = db.Station(
+        station.location_feature = from_shape(union_geom)
+        station.location = from_shape(union_geom.centroid)
+
+        station.earliest_reading = min(start_date, station.earliest_reading_utc)
+        station.latest_reading = max(end_date, station.latest_reading_utc)
+        db_session.add(station)
+        return station.as_json()
+
+    location_point = Point(device["location"]["longitude"], device["location"]["latitude"])
+
+    logger.debug(f"{type(location_point.wkt) = }")
+    station = db.Station(
+        external_id=output_message.metadata.external_id,
+        internal_id=output_message.metadata.internal_id,
+        platform="smart_citizen_kit",
+        name=device["name"],
+        description=device["description"],
+        location=from_shape(location_point),
+        location_feature=from_shape(location_point),
+        earliest_reading=start_date,
+        latest_reading=end_date,
+        authors=[],
+        sensors=list(construct_sck_sensors(db_session, output_message)),
+        extra={
+            "uuid": device["uuid"],
+            "system_tags": device["system_tags"],
+            "user_tags": device["user_tags"],
+            "location": device["location"],
+            "hardware": device["hardware"],
+        },
+    )
+    db_session.add(station)
+    return station.as_json()
+
+
+@dataclasses.dataclass
+class AddSmartCitizenKitMetadata(Parser):
+    mappings: Mappings
+    
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
+        self.mappings_variable_unit_dict = {(column.key, column.unit): column for column in self.mappings}
+
+
+    def process(self, input_message: TabularMessage) -> Iterable[TabularMessage]:
+        device = input_message.metadata.unstructured["device"]
+        assert input_message.metadata.time_span is not None
+
+        metadata = self.generate_metadata(
+            message=input_message,
             external_id=device["id"],
             internal_id=id_hash(str(device["id"])),
-            platform="smart_citizen_kit",
-            name=device["name"],
-            description=device["description"],
-            location=location_point.wkt,
-            location_feature=location_point.wkt,
-            earliest_reading=start_date,
-            latest_reading=end_date,
-            authors=[],
-            sensors=list(construct_sck_sensors(sck_source, session, device["data"]["sensors"])),
-            extra={
-                "uuid": device["uuid"],
-                "system_tags": device["system_tags"],
-                "user_tags": device["user_tags"],
-                "location": device["location"],
-                "hardware": device["hardware"],
-            },
         )
-        session.add(station)
-        session.commit()
-        return station.as_json()
+
+        output_msg = TabularMessage(
+            metadata=metadata,
+            data=input_message.data,
+        )
+
+        with self.globals.sql_session.begin() as db_session:
+            construct_sck_metadata(db_session, 
+                                   output_msg,
+                                   device = input_message.metadata.unstructured["device"], 
+                                   start_date = input_message.metadata.time_span.start,
+                                   end_date = input_message.metadata.time_span.end)
+
+        yield output_msg

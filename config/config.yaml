@@ -13,24 +13,25 @@ globals:
   # Files to configure the FDB
   fdb_schema_path: config/schema
   metkit_language_template: config/language.yaml.template
-  custom_mars_keys: ["platform", "observation_variable", "external_id","internal_id", "aggregation_type"]
+  custom_mars_keys: ["platform", "observation_variable", "external_id","internal_id", "aggregation_type", "version"]
   echo_sql_commands: false
 
   # Whether sources should attempt to access external services or just use locally cached data
   # Can be overridden at the command line
-  offline: false
-  overwrite_fdb: false
-  overwrite_cache: false
+  download: true
+  ingest_to_pipeline: true
+  overwrite_fdb: true
+
 
  # Global constants that override things in the sources and timeaggregator
   ingestion_time_constants:
     query_timespan: 
-      start: datetime.now(tz=timezone.utc) - timedelta(hours = 5)
+      start: datetime.now(tz=timezone.utc) - timedelta(minutes = 50)
       end: datetime.now(tz=timezone.utc) - timedelta(minutes = 10)
 
     # How big a data granule should be
     granularity:
-      minutes: 20
+      hours: 1
 
     # In what direction the time aggregator expects data to arrive. 
     time_direction: forwards
@@ -39,12 +40,11 @@ sources:
   # - sensor.community
   - acronet
   - meteotracker
-  #- smart_citizen_kit
+  - smart_citizen_kit
 
 environments:
   local:
     api_hostname: ""
-    overwrite_cache: true
     overwrite_fdb: true
     postgres_database:
       host: localhost
@@ -55,7 +55,6 @@ environments:
     data_path: /media/data/data
     cache_path: /media/data/cache
     api_hostname: ""
-    overwrite_cache: true
     overwrite_fdb: true
     postgres_database:
       host: localhost

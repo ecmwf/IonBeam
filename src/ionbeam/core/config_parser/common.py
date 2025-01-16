@@ -1,5 +1,7 @@
 from uuid import UUID
-from ..bases import Source
+
+from ..source import Source
+
 
 class ConfigError(Exception):
     "Generic error from the config parser."

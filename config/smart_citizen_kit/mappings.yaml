@@ -1,31 +1,22 @@
-- name: time
-  key: time
-
+- name: datetime
 - name: station_name
-  key: device.name
-
 - name: station_id
-  key: station.external_id
-
 - name: author
-  key: device.name
+- name: author_uuid
+- name: created_at
+- name: location_exposure
+
+
+- name: platform
+- name: external_station_id
 
 - name: lat
-  key: device.location.latitude
   unit: EPSG:4326
 
 - name: lon
-  key: device.location.longitude
   unit: EPSG:4326
 
-- name: created_at
-  key: device.created_at 
 
-- name: city
-  key: device.location.city
-
-- name: country
-  key: device.location.country
 
 - name: total_volatile_organic_compounds # device.data.sensors.default_key ## tvoc
   key: TVOC # device.data.sensors.measurement.name ## "AMS CCS811 - TVOC"
@@ -140,9 +131,20 @@
   key: ["Relative Humidity", "h"]
   unit: "%"
 
+- name:
+  key: "ext_h"
+  unit: "%"
+  discard: true
+
 - name: air_temperature_near_surface
   key: ["Air Temperature", "t"]
   unit: "ºC" # Yes, this degree symbol looks weird, this is actually the unicode character known as "MASCULINE ORDINAL INDICATOR", do not ask me why.
+
+- name:
+  key: "ext_t"
+  unit: "oC"
+  discard: true
+
 
 # Don't ingest this data, just assert that is it data we expect to see and are happy to discard
 - name: battery_voltage

@@ -12,13 +12,17 @@
 
 # Note: I've put some imports after the argparse code to make the cmdline usage feel snappier
 import argparse
+import dataclasses
 import logging
 import os
 import pdb
 import shutil
 import sys
 import traceback
+from datetime import datetime
 from pathlib import Path
+
+from .core.singleprocess_pipeline import singleprocess_pipeline
 
 os.environ["ODC_ENABLE_WRITING_LONG_STRING_CODEC"] = "1"
 
@@ -53,9 +57,14 @@ if __name__ == "__main__":
         help="Just parse the config and do nothing else.",
     )
     parser.add_argument(
-        "--offline",
+        "--download",
         action="store_true",
         help="Run in offline mode.",
+    )
+    parser.add_argument(
+        "--ingest-to-pipeline",
+        action="store_true",
+        help="If specified then ingest data into the pipeline.",
     )
     parser.add_argument(
         "--overwrite-fdb",
@@ -111,6 +120,18 @@ if __name__ == "__main__":
         "--die-on-error",
         action="store_true",
         help="Whether to abort on the first exception or keep going.",
+    )
+
+    parser.add_argument(
+        "--reingest_from",
+        help="Date to reingest from",
+        type=datetime.fromisoformat,
+    )
+
+    parser.add_argument(
+        "--download_from",
+        help="Date to download from",
+        type=datetime.fromisoformat,
     )
 
     parser.add_argument(
@@ -171,18 +192,25 @@ if __name__ == "__main__":
     )
     logger = logging.getLogger("CMDLINE")
 
-    from .core.bases import Source
     from .core.config_parser.config_parser import parse_config
+    from .core.source import Source
 
     config, actions = parse_config(
         args.config_folder,
-        offline = args.offline,
+        download = args.download,
+        ingest_to_pipeline = args.ingest_to_pipeline,
         overwrite_fdb = args.overwrite_fdb,
-        overwrite_cache = args.overwrite_cache,
         environment = args.environment,
         sources = args.sources,
         die_on_error = args.die_on_error,
+        reingest_from = args.reingest_from,
+        finish_after = args.finish_after,
     )
+
+    if args.download_from:
+        config.globals.ingestion_time_constants.query_timespan = dataclasses.replace(
+            config.globals.ingestion_time_constants.query_timespan,
+            start = args.download_from)
 
     sources, downstream_actions = [], []
     for action in actions:
@@ -195,9 +223,9 @@ if __name__ == "__main__":
     logger.info(f"    Environment: {config.globals.environment}")
     logger.info(f"    Data Path: {config.globals.data_path}")
     logger.info(f"    Data Path: {config.globals.data_path}")
-    logger.info(f"    Offline: {config.globals.offline}")
+    logger.info(f"    Download: {config.globals.download}")
+    logger.info(f"    Ingest to Pipeline: {config.globals.ingest_to_pipeline}")
     logger.info(f"    Overwrite FDB: {config.globals.overwrite_fdb}")
-    logger.info(f"    Overwrite Cache: {config.globals.overwrite_cache}")
 
     logger.info("Sources")
     for i, a in enumerate(sources):
@@ -237,17 +265,10 @@ if __name__ == "__main__":
         init_db(config.globals)
         logger.warning("SQL Database wiped and reinitialised.")
 
-    if "finish_after" in args:
-        logger.warning(
-            f"Telling all sources to finish after emitting {args.finish_after} messages"
-        )
-        for source in sources:
-            source.finish_after = args.finish_after
-
-    from .core.singleprocess_pipeline import singleprocess_pipeline
 
     try:
         singleprocess_pipeline(
+            config,
             sources,
             downstream_actions,
             emit_partial=args.emit_partial,

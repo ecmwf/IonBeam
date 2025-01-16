@@ -93,4 +93,4 @@ class RESTWriter(Writer):
 
         metadata = self.generate_metadata(input_message, mars_request=input_message.metadata.mars_request)
         output_msg = FileMessage(metadata=metadata)
-        yield self.tag_message(output_msg, input_message)
+        yield output_msg

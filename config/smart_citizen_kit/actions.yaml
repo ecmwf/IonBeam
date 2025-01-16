@@ -1,35 +1,64 @@
 actions:
   - class: SmartCitizenKitSource
-    copy_metadata_to_columns:
-      - station_name
-      - station_id
-      - lat
-      - lon
-      - created_at
-      - city
-      - country
-      - author
-    
-    cache_directory: inputs/smart_citizen_kit
     mappings: !include mappings.yaml # Used to rename things before going into the metadata db
 
-  - class: CSVParser
+    copy_metadata_to_columns:
+      external_station_id: device.id
+      station_name: device.name
+      lat: device.location.latitude
+      lon: device.location.longitude
+      author : device.owner.username
+
+      # To add later
+      # location_exposure: device.location.exposure
+      # author_uuid: device.owner.uuid
+      # external_uuid: device.uuid
+      # station_description: device.description
+      # hardware_name: device.hardware.name
+      # device_created_at: device.created_at
+  
+  - class: SetConstants
+    set:
+      platform: smart_citizen_kit
+      aggregation_type: chunked
+
+  - class: ComputeStationId
+  - class: ComputeChunkDateTime
+
+  - class: CanonicaliseColumns
     mappings: !include mappings.yaml
-    
-    identifying_keys:
-      - time
-      
-    metadata_keys:
-      - station_name
+    move_to_front:
       - station_id
+      - external_station_id
+      - station_name
       - author
+      - aggregation_type
+      - chunk_date
+      - platform
+      - chunk_time
+      - datetime
       - lat
       - lon
-      - created_at
-      - city
-      - country
 
-  - class: ODCEncoder
-    split_data_columns: False
-    output: outputs/{source}/odb/{internal_id}_{start_time}.odb
-    MARS_keys: !include MARS_keys.yaml
+  - class: UpdateStationMetadata
+
+  - class: SplitOnColumnValue
+    column: station_id
+
+  - class: DropNaNColumns
+  - class: DropNaNRows
+  - class: DropEmpty
+
+  - class: ComputeMARSIdentifier
+    lookup:
+      class: const.rd
+      expver: const.xxxx
+      stream: const.lwda
+      aggregation_type: data.aggregation_type
+      platform: data.platform
+      date: data.chunk_date
+      internal_id: data.station_id
+      time: data.chunk_time
+      version: const.1
+
+    forward_to_names: ["final_processing"]

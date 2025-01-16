@@ -2,38 +2,18 @@ import dataclasses
 import logging
 from typing import Iterable
 
-from geoalchemy2.shape import to_shape
-from shapely import to_geojson
+from geoalchemy2.shape import from_shape, to_shape
 from shapely.geometry import Point
 from sqlalchemy.orm import Session
 
-from ...core.bases import (
-    FinishMessage,
-    Parser,
-    TabularMessage,
-)
+from ...core.bases import Action, Parser, TabularMessage
 from ...metadata import db, id_hash
 
 logger = logging.getLogger(__name__)
 
-def get_db_properties(session, keys):
-    "Given a list of observed property names, extract them from the database and return them as ORM objects"
-    properties = []
-    for property_name in keys:
-
-        # Lookup the canonical variable in the database        
-        canonical_property = session.query(db.Property).filter_by(name = property_name).one_or_none()
-
-        if canonical_property is None:
-            raise RuntimeError(f"A Property (canonical variable) with name={property_name!r} does not exist in the database")
-
-        properties.append(canonical_property)
-
-    return properties
-
-def create_sensor_if_necessary(mt_source, db_session, name, properties):
+def create_sensor_if_necessary(source : Action, db_session : Session, name : str, property_names : list[str]):
      # Get all the sensors from the database that correspond to this particular set of properties
-    properties = get_db_properties(db_session, properties)
+    properties = db.get_db_properties(source.globals, db_session, property_names)
 
     # Find all the sensors that contain all of the above properties
     candidates = db_session.query(db.Sensor).filter(*(db.Sensor.properties.contains(p) for p in properties)).all()
@@ -44,7 +24,7 @@ def create_sensor_if_necessary(mt_source, db_session, name, properties):
     assert len(candidates) <= 1
     
     if not candidates:
-        logger.info(f"Constructing a new Acronet sensor object with properties {[p.key for p in properties]}")
+        logger.info(f"Constructing a new Acronet sensor object with properties {[p.name for p in properties]}")
 
         # Construct a new sensor object to put into the database
         sensor = db.Sensor(
@@ -67,10 +47,10 @@ def create_authors_if_necessary(db_session, authors):
         ORM_authors.append(author)
     return ORM_authors
 
-def add_acronet_station_to_metadata_store(db_session, message):
+def add_acronet_station_to_metadata_store(action, db_session, message):
     station = message.metadata.unstructured["station"]
     properties = message.data.columns
-    sensor = create_sensor_if_necessary(station, db_session, properties = properties, name = station["name"])
+    sensor = create_sensor_if_necessary(action, db_session, name = station["name"], property_names = properties, )
 
     # Convert the lat lon to shapely object can calculate the bbox
     feature = Point(station["lon"], station["lat"])
@@ -82,8 +62,8 @@ def add_acronet_station_to_metadata_store(db_session, message):
         name = station["name"],
         description = "An Acronet station",
         sensors = [sensor,],
-        location = feature.wkt,
-        location_feature = to_geojson(feature),
+        location = from_shape(feature, srid=4326),
+        location_feature = from_shape(feature, srid=4326),
         earliest_reading = message.data["datetime"].min(), 
         latest_reading = message.data["datetime"].max(),
         authors = create_authors_if_necessary(db_session, ["acronet"]),
@@ -104,8 +84,8 @@ def update_acronet_station_in_metadata_store(db_session, message, station):
     else:
         union_geom = feature
 
-    station.location_feature = to_geojson(union_geom)
-    station.location = union_geom.centroid.wkt
+    station.location_feature = from_shape(union_geom)
+    station.location = from_shape(union_geom.centroid)
 
     new_earliest = message.data["datetime"].min()
     new_latest = message.data["datetime"].max()
@@ -126,7 +106,7 @@ class AddAcronetMetadata(Parser):
         super().init(globals, **kwargs)
 
 
-    def process(self, input_message: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
+    def process(self, input_message: TabularMessage) -> Iterable[TabularMessage]:
 
         
         station = input_message.metadata.unstructured["station"]
@@ -142,14 +122,13 @@ class AddAcronetMetadata(Parser):
             data=input_message.data,
         )
 
-        with Session(self.globals.sql_engine) as db_session:
+        with self.globals.sql_session.begin() as db_session:
             station = db_session.query(db.Station).where(db.Station.external_id == station["id"]).one_or_none()
             if station is None:
-                station = add_acronet_station_to_metadata_store(db_session, output_msg)
+                station = add_acronet_station_to_metadata_store(self, db_session, output_msg)
             else:
                 update_acronet_station_in_metadata_store(db_session, output_msg, station)
 
             db_session.add(station)
-            db_session.commit()
 
-        yield self.tag_message(output_msg, input_message)
+        yield output_msg

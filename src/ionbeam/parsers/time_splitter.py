@@ -19,7 +19,7 @@ class TimeSplitter(Processor):
         for key, chunk in input_message.data.resample(rule = self.granularity, on = "time"):
             metadata = self.generate_metadata(input_message, filepath=None)
             output_msg = TabularMessage(metadata=metadata, data=chunk)
-            yield self.tag_message(output_msg, input_message)
+            yield output_msg
             chunks += 1
             if self.finish_after is not None and chunks > self.finish_after:
                 break

@@ -19,21 +19,27 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class DropEmpty(Parser):
-    """
-
-    """
-
     def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
         if len(msg.data) == 0:
             return
-        
-        metadata = self.generate_metadata(
-            message=msg,
-        )
+        yield msg
 
-        output_msg = TabularMessage(
-            metadata=metadata,
-            data=msg.data,
-        )
 
-        yield self.tag_message(output_msg, msg)
+@dataclasses.dataclass
+class DropNaNColumns(Parser):
+    def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
+        cols = msg.data.columns
+        msg.data.dropna(axis=1, how='all', inplace=True)
+        dropped = set(cols) - set(msg.data.columns)
+
+        for col in dropped:
+            logger.info(f"Dropped column {col}")
+            msg.metadata.columns.pop(col)
+
+        yield msg
+
+@dataclasses.dataclass
+class DropNaNRows(Parser):
+    def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
+        msg.data.dropna(axis=0, how='all', inplace=True)
+        yield msg

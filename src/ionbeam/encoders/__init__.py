@@ -8,4 +8,4 @@
 # does it submit to any jurisdiction.
 #
 from .odb import ODCEncoder
-from .simple_odb import SimpleODCEncoder
+from .parquet import ParquetEncoder

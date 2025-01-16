@@ -16,6 +16,7 @@ from typing import Annotated, List
 
 # yamlinclude allows us to include one yaml file from another
 import yaml
+from sqlalchemy.orm import sessionmaker
 from yamlinclude import YamlIncludeConstructor
 
 # This line is necessary to automatically find all the subclasses of things like "Encoder"
@@ -91,6 +92,7 @@ def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
     for prev_action, action in it.pairwise(config.actions):
         if action.match is None:
             action.match = prev_action.id
+            prev_action.next = [action.id,]
 
     return config
 
@@ -165,6 +167,8 @@ def parse_globals(config_dir: Path, **overrides) -> Config:
         echo = config.globals.echo_sql_commands,
     )
 
+    config.globals.sql_session = sessionmaker(config.globals.sql_engine)
+
     # Parse the global fdb schema file
     # This is used to validate odb files during encoding and before writing to the fdb
     # It is also used to generate overlays for metkit/odb/marsrequest.yaml and metkit/language.yaml
@@ -214,6 +218,18 @@ def parse_config(config_dir: Path, schema=Config, **overrides):
         sources[name] = source
         actions.extend(source.actions)
 
+
+    for action in actions: 
+        if action.name is not None:
+            if action.name in config.globals.actions_by_name:
+                raise ConfigError(f"Duplicate action name {action.name} in {action.definition_path} and {config.globals.actions_by_name[action.name].definition_path}")
+            
+            config.globals.actions_by_name[action.name] = action
+
+    for action in actions:
+        if action.forward_to_names is not None:
+            action.next = [config.globals.actions_by_name[name].id for name in action.forward_to_names]
+
     config.sources = sources
     return config, actions
 
@@ -249,6 +265,7 @@ def reload_action(config : Config, action : Action) -> tuple[Config, Action]:
     """
     assert action.definition_path is not None, "Cannot reload an action with no yaml source file on disk"
     definition_path = action.definition_path
+    action_id = action.id
 
     logger.debug(f"Reloading {action} from {action.definition_path}")
     config = parse_globals(config.globals.source_path)
@@ -272,6 +289,37 @@ def reload_action(config : Config, action : Action) -> tuple[Config, Action]:
     action_dict = matches[0]
 
     action = parse_config_from_dict(Action, action_dict)
+    action.id = action_id
     action.init(config.globals, definition_path=definition_path)
+
+    return config, action
+
+def load_action_from_paths(config_path : Path, action_path : Path, action_class : str) -> tuple[Config, Action]:
+    """
+    Attempts to hot reload an action.
+    """
+    logger.debug(f"Loading {action_class} from {action_path}")
+    config = parse_globals(config_path)
+
+    # Allow includes from adjacent files
+    YamlIncludeConstructor.add_to_loader_class(
+        loader_class=SafeLineLoader, base_dir=str(action_path.parent)
+    )
+
+    # Load the yaml file that will have multiple actions in it
+    with open(action_path) as f:
+        actions = yaml.load(f, Loader=SafeLineLoader)
+
+    matches = [a for a in actions["actions"] if a["class"] == action_class]
+
+    if len(matches) == 0:
+        raise ConfigError(f"Could not find action {action_class} in {action_path}")
+    elif len(matches) > 1:
+        raise ConfigError(f"Found multiple actions {action_class} in {action_path}, give them ids to disambiguate (TODO implement this)")
+    
+    action_dict = matches[0]
+
+    action = parse_config_from_dict(Action, action_dict)
+    action.init(config.globals, definition_path=action_path)
 
     return config, action

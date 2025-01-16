@@ -16,7 +16,8 @@ from typing import List
 from watchdog.events import PatternMatchingEventHandler
 from watchdog.observers import Observer
 
-from ..core.bases import FileMessage, Source
+from ..core.bases import FileMessage
+from ..core.source import Source
 
 
 @dataclasses.dataclass

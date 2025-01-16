@@ -3,7 +3,8 @@
   type: datetime
 
 - name: author
-- name: station_id
+- name: platform
+- name: external_station_id
 
 - name: start_time
   key: start

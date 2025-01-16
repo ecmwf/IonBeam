@@ -15,12 +15,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
 
 from ...core.bases import TabularMessage
 from ...core.time import TimeSpan
 from ..API_sources_base import DataChunk, DataStream, RESTSource
-from .cima import CIMA_API
+from .api import CIMA_API
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,8 @@ class AcronetSource(RESTSource):
     source: str = "acronet"
     version = 1
     endpoint = "https://webdrops.cimafoundation.org/app/"
-    maximum_request_size: timedelta = timedelta(minutes = 20)
-    max_time_downloading: timedelta = timedelta(seconds = 5)
+    maximum_request_size: timedelta = timedelta(days = 2)
+    max_time_downloading: timedelta = timedelta(seconds = 10)
 
     # mappings: List[RawVariable] = dataclasses.field(default_factory=list)
 
@@ -67,7 +68,7 @@ class AcronetSource(RESTSource):
 
     def download_chunk(self, data_stream: DataStream, time_span: TimeSpan) -> DataChunk:
         sensor_class = data_stream.data
-        logger.debug(f"Downloading all data in timespan for sensor_class = {sensor_class.name}")
+        # logger.debug(f"Downloading all data in timespan for sensor_class = {sensor_class.name}")
         r = self.api.get(
                 self.api.api_url + f"sensors/data/{sensor_class.name}/all",
                 params={
@@ -98,85 +99,78 @@ class AcronetSource(RESTSource):
             data = None,
         )
 
-    def emit_messages(self, relevant_chunks : Iterable[DataChunk], time_span: TimeSpan) -> Iterable[TabularMessage]:
-        data_by_sensor_id = defaultdict(lambda : defaultdict(list))
-        
-        # Go through all the returned data group it by sensor_id
+    def emit_messages(self, relevant_chunks : Iterable[DataChunk], time_spans: Iterable[TimeSpan]) -> Iterable[TabularMessage]:
+        # Go through all the returned data group it by station
+        data_by_station = defaultdict(lambda: defaultdict(list))
+
         relevant_chunks = list(relevant_chunks)
-        logger.debug(f"Processing {len(relevant_chunks)} chunks")
+        t0 = datetime.now()
+
+        columns = {}
+
         for chunk in relevant_chunks:
             for data in chunk.json:
+                # logger.debug(f"Processing data for sensor {data}")
                 if data["sensorId"] not in self.sensor_id_to_station:
                     continue
-                
+
                 sensor_id = data["sensorId"]
-                for time, value in zip(data["timeline"], data["values"]):
-                    # Filter out NaN values
-                    if value < -9000:
-                        continue
+                station_name, sensor_class = self.sensor_id_to_station[sensor_id]
+                sensor = self.api.sensors[sensor_class]
+                
+                column_name = f"{sensor_class} [{sensor.unit}]"
+                
+                values = np.array(data["values"], dtype=float)
+                values[values < -9000] = np.nan  # or None
 
-                    if not time_span.start <= datetime.strptime(time, "%Y%m%d%H%M").replace(tzinfo=UTC) < time_span.end:
-                        continue
+                df = pd.DataFrame({
+                    "datetime": pd.to_datetime(data["timeline"], format="%Y%m%d%H%M", utc = True),
+                    column_name: values,
+                }).set_index("datetime")
 
-                    data_by_sensor_id[sensor_id]["values"].append(value)
-                    data_by_sensor_id[sensor_id]["timeline"].append(time)
+                data_by_station[station_name][column_name].append(df)
 
-        del relevant_chunks
+        logger.debug(f"Acronet processed {len(relevant_chunks)} chunks in {datetime.now() - t0}")
 
-        logger.debug("Regrouping data by station")
-        # Regroup the data by station
-        data_by_station = defaultdict(list)
-        for sensor_id, data in data_by_sensor_id.items():
-            station_name, sensor_class = self.sensor_id_to_station[sensor_id]
-            sensor = self.api.sensors[sensor_class]
-            new_data = {}
-            new_data["station_name"] = station_name
-            new_data["sensor_class"] = sensor_class
-            new_data["sensor_unit"] = sensor.unit
-            new_data["values"] = data["values"]
-            new_data["timeline"] = data["timeline"]
-            data_by_station[station_name].append(new_data)
-        
-        logger.debug("Making dataframes")
-        station_dfs = self.make_dataframes(data_by_station)
-        del data_by_station
-        
-        for station_name, df in station_dfs.items():
+        station_dataframes = []
+        t0 = datetime.now()
+        for station_name, column_dict in data_by_station.items():
             station = self.api.stations[station_name]
+            station_dfs = []
+            for col_name, partial_dfs in column_dict.items():
+                partial_df = pd.concat(partial_dfs, axis=0)
+                # deduplicate by time
+                partial_df = partial_df[~partial_df.index.duplicated(keep='first')]
+                partial_df = partial_df.sort_index()
+                station_dfs.append(partial_df)
+            
+            df = pd.concat(station_dfs, axis=1, copy = False)
 
-            metadata = dict(
-                            station = dataclasses.asdict(station),
-                            author = "acronet",
-                        )
+            # Copy relevant station metadata as columns into the dataframe
+            self.perform_copy_metadata_columns(df, dataclasses.asdict(station))
+            station_dataframes.append(df)
 
+        combined_df = pd.concat(
+            [
+                df.reset_index()  # moves the current DatetimeIndex into a column named 'datetime'
+                .set_index(['datetime', 'external_station_id'])
+                for df in station_dataframes
+            ],
+            verify_integrity=True   # raises an error if duplicates exist
+        )
+        combined_df["author"] = "acronet"
+        combined_df.reset_index(inplace=True)
+        combined_df.set_index("datetime", inplace=True)
+        combined_df.sort_index(inplace=True)
 
-            yield TabularMessage(
+        for time_span in sorted(time_spans, key=lambda x: x.start):
+            data = combined_df.loc[time_span.start : time_span.end]
+
+            msg = TabularMessage(
                 metadata=self.generate_metadata(
                     time_span=time_span,
-                    unstructured=metadata,
                 ),
-                data=df,
+                data=data,
             )
-            # break
-
-
-    def make_dataframes(self, data_by_station: dict) -> dict[str, pd.DataFrame]:
-        station_dfs = {}
-
-        for station_name, data in data_by_station.items():
-            by_time = defaultdict(lambda: {"time": None})
-            for d in data:
-                col_name = f"{d['sensor_class']} [{d['sensor_unit']}]"
-                for time, value in zip(d["timeline"], d["values"]):
-                    by_time[time]["time"] = time
-                    by_time[time][col_name] = value
-
-            # Merge all sensor data for the station
-            if by_time:
-                df = pd.DataFrame.from_records(list(by_time.values()))
-                df["time"] = pd.to_datetime(df["time"], format="%Y%m%d%H%M", utc = True)
-                df = df.sort_values("time").reset_index(drop=True)
-                station_dfs[station_name] = df
-
-
-        return station_dfs
+            yield msg
+        logger.debug(f"Acronet: Collected by station in {datetime.now() - t0}")

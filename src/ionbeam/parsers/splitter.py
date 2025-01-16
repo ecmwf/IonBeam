@@ -63,4 +63,4 @@ class Splitter(Parser):
                 data=df,
             )
 
-            yield self.tag_message(output_msg, rawdata)
+            yield output_msg

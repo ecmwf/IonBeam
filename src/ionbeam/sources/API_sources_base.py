@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
-from typing import Any, Iterable, Self
+from typing import Any, Iterable, Literal, Self
 from urllib.parse import urljoin
 
 import pandas as pd
@@ -17,7 +17,8 @@ from sqlalchemy.orm import Mapped, Session, load_only, mapped_column
 from sqlalchemy_utils import UUIDType
 from urllib3.util import Retry
 
-from ..core.bases import Mappings, Source, TabularMessage
+from ..core.bases import Mappings, TabularMessage
+from ..core.source import Source
 from ..core.time import (
     TimeSpan,
 )
@@ -46,12 +47,12 @@ class RateLimitedException(APISourcesBaseException):
 
         elif response is not None and "Retry-After" in response.headers:
             retry_after = int(response.headers["Retry-After"])
-            self.retry_at = start_time + timedelta(seconds=retry_after)
+            self.retry_at = datetime.now(UTC) + timedelta(seconds=retry_after)
         
         else:
-            self.retry_at = start_time + timedelta(minutes=5)
+            self.retry_at = datetime.now(UTC) + timedelta(minutes=5)
 
-@dataclasses.dataclass
+@dataclasses.dataclass(eq=True, frozen=True)
 class DataChunk:
     """
     Represents a chunk of a stream of data that has been downloaded from an API and stored in the db
@@ -71,10 +72,13 @@ class DataChunk:
     version: int
     time_span: TimeSpan
     ingestion_time: datetime = dataclasses.field(default_factory=datetime.now)
-    json: dict = dataclasses.field(repr=True, default_factory=dict)
-    data: pd.DataFrame | None = dataclasses.field(repr=False, default=None)
+    json: dict = dataclasses.field(repr=True, default_factory=dict, compare=False, hash=False)
+    data: pd.DataFrame | None = dataclasses.field(repr=False, default=None, compare=False, hash=False)
     success: bool = True
     empty: bool = False
+
+    def __repr__(self) -> str:
+        return f"DataChunk({self.source}, {self.key}, {self.version}, {self.time_span}, {self.ingestion_time}, {self.success}, {self.empty})"
 
     @classmethod
     def make_error_chunk(cls, data_stream : "DataStream", time_span : TimeSpan, error : Exception, json = {}) -> Self:
@@ -112,12 +116,23 @@ class DataChunk:
                 DBDataChunk.start_datetime < self.time_span.end,
                 self.time_span.start < DBDataChunk.end_datetime).all()
         return chunks
+    
+    def load_data(self, db_session: Session):
+        """Load the data from the database"""
+        db_chunk = db_session.query(DBDataChunk).filter_by(
+            source=self.source,
+            key=self.key,
+            version=self.version,
+            start_datetime=self.time_span.start,
+            end_datetime=self.time_span.end,
+        ).one()
+        return db_chunk.to_data_chunk()
 
     def write_to_db(self, db_session: Session, delete_previous_tries=True):
         """Save to the database"""
         overlapping = self.get_overlapping(db_session)
         for chunk in overlapping:
-            if chunk.success:
+            if chunk.success and not chunk.empty:
                 raise ExistingDataException(f"Trying to ingest data chunk {self} over {chunk.to_data_chunk()}")
             else:
                 if delete_previous_tries:
@@ -137,7 +152,6 @@ class DataChunk:
             data=self.data.to_parquet() if self.data is not None else None
         )
         db_session.add(chunk)
-        db_session.commit()
 
 # This is just a flattened version of DataChunk for storage in the SQL database
 class DBDataChunk(Base):
@@ -157,8 +171,12 @@ class DBDataChunk(Base):
     __table_args__ = (
         # Index for fast lookups on source, key, version
         Index("ix_source_key_version", "source", "key", "version"),
+
         # Composite index for time range queries
         Index("ix_start_end_datetime", "start_datetime", "end_datetime"),
+
+        # Index for fast lookups on ingestion time
+        Index("ix_ingestion_time", "ingestion_time"),
     )
 
     def to_data_chunk(self, only_metadata = False) -> DataChunk:
@@ -194,10 +212,15 @@ class DataStream:
     data: Any = dataclasses.field(hash=False)
     last_ingestion: datetime | None = None
 
-    def query_db(self, db_session: Session, time_span : TimeSpan,
+    def __repr__(self) -> str:
+        return f"DataStream({self.source}, {self.key}, {self.version}, {self.last_ingestion})"
+
+    def get_chunks(self, db_session: Session, time_span : TimeSpan,
+                mode: Literal["metadata", "data"] = "data",
                 success: bool | None = None,
                 ingested_after : datetime | None = None,
-                non_empty : bool = False):
+                ingested_before : datetime | None = None,
+                empty : bool | None = False) -> Iterable[DataChunk]:
         
         query = db_session.query(DBDataChunk).filter_by(
             source=self.source,
@@ -211,38 +234,15 @@ class DataStream:
             query = query.filter(DBDataChunk.success == success)
         if ingested_after is not None:
             query = query.filter(DBDataChunk.ingestion_time > ingested_after)
-        if non_empty:
-            query = query.filter(DBDataChunk.empty == False)
-        return query
-
-    def get_timespans_from_db(self, db_session: Session, 
-                            time_span : TimeSpan,
-                            success: bool | None = None,
-                            ingested_after : datetime | None = None,
-                            non_empty : bool = False) -> Iterable[TimeSpan]:
         
-        filtered_query = self.query_db(db_session, time_span, success, ingested_after)
-        column_query = filtered_query.with_entities(DBDataChunk.start_datetime, DBDataChunk.end_datetime)
-        for start, end in column_query.all():
-            yield TimeSpan(start.replace(tzinfo=UTC), end.replace(tzinfo=UTC))
+        if ingested_before is not None:
+            query = query.filter(DBDataChunk.ingestion_time < ingested_before)
+        
+        if empty is not None:
+            query = query.filter(DBDataChunk.empty == empty)
 
-    def get_chunks_from_db(self, db_session: Session, 
-                           time_span : TimeSpan,
-                            success: bool | None = None,
-                            ingested_after : datetime | None = None,
-                            non_empty : bool = False) -> Iterable[DataChunk]:
-        """Read the data from the database cache"""
-        filtered_query = self.query_db(db_session, time_span, success, ingested_after)
-        for db_chunk in filtered_query.all():
-            yield db_chunk.to_data_chunk()
-
-    def get_chunk_metadata_from_db(self, db_session: Session, 
-                            time_span : TimeSpan,
-                            success: bool | None = None,
-                            ingested_after : datetime | None = None,
-                            non_empty : bool = False) -> Iterable[DataChunk]:
-        filtered_query = self.query_db(db_session, time_span, success, ingested_after)
-        filtered_query = filtered_query.options(load_only(
+        if mode == "metadata":
+            query = query.options(load_only(
             DBDataChunk.source,
             DBDataChunk.key,
             DBDataChunk.version,
@@ -254,8 +254,18 @@ class DataStream:
             raiseload=True # Raises an exeption if later code tries to load the data columns
             ))
         
-        for db_chunk in filtered_query.all():
-            yield db_chunk.to_data_chunk(only_metadata =True)
+            for db_chunk in query.all():
+                yield db_chunk.to_data_chunk(only_metadata =True)
+        
+        elif mode == "data":
+            for db_chunk in query.all():
+                yield db_chunk.to_data_chunk()
+
+        else:
+            raise ValueError(f"Invalid mode {mode}")
+
+
+
 
     def write_to_db(self, db_session, last_ingestion_time: datetime | None = None):
         """Save to the database"""
@@ -276,7 +286,6 @@ class DataStream:
         )
 
         db_session.execute(stmt)
-        db_session.commit()
 
     def get_last_ingestion_time(self, db_session: Session) -> datetime | None:
         db_data_stream = db_session.query(DBDataStream).filter_by(
@@ -309,7 +318,7 @@ class DBDataStream(Base):
         # Composite index for time range queries
         Index("ix_last_ingestion_time", "last_ingestion_time"),
         # Force this trio to be unique so that we can trigger upserts on it
-        UniqueConstraint('source', 'key', 'version', name='uix_source_key_version'),
+        UniqueConstraint('source', 'key', 'version', name='uix_datastream_source_key_version'),
     )
 
     def to_data_stream(self) -> DataStream:
@@ -334,6 +343,11 @@ class AbstractDataSourceMixin(ABC):
         Ask the API what datastreams exist for this time range
         """
         pass
+
+    @abstractmethod
+    def affected_time_spans(self, chunk : DataChunk, granularity : timedelta) -> Iterable[TimeSpan]:
+        """Override this when the data is very sparse"""
+        pass
     
     @abstractmethod
     def download_chunk(self, data_stream: DataStream, time_span: TimeSpan) -> DataChunk:
@@ -344,7 +358,7 @@ class AbstractDataSourceMixin(ABC):
         pass
 
     @abstractmethod
-    def emit_messages(self, relevant_chunks : Iterable[DataChunk], time_span: TimeSpan) -> Iterable[TabularMessage]:
+    def emit_messages(self, relevant_chunks : Iterable[DataChunk], time_span_group: Iterable[TimeSpan]) -> Iterable[TabularMessage]:
         """
         Emit messages corresponding to the data downloaded from the API in this time_span
         This is separate from download_data_stream_chunks to allow for more complex processing.
@@ -408,7 +422,7 @@ class APISource(Source, AbstractDataSourceMixin):
         """Given a DataStream and a time span, return any gaps in the time span that need to be downloaded"""
         
         # Get all the timespan of all chunks that have been ingested sucessfully
-        chunks_time_spans =  list(data_stream.get_timespans_from_db(db_session, time_span, success=True, non_empty=False))
+        chunks_time_spans =  list(c.time_span for c in data_stream.get_chunks(db_session, time_span, success=True, empty=False, mode="metadata"))
         chunks_to_ingest = time_span.remove(chunks_time_spans)
         split_chunks = [
             c 
@@ -423,7 +437,7 @@ class APISource(Source, AbstractDataSourceMixin):
         if split_chunks \
             and (split_chunks[-1].start + self.minimum_request_size) > time_span.end \
             and split_chunks[-1].delta() < self.minimum_request_size:
-            logger.debug(f"Removing last chunk because its time interval is too small. ({split_chunks[-1].delta()}")
+            # logger.debug(f"Removing last chunk because its time interval is too small. ({split_chunks[-1].delta()}")
             split_chunks = split_chunks[:-1]
 
         return split_chunks
@@ -438,7 +452,7 @@ class APISource(Source, AbstractDataSourceMixin):
         
         start_time = datetime.now(UTC)
         
-        with Session(self.globals.sql_engine) as db_session:
+        with self.globals.sql_session.begin() as db_session:
             # Check if the source has been rate limited recently
             retry_at = self.check_source_for_errors(db_session, since = start_time - timedelta(days=1))
             if retry_at > start_time:
@@ -446,42 +460,54 @@ class APISource(Source, AbstractDataSourceMixin):
                 return
         
             # Get the list of queries we need to make
-            gaps_by_datastream = {data_stream : reversed(self.gaps_in_database(db_session, data_stream, query_time_span))
+            gaps_by_datastream = {data_stream : list(self.gaps_in_database(db_session, data_stream, query_time_span))
                                   for data_stream in data_streams}
 
-            # Download any data we need for each data stream
-            # 
-            while datetime.now(UTC) - start_time < self.max_time_downloading:
-                for data_stream, gaps in gaps_by_datastream.items():
-                    gap = next(gaps, None)
-                    if gap is None: 
-                        continue
+        # Download any data we need for each data stream
+        while gaps_by_datastream:
+            # Remove any that are done
+            gaps_by_datastream = {data_stream : gaps for data_stream, gaps in gaps_by_datastream.items() if gaps}
+            for data_stream, gaps in gaps_by_datastream.items():
+                if datetime.now(UTC) - start_time > self.max_time_downloading:
+                    return
 
-                    # Begin a nested db session
-                    # This lets us rollback just this bit (automatically)
-                    # if an unexpected failure occurs in here
-                    with db_session.begin_nested():
-                        try:
-                            if fail: self.fail(fail)
-                            data_chunk = self.download_chunk(data_stream, gap)
-                            data_chunk.write_to_db(db_session)
-                            logger.debug(f"Downloaded data and wrote to db for {data_stream.key} {gap.delta()}")
-                            yield data_chunk
-                        
-                        except ExistingDataException:
-                            logger.debug(f"Data already exists in db for {data_stream.key} {gap.delta()}")
-                            if self.globals.die_on_error: raise
+                logger.debug(f"Downloading data for {data_stream.key}, currently has {len(gaps)} gap(s).")
+                if not gaps: 
+                    continue
+                gap = gaps.pop()
 
-                        except Exception as e:
-                            logger.warning(f"Failed to download chunk {data_stream.key} {gap.delta()} {e}")
-                            error_chunk = DataChunk.make_error_chunk(data_stream, gap, e)
-                            error_chunk.write_to_db(db_session)
-                            if self.globals.die_on_error: raise
-                            yield error_chunk
+                # Start a session here so that if anything goes wrong it gets automatically rolled back
+                with self.globals.sql_session.begin() as db_session:
+                    try:
+                        if fail: self.fail(fail)
+                        data_chunk = self.download_chunk(data_stream, gap)
+                        data_chunk.write_to_db(db_session)
+                        logger.debug(f"Downloaded data and wrote to db for {data_stream.key} {gap.delta()}")
+                        yield data_chunk
+                    
+                    except ExistingDataException:
+                        logger.debug(f"Data already exists in db for {data_stream.key} {gap.delta()}")
+                        if self.globals.die_on_error: raise
 
-                            # Completely give up for now if we are rate limited
-                            if isinstance(e, RateLimitedException):
-                                return
+                    except Exception as e:
+                        logger.warning(f"Failed to download chunk {data_stream.key} {gap.delta()} {e}")
+                        error_chunk = DataChunk.make_error_chunk(data_stream, gap, e)
+                        error_chunk.write_to_db(db_session)
+                        if self.globals.die_on_error: raise
+                        yield error_chunk
+
+                        # Completely give up for now if we are rate limited
+                        if isinstance(e, RateLimitedException) or (isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 429):
+                            logger.warning("Rate limited, giving up for now")
+                            return
+
+    def get_all_data_streams(self, db_session: Session) -> Iterable[DataStream]:
+        for ds in db_session.query(DBDataStream).filter_by(source=self.source).all():
+            yield ds.to_data_stream()
+
+    def affected_time_spans(self, chunk : DataChunk, granularity : timedelta) -> Iterable[TimeSpan]:
+        """Override this when the data is very sparse"""
+        return chunk.time_span.split_rounded(granularity)
 
     def generate(self) -> Iterable[TabularMessage]:
         """
@@ -490,11 +516,27 @@ class APISource(Source, AbstractDataSourceMixin):
         query_time_span = self.globals.ingestion_time_constants.query_timespan
         granularity = self.globals.ingestion_time_constants.granularity
 
-        data_streams = list(self.get_data_streams(query_time_span))
-        logger.debug(f"Got data streams {data_streams}")
+        if self.globals.download:
+            # Get all the streams of data we need to download
+            try:
+                data_streams = list(self.get_data_streams(query_time_span))
+            except Exception as e:
+                logger.warning(f"Failed to get data streams for {self.source} with error {e}")
+                if self.globals.die_on_error: raise
+                else: return
+            
+            # Save them to the db
+            with self.globals.sql_session.begin() as db_session:
+                for ds in data_streams:
+                    ds.write_to_db(db_session)
 
-        _ = list(self.download_data(data_streams, query_time_span))
+            # Download the data for each stream
+            logger.info(f"For source {self.source}, got data streams {data_streams}")
+            _ = list(self.download_data(data_streams, query_time_span))
 
+        if not self.globals.ingest_to_pipeline:
+            return 
+        
         # Let the API implementation do any additional processing
         # and emit the messages
         emitted_messages = 0
@@ -503,49 +545,73 @@ class APISource(Source, AbstractDataSourceMixin):
         # There's a bit of a tradeoff in the design here
         # When doing realtime ingestion we're ingesting in short 5 minute intervals
         # When doing historical ingestion it makes sense to do larger queries
-        # But because we are emitting messages for each 5 minute output timespan
-        # If the ingestion chunks are too large then we have to repeatedly load and filter them
-        # The optimal stategy would be to emit by chunk when chunk_span >> granularity
-        # and emit by timespan when chunk_span ~= granularity
+        # It would be inefficient to hold 10 days worth of data in memory and then filter it for each 5 minute output timespan
+        # So instead we pick one timespan and find all the chunks it needs
+        # Then we find all the timespans that are affected by those chunks
+        # We call this a timespan group, and we process all the chunks in the group before moving on to the next group
+        # This way we can operate on large chunks efficiently
 
-        with Session(self.globals.sql_engine) as db_session:
-                
-            # Get all the chunks that were downloaded more recently than data_stream.last_ingestion_time
-            # Only get the metadata for now
-            new_or_updated_chunks = [
+        reingest_from = self.globals.reingest_from
+        with self.globals.sql_session.begin() as db_session:
+
+            new_chunks = [
                 data_chunk
-                for data_stream in data_streams
-                for data_chunk in data_stream.get_chunks_from_db(db_session, query_time_span, 
-                                                                 ingested_after = data_stream.get_last_ingestion_time(db_session),
-                                                                 non_empty=True) 
+                for data_stream in self.get_all_data_streams(db_session)
+                for data_chunk in data_stream.get_chunks(db_session, query_time_span, 
+                                                                 ingested_after = reingest_from if reingest_from is not None else data_stream.get_last_ingestion_time(db_session),
+                                                                 ) 
             ]
-            logger.debug(f"Got new or updated chunks {len(new_or_updated_chunks)}")
+            logger.info(f"New or updated chunks {len(new_chunks)}")
 
 
             # Determine the list of output time spans that overlap one of the modified chunks
-            # Also keep a reference to the chunk data for each of them
-            affected_time_spans = defaultdict(list)
-            for chunk in new_or_updated_chunks:
-                for ts in chunk.time_span.split_rounded(granularity):
-                    affected_time_spans[ts].append(chunk)
+            # Create a set of new chunks for each time span
+            affected_time_spans : dict[TimeSpan, set[DataChunk]] = defaultdict(set)
+            for chunk in new_chunks:
+                for ts in self.affected_time_spans(chunk, granularity):
+                    affected_time_spans[ts].add(chunk)
 
-            logger.debug(f"Got affected time spans {len(affected_time_spans)}")
+            logger.info(f"Affected time spans {len(affected_time_spans)}")
 
 
-        logger.debug("Starting to emit messages")
-        for ts, chunks in affected_time_spans.items():
-            logger.debug(f"Got {len(chunks)} modified chunks for ts {ts}")
+        logger.debug("Starting to emit messages, looping over time spans")
+        while affected_time_spans:
+            
+            # Get the next time span to work on
+            current_time_span, chunk_group = affected_time_spans.popitem()
+            logger.info(f"Picked the next time span to work on {current_time_span}")
 
-            # Go through and also load all the old chunks we need for each affected time span
-            for data_stream in data_streams:
-                for chunk in data_stream.get_chunks_from_db(db_session, ts, non_empty=True):
-                    chunks.append(chunk)
+            # When the chunks are large it makes sense to operate on many time spans at once
+            # get all the timespans affected by all the chunks we have loaded anyway.
+            # This is a heuristic but should define a nice unit of work to do.
+            time_spans_affected_by_this_group = {current_time_span,} | set(
+                t
+                for chunk in chunk_group
+                for t in self.affected_time_spans(chunk, granularity)
+                if t in affected_time_spans # Don't process time spans we've already processed
+                )
+            
+            for t in time_spans_affected_by_this_group:
+                if t in affected_time_spans:
+                    del affected_time_spans[t]
 
-            logger.debug(f"Got {len(chunks)} total chunks for ts {ts}")
+            logger.info(f"Expanded to group of {len(time_spans_affected_by_this_group)} time spans")
 
-            msgs = list(self.emit_messages(chunks, ts))
+            # Go through and also load all the old chunks we need too
+            for ts in time_spans_affected_by_this_group:
+                for data_stream in data_streams:
+                    for chunk in data_stream.get_chunks(db_session, ts, ingested_before = data_stream.get_last_ingestion_time(db_session), mode="metadata"):
+                        if chunk not in chunk_group:
+                            # get the full data for this chunk
+                            chunk = chunk.load_data(db_session)
+                            chunk_group.add(chunk)
 
-            logger.debug(f"Emitted {len(msgs)} messages for {ts}")
+            logger.debug(f"{len(chunk_group)} total chunks contribute to this timespan group, about {len(chunk_group) / len(data_streams):.1f} per datastream")
+
+            msgs = list(self.emit_messages(chunk_group, time_spans_affected_by_this_group))
+
+            if len(msgs) == 0:
+                logger.info(f"Emitted {len(msgs)} messages for time span group")
 
             for msg in msgs:
                 yield msg
@@ -553,7 +619,8 @@ class APISource(Source, AbstractDataSourceMixin):
                 if self.finish_after is not None and emitted_messages >= self.finish_after:
                     return
         
-        with Session(self.globals.sql_engine) as db_session:
+        # If we get here without an error then mark the chunks as having been ingested properly
+        with self.globals.sql_session.begin() as db_session:
             # Update the last_ingestion_time for each data stream
             for ds in data_streams:
                 ds.write_to_db(db_session)

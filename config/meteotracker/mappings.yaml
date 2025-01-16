@@ -15,6 +15,7 @@
 - name: external_id
 
 - name: author
+- name: living_lab
 
 - name: lat
   unit: EPSG:4326
@@ -39,10 +40,11 @@
 - name: relative_humidity_near_surface
   key: H
   unit: "%"
-# This would cause issues because we're also outputing it as a metadata_column too
-# - name: air_pressure_near_surface
-#   key: P
-#   unit: mbar
+
+- name: air_pressure_near_surface
+  key: P
+  unit: mbar
+
 - name: potential_temperature
   key: tp
   unit: K

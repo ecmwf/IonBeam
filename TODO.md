@@ -11,22 +11,59 @@
 
 [x] port meteotracker to new ingestion system
 on system
-[/] get downstream mt working
+
 [x] debug hang on SimpleODCEncoder 
-[ ] write class AddMeteotrackerMetadata(Parser):
-[ ] Debug why meteotracker is emitting so many message, probably not filtering correctly
+[x] write class AddMeteotrackerMetadata(Parser):
+[x] Debug why meteotracker is emitting so many message, probably not filtering correctly
+[x] Allow canonicalise to accept a list of RawVariables
+[x] modify canonicalise to add on the raw variable in this case
+[x] fix location_feature = from_wkt(self.location_feature)
+[x] figure out why the aronet data is now all nones
 
-[ ] port SCK to new ingestion system
-[ ] Try to triger a 429 and check for Retry-After header
-[ ] Add logic to exponentially back off if 429s keep happening
-[ ] get downstream sck working
+[ ] Rewrite SCK and MT to give the data out in one big chunk then use the infra I made for acronet
 
-[ ] Rewrite metadata adding to use an upsert and share more between sources
+[ ] make datetime index
+[ ] add external station id
+
+
+
+[ ] Split out functionality to create RawVariable columns into separate action
+
+pyarrow.lib.ArrowInvalid: Could not open Parquet input source '<Buffer>': Parquet file size is 0 bytes
+
+[ ] take a look at concatenating parquet files
+
+
+
+[/] get downstream mt working
+[/] port SCK to new ingestion system
+    [ ] Try to triger a 429 and check for Retry-After header
+    [ ] Add logic to exponentially back off if 429s keep happening
+
+[/] get downstream sck working
+
+[x] Sort out unit conversions for SCK because columns with the same name can have different units
+
+[x] Deal with ownership of data. 
+    [x] Allow actions to assume they own and can mutate input data
+    [x] Modify the processor to give ownership over a message to the first consumer and a copy to all the rest.
+
+
+[ ] Strip out the concept of metadata entirely and make it all data?
+
+match up the column names
+{'Light', 'PN1.0', 'PM 1', 'Air Temperature', 'battery', 'PN10.0', 'Relative Humidity', 'Barometric Pressure', 'TVOC', 'CO2', 'PN5.0', 'PN0.5', 'PM 10', 'eCO2', 'PM 2.5', 'PN0.3', 'PN2.5', 'Noise Level'} != {'pm_avg_10', 'bat', 'bar', 'lat', 'pm_avg_2.5', 'h', 'ext_t', 'station_id', 'ext_h', 'light', 't', 'pm_avg_1', 'author', 'author_uuid', 'eco2', 'location_exposure', 'co2', 'tvoc', 'time', 'lon', 'station_name', 'noise_dba'}
+
+[ ] Conver the other two sources to also generate columns of raw Variables?
+
+[x] Maybe collate acronet into one file after all?
+[x] Rewrite metadata adding to use an upsert and share more between sources
 
 [ ] Allow parsing ingestion times as a cmd line argumennt
+[ ] Add arguments to nuke just one source from the db
+[ ] Add arguments to reingest all data but keep db
 
-[ ] Refactor generate_metadata and tag_message
-[ ] Rewrite encoders/odb.py
+[x] Refactor generate_metadata and tag_message
 
 [ ] Fix this code in codc 
 ```

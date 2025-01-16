@@ -25,7 +25,7 @@ class AVISONotifier(Writer):
 
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
-        self.metadata = dataclasses.replace(self.metadata, state="aviso_notified")
+        self.set_metadata = dataclasses.replace(self.set_metadata, state="aviso_notified")
 
     def process(self, message: FileMessage) -> Iterable[Message]:
         request = {"database": "fdbdev", "class": "rd"}
@@ -41,4 +41,4 @@ class AVISONotifier(Writer):
         output_msg = FileMessage(metadata=metadata)
 
         assert output_msg.metadata.mars_id is not None
-        yield self.tag_message(output_msg, message)
+        yield output_msg

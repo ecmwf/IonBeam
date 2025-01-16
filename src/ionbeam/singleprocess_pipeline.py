@@ -10,20 +10,17 @@
 
 import logging
 import sys
-from copy import deepcopy
-from itertools import cycle, islice
+from itertools import chain, cycle, islice
 from time import time
 from typing import Iterable, Sequence
 
-from .bases import DataMessage, Globals, Message, MessageStream, Processor
+from .core.bases import Aggregator, FinishMessage, Message, MessageStream
 
 logger = logging.getLogger(__name__)
 
 
-def roundrobin(iterables: Sequence[MessageStream], finish_after : int | None = None) -> MessageStream:
-    if finish_after is not None:
-        iterables = [islice(it, finish_after) for it in iterables]
-
+def roundrobin(iterables: Sequence[MessageStream]) -> MessageStream:
+    # Recipe credited to George Sakkis
     pending = len(iterables)
     nexts = cycle(iter(it).__next__ for it in iterables)
     while pending:
@@ -34,45 +31,32 @@ def roundrobin(iterables: Sequence[MessageStream], finish_after : int | None = N
             pending -= 1
             nexts = cycle(islice(nexts, pending))
 
-def fully_process_message(msg: DataMessage, globals: Globals) -> tuple[list[Message], int]:
-    """
-    Take a message and keep working on its children until they're all finished.
-    """
-    number_processed = 0
+
+def fully_process_message(msg: Message, actions) -> list[Message]:
     input_messages = [msg]
     finished_messages = []
     while input_messages:
         msg = input_messages.pop()
-        matches = msg.find_matches(globals.actions_by_id)
-
-        for i, action in enumerate(matches):
-            assert isinstance(action, Processor), f"Expected a Processor Action, got {action}"
-
-            # The first action to process the message gets the original message, the rest get a copy.
-            # This speeds up the common case where a message is consumed by only one action.
-            if i > 0: 
-                msg = deepcopy(msg)         
-
-            try:
+        for dest in msg.find_matches(actions):
+            if dest.matches(msg):
                 t0 = time()
-                output_messages = process_message(msg, action)
-
-                if globals.finish_after is not None:
-                    output_messages = islice(output_messages, globals.finish_after)
-
-                input_messages.extend(output_messages)
-                log_message_transmission(logger, msg, action, time() - t0)
-                number_processed += 1
-
-            except Exception as e:
-                logger.warning(f"Failed to process {msg} with {action} with exception {e}")
-                if globals.die_on_error:
-                    raise e
-        if not matches:
-            logger.info(f"{str(msg)} --> Done")
+                input_messages.extend(dest.process(msg))
+                log_message_transmission(logger, msg, dest, time() - t0)
+                matched = True
+        if not matched:
             finished_messages.append(msg)
+    return finished_messages
 
-    return finished_messages, number_processed
+
+def empty_aggregators(actions) -> Iterable[Message]:
+    """
+    Iterate over all the actions and send a finish message to the aggregators
+    yield any messages that result.
+    """
+    for a in actions:
+        if isinstance(a, Aggregator):
+            for m in a.process(FinishMessage("Sources Exhausted")):
+                yield m
 
 def fmt_time(t):
     units = ["s", "ms", "us", "ns"]
@@ -109,28 +93,19 @@ class DummyProgress():
     def add_task(self, *args, **kwargs): pass
     def update(self, *args, **kwargs): pass
 
-def process_message(msg: DataMessage, action: Processor) -> Iterable[DataMessage]:
-    for out_msg in action.process(msg):
-        # Updates the history metadata of the output message
-        assert isinstance(out_msg, DataMessage), f"Expected a DataMessage, got {out_msg}"
-        action.tag_message(out_msg, msg)
-        yield out_msg
 
-
-def singleprocess_pipeline(config, sources, actions, emit_partial: bool, 
+def singleprocess_pipeline(globals, sources, actions, emit_partial: bool, 
                            simple_output : bool = False, 
                            die_on_error: bool = False) -> list[Message]:
     logger.info("Starting single threaded execution...")
-    globals = config.globals
 
-    if globals.finish_after is not None:
-        logger.debug(f"Stopping after each action has emitted {globals.finish_after} messages")
-
-    source = roundrobin(sources, globals.finish_after)
+    source = roundrobin(sources)
+    source = chain(source, [FinishMessage("Sources Exhausted")])
 
     input_messages = []
     finished_messages = []
     sources_done = False
+    aggregators_emptied = False
 
     # The first time we catch ctrl_c we stop the sources
     # The second time we hard exit
@@ -159,21 +134,44 @@ def singleprocess_pipeline(config, sources, actions, emit_partial: bool,
                     except StopIteration:
                         sources_done = True
 
+                # If we've processed every message we can, empty the aggregators.
+                if not input_messages and not aggregators_emptied:
+                    progress.update(message_queue_bar, description="[red]Aggregated Messages Queue")
 
-                # If we've processed every message, finish.
-                if not input_messages:
+                    # By default (i.e emit_partial == false) we just throw half filled message buckets away
+                    if emit_partial:
+                        logger.warning("Initial messages consumed, emptying aggregators.")
+                        input_messages.extend(empty_aggregators(actions))
+                    aggregators_emptied = True
+
+                # If we've processed every message and emptied the aggregators, finish.
+                if not input_messages and aggregators_emptied:
                     break
 
                 # Pop a message off the queue and process it
                 msg = input_messages.pop()
+                processed_messages += 1
 
-                # Take this message and keep working on the output until they're all fully processed
-                # Doing it in this order helps to catch errors in the processing chain early
-                finished_messages, number_processed = fully_process_message(msg, globals)
-                finished_messages.extend(finished_messages)
-                processed_messages += number_processed
+                # We don't want to send a FinshMessage to the aggregators before all messages have had a chance to get there.
+                if isinstance(msg, FinishMessage):
+                    continue
 
+                # fully_process_message(msg)
+                # If the message doesn't match any actions, we move it to the finished queue.
+                matches = msg.find_matches(globals.actions_by_id)
 
+                for action in matches:                        
+                    try:
+                        t0 = time()
+                        input_messages.extend(action.process(msg))
+                        log_message_transmission(logger, msg, action, time() - t0)
+                    except Exception as e:
+                        logger.warning(f"Failed to process {msg} with {action} with exception {e}")
+                        if die_on_error:
+                            raise e
+                if not matches:
+                    logger.info(f"{str(msg)} --> Done")
+                    finished_messages.append(msg)
 
             # logger.info(f"Finshed messages: {finished_messages}")
             except KeyboardInterrupt:

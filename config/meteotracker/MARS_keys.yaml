@@ -63,7 +63,7 @@
 - name: aggregation_type
   dtype: STRING
   fill_method: constant
-  value: tracked
+  value: whole
   column_description: 'The aggregation platform that we retrieved this data from.'
 
 - name: source_name

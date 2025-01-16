@@ -34,6 +34,7 @@ class ExtractMetaData(Parser):
 
     "A list of data to extract from the incoming API responses and add in as columns in the data"
     copy_metadata_to_columns: dict[str, str]
+    copy_to_metadata: dict[str, str]
 
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
@@ -51,12 +52,19 @@ class ExtractMetaData(Parser):
 
             value = recursive_get(message.metadata.unstructured, column_key.split("."))
             if value is None:
-                logger.warning(f"Column {column_key} not found in metadata, skipping")
+                logger.warning(f"Column {column_key} not found in metadata, skipping. Possible keys are {message.metadata.unstructured}")
             if column_name in message.data.columns:
                 logger.warning(f"Column {column_name} already in the dataframe, skipping")
             else:   
                 # logger.debug(f"Extracting {column_key} into {column_name} with value {value}")
                 message.data[column_name] = value
+
+        for name, key in self.copy_to_metadata.items():
+            value = recursive_get(message.metadata.unstructured, key.split("."))
+            if value is None:
+                logger.warning(f"Key {key} not found in data, skipping. Possible keys are {message.metadata.unstructured}")
+            else:
+                setattr(message.metadata, name, value)
 
         output_msg = TabularMessage(
             metadata=self.generate_metadata(
@@ -65,5 +73,4 @@ class ExtractMetaData(Parser):
             data=message.data,
         )
 
-        yield self.tag_message(output_msg, message)
-
+        yield output_msg

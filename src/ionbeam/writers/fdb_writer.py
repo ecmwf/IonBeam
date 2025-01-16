@@ -13,13 +13,15 @@ import logging
 import os
 import shutil
 from pathlib import Path
+from time import time
 from typing import Iterable
 
 import findlibs
 import yaml
 from jinja2 import Template
 
-from ..core.bases import BytesMessage, DataMessage, FileMessage, FinishMessage, Message, Writer
+from ..core.bases import BytesMessage, DataMessage, FileMessage, Message, Writer
+from ..core.singleprocess_pipeline import fmt_time
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +79,6 @@ def install_metkit_overlays(template, keys):
             for k in keys
         ))
 
-
 @dataclasses.dataclass
 class FDBWriter(Writer):
     config: dict | None = None
@@ -88,7 +89,7 @@ class FDBWriter(Writer):
 
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
-        self.metadata = dataclasses.replace(self.metadata, state="written")
+        self.set_metadata = dataclasses.replace(self.set_metadata, state="written")
         self.metkit_language_template = globals.metkit_language_template
 
         if not self.config:
@@ -125,32 +126,40 @@ class FDBWriter(Writer):
         
         return pyfdb.FDB(self.config)
 
-    def process(self, input_message: FileMessage | BytesMessage | FinishMessage) -> Iterable[Message]:
+    def process(self, input_message: FileMessage | BytesMessage) -> Iterable[Message]:
 
         
         assert input_message.metadata.mars_id is not None
         mars_id = input_message.metadata.mars_id.as_strings()
 
-        if len(list(self.fdb.list(mars_id))) > 0 and not self.globals.overwrite_fdb:
+        t0 = time()
+        existing_matches = list(self.fdb.list(mars_id))
+        n = len(existing_matches)
+        logger.debug(f"Found {n} existing matches for {mars_id} in {fmt_time(time() - t0)}")
+
+        if n == 0:
+            t0 = time()
+            self.fdb.archive_single(input_message.data_bytes(), mars_id)
+            self.fdb.flush()
+            logger.debug(f"Added new data for {mars_id} in {fmt_time(time() - t0)}")
+
+        elif not self.globals.overwrite_fdb:
             logger.debug("Dropping data because it's already in the database.")
-            return
-
-        if isinstance(input_message, BytesMessage):
-            bytes = input_message.bytes
-            
-        elif isinstance(input_message, FileMessage):
-            assert input_message.metadata.filepath is not None
-            with open(input_message.metadata.filepath, "rb") as f:
-                bytes = f.read()
-
-
-        else:
-            raise ValueError(f"Unexpected message type {type(input_message)}")
         
-        self.fdb.archive_single(bytes, mars_id)
-        self.fdb.flush()
+        elif n == 1:
+            t0 = time()
+            logger.debug(f"Overwriting existing data for {mars_id}")
+            path = existing_matches[0]["path"]
+            logger.debug(f"Overwriting data at {path}")
+            with open(path, "wb") as f:
+                f.seek(0)
+                f.truncate()
+                f.write(input_message.data_bytes())
+            logger.debug(f"Overwrote data for {mars_id} in {fmt_time(time() - t0)}")
 
-
+        elif n > 1:
+            raise ValueError(f"Multiple matches for {mars_id} in the database.")
+        
         metadata = self.generate_metadata(input_message)
         output_msg = DataMessage(metadata=metadata)
-        yield self.tag_message(output_msg, input_message)
+        yield output_msg

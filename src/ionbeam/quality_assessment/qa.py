@@ -17,7 +17,7 @@ class QualityControl(Processor):
     # Gets called by the config parsing code to create the action object
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
-        self.metadata = dataclasses.replace(self.metadata, state="quality_controlled")
+        self.set_metadata = dataclasses.replace(self.set_metadata, state="quality_controlled")
 
     def process(self, incoming_message: TabularMessage) -> Iterable[TabularMessage]:
         # modify the csv data of the message
@@ -36,4 +36,4 @@ class QualityControl(Processor):
         )
 
         # generate the history of the message and send it out!
-        yield self.tag_message(output_message, previous_msg=incoming_message)
+        yield output_message

@@ -1,6 +1,8 @@
 actions:
-  # By default uses local config and pulls schema and root from global config
+  - class: IdentityAction
+    name: final_processing
+
+  - class: ParquetEncoder
   - class: FDBWriter
-    match:
-    - state: "odc_encoded"
+
 

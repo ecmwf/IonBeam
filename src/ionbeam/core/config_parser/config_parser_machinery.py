@@ -294,9 +294,14 @@ def parse_field(context, key, _type, value):
         if is_dict(_type):
             return parse_dict(context, key, _type, value)
 
-        result = _type(**{k : v for k,v in value.items() if k != "__line__"}) if isinstance(value, dict) else _type(value)
+        if isinstance(value, _type):
+            return value
+        
+        if isinstance(value, dict):
+            return _type(**{k : v for k,v in value.items() if k != "__line__"})
+        
+        return _type(value)
 
-        return result
 
     except Exception as e:
         if isinstance(e, ConfigMatchError):
