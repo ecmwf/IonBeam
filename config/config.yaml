@@ -26,7 +26,7 @@ globals:
  # Global constants that override things in the sources and timeaggregator
   ingestion_time_constants:
     query_timespan: 
-      start: datetime.now(tz=timezone.utc) - timedelta(minutes = 50)
+      start: datetime.now(tz=timezone.utc) - timedelta(hours = 24)
       end: datetime.now(tz=timezone.utc) - timedelta(minutes = 10)
 
     # How big a data granule should be

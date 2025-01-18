@@ -1,5 +1,6 @@
 import dataclasses
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
@@ -10,7 +11,7 @@ import pandas as pd
 from cachetools import TTLCache, cachedmethod
 from cachetools.keys import hashkey
 
-from ...core.bases import RawVariable, TabularMessage, TimeSpan
+from ...core.bases import Mappings, RawVariable, TabularMessage, TimeSpan
 from ..API_sources_base import DataChunk, DataStream, RESTSource
 
 logger = logging.getLogger(__name__)
@@ -22,11 +23,12 @@ def saltedmethodkey(salt):
     return _hash
 
 
-@dataclasses.dataclass
+@dataclass
 class SmartCitizenKitSource(RESTSource):
     """
     API Documentation: https://developer.smartcitizen.me/#summary
     """
+    mappings: Mappings = field(kw_only=True)
 
     maximum_request_size = timedelta(days=10)
     minimum_request_size = timedelta(minutes=5)
@@ -301,6 +303,8 @@ class SmartCitizenKitSource(RESTSource):
                         sensor_key = sensor_key,
                     )
                 )
+
+                column_metadata["external_station_id"] = self.globals.canonical_variables_by_name["external_station_id"]
                 
                 # logger.debug(f"Processing sensor {sensor_key} for device {device_id}")
                 array = np.array(readings)
@@ -310,27 +314,29 @@ class SmartCitizenKitSource(RESTSource):
                 times, values = array.T
                 
                 all_times.append(times)
-                all_readings.append(values)
+                all_readings.append(values.astype(np.float64))
                 all_sensor_keys.append(np.array([sensor_key] * values.shape[0]))
 
             a_all_times = np.concatenate(all_times)
-            a_all_readings = np.concatenate(all_readings)
+            a_all_readings = np.concatenate(all_readings, dtype = np.float64)
             a_all_sensor_keys = np.concatenate(all_sensor_keys)
 
             df_long = pd.DataFrame({
                 "datetime": pd.to_datetime(a_all_times, utc=True),
-                "sensor_key": a_all_sensor_keys,
+                "sensor_key": pd.Series(a_all_sensor_keys, dtype = "string"),
                 "value": a_all_readings,
-            }).set_index("datetime")
+            },
+            ).set_index("datetime")
 
-            column_metadata["datetime"] = self.mappings_variable_unit_dict[("datetime", None)]
+            # column_metadata["datetime"] = self.mappings_variable_unit_dict[("datetime", None)]
 
             # 4) Pivot to get one column per sensor_key
             df_wide = df_long.pivot(columns="sensor_key", values="value")
 
             self.perform_copy_metadata_columns(df_wide, dict(
                 device = device,
-            ))
+            ),
+            columns = column_metadata)
             all_dfs.append(df_wide)
 
         combined_df = pd.concat(
@@ -339,16 +345,18 @@ class SmartCitizenKitSource(RESTSource):
                         .set_index(['datetime', 'external_station_id'])
                         for df in all_dfs
                     ],
-                    verify_integrity=True   # raises an error if duplicates exist
+                    verify_integrity=False
                 )
         combined_df["author"] = "smart_citizen_kit"
+        combined_df["author"] = combined_df["author"].astype("string")
+        
         combined_df.reset_index(inplace=True)
         combined_df.set_index("datetime", inplace=True)
         combined_df.sort_index(inplace=True)
+        combined_df["external_station_id"] = combined_df["external_station_id"].astype("string")
 
         for time_span in sorted(time_spans, key=lambda x: x.start):
                 data = combined_df.loc[time_span.start : time_span.end]
-                data.reset_index(inplace=True)
 
                 msg = TabularMessage(
                     metadata=self.generate_metadata(

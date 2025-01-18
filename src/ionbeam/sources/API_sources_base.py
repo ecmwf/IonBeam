@@ -11,13 +11,13 @@ from urllib.parse import urljoin
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
-from sqlalchemy import JSON, Index, UniqueConstraint
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import Index, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, Session, load_only, mapped_column
 from sqlalchemy_utils import UUIDType
 from urllib3.util import Retry
 
-from ..core.bases import Mappings, TabularMessage
+from ..core.bases import TabularMessage
 from ..core.source import Source
 from ..core.time import (
     TimeSpan,
@@ -165,7 +165,8 @@ class DBDataChunk(Base):
     ingestion_time: Mapped[datetime] # Same as DataChunk.ingestion_time
     success: Mapped[bool]
     empty: Mapped[bool]
-    json: Mapped[dict] = mapped_column(JSON, nullable=True) # Same as DataChunk.json
+    json: Mapped[dict] = mapped_column(JSONB, nullable = True) # Same as DataChunk.json
+    # json: Mapped[dict] = mapped_column(mutable_json_type(dbtype=JSONB, nested=True), nullable = True) # Same as DataChunk.json
     data: Mapped[bytes] = mapped_column(nullable=True) # == DataChunk.data.toparquet()
 
     __table_args__ = (
@@ -379,7 +380,6 @@ class APISource(Source, AbstractDataSourceMixin):
         - Retrying chunks if some chunks fail on the first attempt.
         - Recombining chunks to form a complete dataset.
     """
-    mappings: Mappings
 
     "The time interval to ingest, can be overridden by globals.source_timespan"
     finish_after: int | None = None
@@ -471,7 +471,7 @@ class APISource(Source, AbstractDataSourceMixin):
                 if datetime.now(UTC) - start_time > self.max_time_downloading:
                     return
 
-                logger.debug(f"Downloading data for {data_stream.key}, currently has {len(gaps)} gap(s).")
+                logger.debug(f"Downloading data for datastream '{data_stream.key}', currently has {len(gaps)} gap(s).")
                 if not gaps: 
                     continue
                 gap = gaps.pop()
@@ -620,10 +620,12 @@ class APISource(Source, AbstractDataSourceMixin):
                     return
         
         # If we get here without an error then mark the chunks as having been ingested properly
-        with self.globals.sql_session.begin() as db_session:
-            # Update the last_ingestion_time for each data stream
-            for ds in data_streams:
-                ds.write_to_db(db_session)
+        # unless we used the finish_after parameter to limit the number of messages processed
+        if self.globals.finish_after is None:
+            with self.globals.sql_session.begin() as db_session:
+                # Update the last_ingestion_time for each data stream
+                for ds in data_streams:
+                    ds.write_to_db(db_session)
 
 
                 

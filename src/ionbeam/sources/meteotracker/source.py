@@ -10,22 +10,26 @@
 
 import dataclasses
 import logging
+import re
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterable, List
+from time import time
+from typing import Iterable
 
+import numpy as np
 import pandas as pd
 import shapely
 
-from ...core.bases import RawVariable, TabularMessage
+from ...core.bases import CanonicalVariable, RawVariable, TabularMessage
 from ...core.time import TimeSpan
+from ...singleprocess_pipeline import fmt_time
 from ..API_sources_base import AbstractDataSourceMixin, DataChunk, DataStream, RESTSource
-from .api import MeteoTracker_API, MeteoTracker_API_Error
+from .api import MeteoTracker_API
 
 logger = logging.getLogger(__name__)
 
-
-@dataclasses.dataclass
+@dataclass
 class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
     """
     The retrieval here works like this:
@@ -34,21 +38,11 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
     source: str = "meteotracker"
     version = 1
 
-    mappings: List[RawVariable] = dataclasses.field(default_factory=list)
-
     "A bounding polygon represented in WKT (well known text) format."
     wkt_bounding_polygon: str | None = None  # Use geojson.io to generate
-
-    """A list of patterns used to generate author names to check. eg 
-        author_patterns:
-            Bologna:
-                bologna_living_lab_{}: range(1,21)
-            Barcelona:
-                barcelona_living_lab_{}: range(1, 16)
-                Barcelona_living_lab_{}: range(1, 16)
-    """
-    cache_directory: Path = dataclasses.field(default_factory=Path)
-    author_patterns: dict[str, dict[str, str]] = dataclasses.field(default_factory=dict)
+    
+    cache_directory: Path = field(default_factory=Path)
+    author_patterns: dict[str, list[str]] = field(default_factory=dict)
 
     maximum_request_size: timedelta = timedelta(days = 10)
     max_time_downloading: timedelta = timedelta(seconds = 10)
@@ -61,8 +55,7 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
         assert(self.globals.ingestion_time_constants is not None)
         assert(self.globals.secrets is not None)
         
-
-        self.cache_directory = self.resolve_path(self.cache_directory, type="data")
+        self.cache_directory = Path(self.globals.cache_path) / "meteotracker_cache"
 
         if self.wkt_bounding_polygon is not None:
             self.bounding_polygon = shapely.from_wkt(self.wkt_bounding_polygon)
@@ -77,13 +70,9 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
         
         self.api = MeteoTracker_API(self.credentials, self.api_headers)
 
-        # Set up the list of target authors
-        self.authors = []
-        for living_lab, patterns in self.author_patterns.items():
-            for pattern, range_expression in patterns.items():
-                for item in eval(range_expression):
-                    author = pattern.format(item)
-                    self.authors.append((living_lab, author))
+        self.author_regex_to_living_lab = {re.compile(pattern): living_lab 
+            for living_lab, patterns in self.author_patterns.items()
+            for pattern in patterns}
 
 
     def get_data_streams(self, time_span: TimeSpan) -> Iterable[DataStream]:
@@ -95,35 +84,22 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
         )
 
     def download_chunk(self, data_stream: DataStream, time_span: TimeSpan) -> DataChunk:
-        sessions = {}
-        all_session_data = pd.DataFrame()
-        for living_lab, author in self.authors:
-            try:
-                author_sessions = self.api.query_sessions(author=author, time_span=time_span, items=1000)
-            
-            except MeteoTracker_API_Error as e:
-                logger.warning(f"Query_sessions failed for author {author}\n{e}")
-                continue
-
-
-
-            for session in author_sessions:
-                # Can for example find tracks for author = 'genova_living_lab_28'  with the search 'genova_living_lab_2'
-                if session.id in sessions:
-                    continue
-
-                logger.debug(f"Retrieved session {session.id} for {author=}")
-                data = self.api.get_session_data(session)
-                data["id"] = session.id
-                all_session_data = pd.concat([all_session_data, data])
-
-                session = dataclasses.asdict(session)
-                session["living_lab"] = living_lab
-                session["start_time"] = session["start_time"].isoformat()
-                session["end_time"] = session["end_time"].isoformat() if session["end_time"] is not None else None
-                sessions[session["id"]] = session
+        sessions : dict = {session.id : dict(
+            meta = session,
+            data = None,
+        ) for session in self.api.query_sessions(time_span=time_span)}
         
-        logger.debug(f"Retrieved {len(sessions)} in total.")
+        logger.debug(f"Meteotracker will download {len(sessions) = } for this time period.")
+
+        t0 = time()
+        for session in sessions.values():
+            meta = session["meta"]
+            session["data"] = self.api.get_session_data(meta, raw=True)
+            session["meta"] = dataclasses.asdict(meta)
+        
+        if sessions:
+            logger.debug(f"Retrieved {len(sessions)} in {fmt_time((time() - t0)/len(sessions))}")
+
 
         return DataChunk(
             key = "meteotracker:all",
@@ -132,50 +108,73 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
             version=self.version,
             empty = len(sessions) == 0,
             json=sessions,
-            data=all_session_data,
+            data=None,
         )
     
     def affected_time_spans(self, chunk: DataChunk, granularity: timedelta) -> Iterable[TimeSpan]:
         assert chunk.source == self.source, f"{chunk.source} != {self.source}"
-        for session_id, session in chunk.json.items():
-            start_time = datetime.fromisoformat(session["start_time"])
+        for session in chunk.json.values():
+            start_time = datetime.fromisoformat(session["meta"]["start_time"])
             yield TimeSpan.from_point(start_time, granularity)
 
     def emit_messages(self, relevant_chunks : Iterable[DataChunk], time_spans: Iterable[TimeSpan]) -> Iterable[TabularMessage]:
         time_spans = set(time_spans)
+        columns : dict[str, RawVariable | CanonicalVariable ] = {}
+        data_frames = []
         for chunk in relevant_chunks:
             for session_id, session in chunk.json.items():
-                assert chunk.data is not None
+                data = session["data"]
+                meta = session["meta"]
 
-                data = chunk.data[chunk.data.id == session_id].copy()
-                data["time"] = pd.to_datetime(data["time"])
+                data = pd.DataFrame.from_records(data)
+                data[["lat", "lon"]] = np.array(data["lo"].tolist())[:, [1, 0]]
+                data.drop(columns=["lo"], inplace=True)
+                
+                # determine the living lab
+                living_labs = set(living_lab for pattern, living_lab in self.author_regex_to_living_lab.items() if pattern.match(meta['author']))
+                if len(living_labs) == 0:
+                    living_lab = "unknown"
+                elif len(living_labs) == 1:
+                    living_lab = living_labs.pop()
+                    logger.debug(f"Matched {meta['author'] = } to {living_lab = }")
+                else:
+                    raise ValueError(f"Multiple living labs matched for {session.author = } {living_labs = }")
 
-                start_time = data["time"].min()
-                end_time = data["time"].max()
-                data_time_span = TimeSpan(start=start_time, end=end_time)
+                # Copy all relevant metadata into columns
+                data.rename(columns={"time": "datetime"}, inplace=True)
+                data["datetime"] = pd.to_datetime(data["datetime"])
 
-                if not any(start_time in ts for ts in time_spans):
-                    logger.debug(f"Skipping {session_id} with {start_time = } because it's not in any of the time spans")
-                    continue
+                meta["living_lab"] = living_lab
+                self.perform_copy_metadata_columns(data, meta, columns)
+                data_frames.append(data)
 
-                if not self.in_bounds(data):
-                    logger.debug(f"Skipping {session_id} because it's not in bounds")
-                    return False
+        combined_df = pd.concat(
+            [
+                df.set_index(['datetime', 'external_station_id'])
+                for df in data_frames
+            ],
+            verify_integrity=False
+        )
+        combined_df.reset_index(inplace=True)
+        combined_df.set_index('datetime', inplace=True)
+        combined_df.sort_index(inplace=True)
 
-    
-                yield TabularMessage(
-                    metadata=self.generate_metadata(
-                        external_id=session_id,
-                        time_span=data_time_span,
-                        unstructured=session,
-                    ),
-                    data=data,
-                )
+        for time_span in time_spans:
+            data = combined_df.loc[time_span.start : time_span.end]
+            if len(data) == 0:
+                continue
 
-    def in_bounds(self, df):
-        if self.wkt_bounding_polygon is None:
-            return True
-        lat, lon = df.lat.values[0], df.lon.values[0]
-        point = shapely.geometry.point.Point(lat, lon)
-        return self.bounding_polygon.contains(point)
+            yield TabularMessage(
+                metadata=self.generate_metadata(
+                    time_span=time_span,
+                    columns=columns,
+                ),
+                data=data,
+            )
 
+    # def in_bounds(self, df):
+    #     if self.wkt_bounding_polygon is None:
+    #         return True
+    #     lat, lon = df.lat.values[0], df.lon.values[0]
+    #     point = shapely.geometry.point.Point(lat, lon)
+    #     return self.bounding_polygon.contains(point)

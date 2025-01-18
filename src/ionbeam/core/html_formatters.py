@@ -2,7 +2,7 @@ import json
 import random
 import string
 from dataclasses import fields, is_dataclass
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import BinaryIO
 
@@ -16,6 +16,9 @@ def random_id(n):
 def json_to_html(d):
     return f"<pre>{json.dumps(d, indent = 4)}>/pre>"
     # return JSON(d)
+
+def preformatted_html(s):
+    return f"<pre>{s}</pre>"
 
 def dataframe_to_html(data: pd.DataFrame, max_colwidth=1000, **kwargs) -> str:
     kwargs = dict(index=False, notebook=True, render_links=True, max_rows=50) | kwargs
@@ -63,39 +66,21 @@ def mappings_to_html(mappings):
 def column_metadata_to_html(columns: dict, values : dict | None):
     if not columns:
         return "<p>No column metadata</p>"
-    example = columns[next(iter(columns))]
 
-    if example.__class__.__name__ == "CanonicalVariable":
-        df = pd.DataFrame.from_records(
-            [
-                dict(
-                    Name=c.name,
-                    Datatype=c.dtype,
-                    Unit=c.unit or "",
-                    FirstValue=values.get(c.name, "Not present") if values is not None else "",
-                    Description=c.description or "",
-                )
-                for k, c in columns.items()
-            ]
-        )
-        return dataframe_to_html(df)
-    elif example.__class__.__name__ == "RawVariable":
-        df = pd.DataFrame.from_records(
-            [
-                dict(
-                    Name=c.name,
-                    Key=c.key,
-                    Type=c.type,
-                    Unit=c.unit or "",
-                    FirstValue=values.get(c.key, "Not present")  if values is not None else "",
-                    Discard=c.discard,
-                )
-                for k, c in columns.items()
-            ]
-        )
-        return dataframe_to_html(df)
-    else:
-        return f"<p>Unknown column metadata type {columns[0].__class__.__name__}</p>"
+    df = pd.DataFrame.from_records(
+        [
+            dict(
+                Name=c.name,
+                Key=c.key,
+                Datatype=c.dtype,
+                Unit=c.unit or "",
+                FirstValue = values.get(c.key, "Not present") if values is not None else "",
+                Description = c.description or "",
+            )
+            for k, c in columns.items()
+        ]
+    )
+    return dataframe_to_html(df)
 
 
 
@@ -300,7 +285,10 @@ def message_to_html(message):
     if hasattr(message, "data"):
         rows, columns = message.data.shape
         size = human_readable_bytes(message.data.memory_usage().sum())
-        title = f"Data (Pandas DataFrame, {rows} rows x {columns} columns, size: {size})"
+        title = f"Data (Pandas DataFrame, {rows} rows x {columns} columns, size: {size} index: {message.data.index.name})"
+        info = StringIO()
+        message.data.info(verbose = True, buf = info)
+        sections.append(make_section("DataFrame.info()", preformatted_html(info.getvalue())))
         sections.append(make_section(title, dataframe_to_html(message.data)))
 
     if hasattr(message, "metadata") and getattr(message.metadata, "mars_id", {}):
@@ -356,6 +344,9 @@ def action_to_html(action, extra_sections=[]):
     html = dataframe_to_html(df, header=False)
 
     sections.insert(0, make_section("Attributes", html, open=True))
+    
+    if hasattr(action, "__doc__") and action.__doc__:
+        sections.insert(0, make_section("Docstring", preformatted_html(action.__doc__)))
 
     newline = "\n"
     return f"""

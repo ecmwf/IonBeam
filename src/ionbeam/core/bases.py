@@ -12,7 +12,7 @@ import dataclasses
 import itertools as it
 import re
 import uuid
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Callable, Iterable, List, Literal, TypeVar
@@ -23,6 +23,7 @@ import pandas as pd
 from sqlalchemy.engine.base import Engine
 from sqlalchemy.orm.session import Session
 
+from ..core.converters import unit_conversions
 from .history import (
     ActionInfo,
     CodeSourceInfo,
@@ -53,9 +54,9 @@ class MetaData:
     encoded_format: str | None = None
     filepath: Path | None = None
     mars_id: MARSRequest | None = None
-    unstructured: dict = dataclasses.field(kw_only=True, default_factory=dict)
+    unstructured: dict = field(kw_only=True, default_factory=dict)
 
-    columns: dict[str, "CanonicalVariable | RawVariable"] = dataclasses.field(default_factory=dict, kw_only=True)
+    columns: dict[str, "CanonicalVariable | RawVariable"] = field(default_factory=dict, kw_only=True)
 
     internal_id: str | None = None
     external_id: str | None = None
@@ -73,7 +74,7 @@ class MetaData:
 @dataclass
 class Message:
     "Base Message Class from which FinishMessage and DataMessage inherit"
-    next: List[UUID] | None = dataclasses.field(default=None, kw_only=True)
+    next: List[UUID] | None = field(default=None, kw_only=True)
 
     def _repr_html_(self):
         return message_to_html(self)
@@ -103,7 +104,7 @@ class DataMessage(Message):
     "A message that represents some data. It may have an attached dataframe, a reference to a file or somethihg else."
 
     metadata: MetaData
-    history: list = dataclasses.field(default_factory=list, kw_only=True)
+    history: list = field(default_factory=list, kw_only=True)
 
     def __str__(self):
         class_name = self.__class__.__name__
@@ -146,30 +147,23 @@ MessageVar = TypeVar("MessageVar", bound=Message)
 DataMessageVar = TypeVar("DataMessageVar", bound=DataMessage)
 
 
-# Config Classes
 @dataclass
-class CanonicalVariable:
-    """
-    Represents a physical variable with units, dtype and other metadata
-    name: our internal name, i.e air_temperature_near_surface
-    desc: a description of the variable
-    unit: the physical unit
-    WMO: whether this exact name exists in the WMO variables
-    dtype: the dtype with which to store this data internally
-    output: whether this variable should be output as an observation at the end of the pipeline
-
-    These three set the MARS keys for this variable
-    codetype: int
-    varno: int
-    obstype: int
-    """
-
+class Variable:
     name: str
     description: str | None = None
     unit: str | None = None
+    type: str | None = None
     CRS: str | None = None
     dtype: str | None = "float64"
-    output: bool = False
+    discard: bool = False
+
+
+@dataclass
+class CanonicalVariable(Variable):
+    """
+    Represents a physical variable with units, dtype and other metadata
+    """
+
     raw_variable: "RawVariable | None" = None
 
     def __repr__(self):
@@ -184,6 +178,38 @@ class CanonicalVariable:
     @property
     def key(self):
         return self.name
+
+@dataclass
+class RawVariable(Variable):
+    """Represents a variable within an external stream of data
+    and links it to our nice internal representation.
+
+    name: our internal name, i.e air_temperature_near_surface
+    key: the column name within the incoming data stream perhaps T0, temp, temperatura
+    type: if not None, gives a hint to the parser of how to parse this column
+    unit: the incoming physical unit, i.e degrees celsius
+    canonical_variable: linked at runtime to the canonical_variable that this column will get parsed to.
+    """
+
+    key: str = "__DEFAULT_TO_NAME__"
+    canonical_variable: CanonicalVariable | None = None
+    converter: Callable[[pd.Series], pd.Series] | None = None
+    metadata: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.key == "__DEFAULT_TO_NAME__":
+            self.key = self.name
+
+        # Make a best effort to deal with unicode characters that look the same but have different code points
+        if self.unit:
+            self.unit = normalize("NFKD", str(self.unit))
+
+    def make_canonical(self) -> CanonicalVariable:
+        assert self.canonical_variable is not None
+        return dataclasses.replace(
+            self.canonical_variable,
+            raw_variable=self,
+        )
 
 
 @dataclass
@@ -200,10 +226,12 @@ class IngestionTimeConstants:
 @dataclass
 class Globals:
     canonical_variables: List[CanonicalVariable]
+    canonical_variables_by_name: dict[str, CanonicalVariable] = field(init=False)
+    
     data_path: Path
     cache_path: Path
     ingestion_time_constants: IngestionTimeConstants
-    source_path: Annotated[Path, "post_init"] = dataclasses.field(kw_only=True)
+    source_path: Path | None = field(default=None, kw_only=True)
 
     die_on_error: bool = False
     
@@ -226,18 +254,18 @@ class Globals:
 
     split_data_columns: bool = True
     code_source: CodeSourceInfo | None = None
-    fdb_schema: Annotated[FDBSchema, "post_init"] = dataclasses.field(kw_only=True)
+    fdb_schema: FDBSchema = field(kw_only=True, init = False)
     secrets: dict | None = None
     api_hostname: str | None = None
     postgres_database: dict | None = None
     custom_mars_keys: list[str] | None = None
 
-    sql_engine: Annotated[Engine, "post_init"] = dataclasses.field(kw_only=True)
-    sql_session: Annotated[Session, "post_init"] = dataclasses.field(kw_only=True)
+    sql_engine: Engine = field(kw_only=True, init=False)
+    sql_session: Session = field(kw_only=True, init=False)
 
     # When a class hasn't been instantiated yet use a string, see https://peps.python.org/pep-0484/#forward-references
-    actions_by_id: dict[uuid.UUID, "Action"] = dataclasses.field(default_factory=dict)
-    actions_by_name: dict[str, "Action"] = dataclasses.field(default_factory=dict)
+    actions_by_id: dict[uuid.UUID, "Action"] = field(default_factory=dict)
+    actions_by_name: dict[str, "Action"] = field(default_factory=dict)
 
     def _repr_html_(self):
         return dataclass_to_html(self)
@@ -248,21 +276,21 @@ class Action:
     "The base class for actions, from which Source and Processor inherit"
 
     # Unique human readable name
-    name: str | None = dataclasses.field(default = None, kw_only=True)
+    name: str | None = field(default = None, kw_only=True)
 
     # A list of names of actions to forward messages to next
-    forward_to_names: List[str] | None = dataclasses.field(default = None, kw_only=True)
+    forward_to_names: List[str] | None = field(default = None, kw_only=True)
 
     # Metadata to set on outgoing messages
-    set_metadata: MetaData = dataclasses.field(default_factory=MetaData, kw_only=True)
+    set_metadata: MetaData = field(default_factory=MetaData, kw_only=True)
 
-    # code_source: CodeSourceInfo | None = dataclasses.field(default=None, kw_only=True)
-    id: uuid.UUID = dataclasses.field(default_factory=uuid.uuid4, kw_only=True)
-    next: List[UUID] | None = dataclasses.field(default=None, kw_only=True)
-    globals: Annotated[Globals, "post_init"] = dataclasses.field(kw_only=True)
+    # code_source: CodeSourceInfo | None = field(default=None, kw_only=True)
+    id: uuid.UUID = field(default_factory=uuid.uuid4, kw_only=True)
+    next: List[UUID] | None = field(default=None, kw_only=True)
+    globals: Globals = field(kw_only=True, init=False)
 
     "Path to the yaml file that defines this action" 
-    definition_path: Annotated[Path | None, "post_init"] = dataclasses.field(kw_only=True)
+    definition_path: Path | None = field(kw_only=True, init=False)
 
     def init(self, globals: Globals, definition_path: Path | None = None):
         "Initialise self with access to the global config variables"
@@ -370,7 +398,7 @@ class Match:
 
     def matches(self, msg: DataMessage) -> bool:
         "Determine if msg matches this Match object"
-        for field in dataclasses.fields(self):
+        for field in fields(self):
             match_regex = getattr(self, field.name)
             if match_regex is None:
                 continue
@@ -395,7 +423,7 @@ class Processor(Action):
     "An Action which accepts and returns messages"
 
     # UUID is the fast path that just matches instantly with a single previous action
-    match: List[Match] | None = dataclasses.field(default=None, kw_only=True)
+    match: List[Match] | None = field(default=None, kw_only=True)
 
     def matches(self, message: Message) -> bool:
         if isinstance(message, FinishMessage):
@@ -459,46 +487,6 @@ class Writer(Processor):
     def __post_init__(self):
         self.set_metadata = dataclasses.replace(self.set_metadata, state="written")
 
-from ..core.converters import unit_conversions
-
-
-@dataclass
-class RawVariable:
-    """Represents a variable within an external stream of data
-    and links it to our nice internal representation.
-
-    name: our internal name, i.e air_temperature_near_surface
-    key: the column name within the incoming data stream perhaps T0, temp, temperatura
-    type: if not None, gives a hint to the parser of how to parse this column
-    unit: the incoming physical unit, i.e degrees celsius
-    canonical_variable: linked at runtime to the canonical_variable that this column will get parsed to.
-    """
-
-    name: str
-    key: str = "__DEFAULT_TO_NAME__"
-    type: str | None = None
-    unit: str | None = None
-    description: str | None = None
-    discard: bool = False
-    canonical_variable: Annotated[CanonicalVariable, "post_init"] = dataclasses.field(default=None)
-    converter: Callable[[pd.Series], pd.Series] | None = None
-    metadata: dict = dataclasses.field(default_factory=dict)
-
-    def __post_init__(self):
-        if self.key == "__DEFAULT_TO_NAME__":
-            self.key = self.name
-
-        # Make a best effort to deal with unicode characters that look the same but have different code points
-        if self.unit:
-            self.unit = normalize("NFKD", str(self.unit))
-
-    def make_canonical(self) -> CanonicalVariable:
-        assert self.canonical_variable is not None
-        return dataclasses.replace(
-            self.canonical_variable,
-            raw_variable=self,
-        )
-
 
 class Mappings(list):
     """
@@ -519,7 +507,7 @@ class Mappings(list):
             value = d.get(k, default)
             return value if isinstance(value, list) else [value]
 
-        allowed = {f.name for f in dataclasses.fields(RawVariable)}
+        allowed = {f.name for f in fields(RawVariable)}
         super().__init__(
             [
                 RawVariable(

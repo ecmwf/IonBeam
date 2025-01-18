@@ -36,11 +36,22 @@ class IdentityAction(Parser):
         yield output_msg
 
 @dataclasses.dataclass
+class ComputeStationNameFromId(Parser):
+    def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
+        assert "station_id" in msg.data
+        assert "platform" in msg.data
+        msg.data["station_name"] = msg.data.platform.astype(str) + ": " + msg.data.station_id.astype(str)
+        msg.metadata.columns["station_name"] = self.globals.canonical_variables_by_name["station_name"]
+        yield msg
+
+@dataclasses.dataclass
 class ComputeChunkDateTime(Parser):
     def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
         assert msg.metadata.time_span is not None
         msg.data["chunk_date"] = msg.metadata.time_span.start.strftime('%Y%m%d')
         msg.data["chunk_time"] = msg.metadata.time_span.start.strftime('%H%M')
+        msg.metadata.columns["chunk_date"] = self.globals.canonical_variables_by_name["chunk_date"]
+        msg.metadata.columns["chunk_time"] = self.globals.canonical_variables_by_name["chunk_time"]
         yield msg
 
 @dataclasses.dataclass
@@ -62,5 +73,6 @@ class ComputeMARSIdentifier(Parser):
 class ComputeStationId(Parser):
     def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
         assert "external_station_id" in msg.data
-        msg.data["station_id"] = msg.data.external_station_id.astype(str).apply(id_hash)
+        msg.data["station_id"] = msg.data.external_station_id.astype("string").apply(id_hash).astype("string")
+        msg.metadata.columns["station_id"] = self.globals.canonical_variables_by_name["station_id"]
         yield msg

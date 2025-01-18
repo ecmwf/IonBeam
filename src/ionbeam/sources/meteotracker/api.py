@@ -11,7 +11,7 @@
 import dataclasses
 import logging
 from datetime import datetime, timedelta
-from typing import ClassVar, Dict, List, Literal, NewType, Tuple
+from typing import ClassVar, Dict, List, Literal, NewType, Tuple, overload
 
 import pandas
 import requests
@@ -234,7 +234,7 @@ class MeteoTracker_API:
             params["page"] = i
             response = self.get("https://app.meteotracker.com/api/Sessions", params=params).json()
             responses.append(response)
-            if len(response) < 1000:
+            if len(response) < items:
                 break  # we're done
 
         json = [s for res in responses for s in res]
@@ -242,13 +242,23 @@ class MeteoTracker_API:
             return json
         return [MT_Session(**j) for j in json]
 
-    def get_session_data(self, session: MT_Session) -> pandas.DataFrame:
+    @overload
+    def get_session_data(self, session: MT_Session, raw: Literal[False] = False) -> pandas.DataFrame:
+        ...
+
+    @overload
+    def get_session_data(self, session: MT_Session, raw: Literal[True]) -> dict:
+        ...
+
+    def get_session_data(self, session: MT_Session, raw = False):
         variables = session.columns + ["time", "lo"]
 
         json = self.get(
             "https://app.meteotracker.com/api/points/session", params=dict(id=session.id, data=" ".join(variables))
         ).json()
-
+        if raw: 
+            return json
+        
         df = pandas.DataFrame.from_records(json)
         if "lo" in df:
             df["lat"], df["lon"] = [r[1] for r in df["lo"].values], [r[0] for r in df["lo"].values]

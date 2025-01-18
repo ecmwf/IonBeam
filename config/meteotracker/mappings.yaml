@@ -7,12 +7,10 @@
 - name: start_time
   type: datetime
 
-- name: external_id
+- name: external_station_id
   key: id
 
 - name: offset_tz
-
-- name: external_id
 
 - name: author
 - name: living_lab

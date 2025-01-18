@@ -6,7 +6,7 @@ from typing import Iterable
 
 import pandas as pd
 
-from .bases import Action, DataMessage, TabularMessage
+from .bases import Action, CanonicalVariable, DataMessage, RawVariable, TabularMessage
 
 logger = logging.getLogger(__name__)
 
@@ -35,19 +35,32 @@ class Source(Action, ABC):
     def matches(self, message: DataMessage) -> bool:
         return False
 
-    def perform_copy_metadata_columns(self, df : pd.DataFrame, source: dict) -> None:
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
+        assert "external_station_id" in self.copy_metadata_to_columns, "external_station_id must be copied to columns"
+
+    def perform_copy_metadata_columns(self, df : pd.DataFrame, source: dict, columns : dict[str, RawVariable | CanonicalVariable]) -> None:
         for column_name, column_key in self.copy_metadata_to_columns.items():
             if column_name in df:
                 logger.warning(f"Copy_data_to_Column {column_name} already in the dataframe, skipping")
                 continue
+
+            if column_name not in self.globals.canonical_variables_by_name:
+                assert ValueError, f"Column {column_name} not found in canonical variables"
 
             value = recursive_get(source, column_key.split("."))
 
             if value is None:
                 logger.warning(f"Column {column_key} not found in metadata, skipping. Possible keys are {source}")
             else:   
-                # logger.debug(f"Extracting {column_key} into {column_name} with value {value}")
+                # logger.debug(f"Extracting {column_key} into {column_name} with value {value = } {type(value) = }")
                 df[column_name] = value
+                columns[column_name] = self.globals.canonical_variables_by_name[column_name]
+
+                # push pandas to use the newer string type than object for string columns
+                if columns[column_name].dtype is not None:
+                    df[column_name] = df[column_name].astype(columns[column_name].dtype)
+                
 
     @abstractmethod
     def generate(self) -> Iterable[TabularMessage]:

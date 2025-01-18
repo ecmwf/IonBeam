@@ -1,44 +1,40 @@
 actions:
   - class: AcronetSource
-    mappings: !include mappings.yaml
     copy_metadata_to_columns:
       external_station_id: id
       station_name: name
       lat: lat
       lon: lon
 
+  # Compute the column mappings based on the name of each column
+  - class: ComputeColumnMappingsByName
+    mappings: !include mappings.yaml
+
   - class: SetConstants
     set:
       platform: acronet
-      aggregation_type: chunked
+      aggregation_type: by_time
 
   - class: ComputeStationId
+  - class: FormatChecks
   - class: ComputeChunkDateTime
 
   - class: CanonicaliseColumns
     mappings: !include mappings.yaml
     move_to_front:
+      - platform
+      - author
       - station_id
       - external_station_id
       - station_name
-      - author
       - aggregation_type
       - chunk_date
-      - platform
       - chunk_time
       - datetime
       - lat
       - lon
 
   - class: UpdateStationMetadata      
-
-  - class: SplitOnColumnValue
-    column: station_id
-
-  - class: DropNaNColumns
-  - class: DropNaNRows
-  - class: DropEmpty
-
   - class: ComputeMARSIdentifier
     lookup:
       class: const.rd
@@ -47,11 +43,32 @@ actions:
       aggregation_type: data.aggregation_type
       platform: data.platform
       date: data.chunk_date
-      internal_id: data.station_id
       time: data.chunk_time
       version: const.1
 
-    forward_to_names: ["final_processing"]
+    forward_to_names: ["final_processing"]     
+
+
+  # - class: SplitOnColumnValue
+  #   column: station_id
+
+  # - class: DropNaNColumns
+  # - class: DropNaNRows
+  # - class: DropEmpty
+
+  # - class: ComputeMARSIdentifier
+  #   lookup:
+  #     class: const.rd
+  #     expver: const.xxxx
+  #     stream: const.lwda
+  #     aggregation_type: data.aggregation_type
+  #     platform: data.platform
+  #     date: data.chunk_date
+  #     internal_id: data.station_id
+  #     time: data.chunk_time
+  #     version: const.1
+
+  #   forward_to_names: ["final_processing"]
 
       
 

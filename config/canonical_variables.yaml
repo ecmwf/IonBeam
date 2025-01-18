@@ -5,19 +5,40 @@
 # When that's not possible we need to define the key, unit and definition
 # Possibly other variables too
 
-# for dtype use object aliases from https://pandas.pydata.org/docs/user_guide/basics.html#basics-dtypes
+# for dtype use string aliases from https://pandas.pydata.org/docs/user_guide/basics.html#basics-dtypes
 # default dtype is float64
 
 - name: platform
-  dtype: object
-  description: The platform that made the observation, e.g. acronet, meteotracker, smart_citizen_kit
+  dtype: category
+  description: The platform that made the observation
+
+- name: living_lab
+  dtype: category
+  description: The living lab associated with this data
 
 - name: aggregation_type
-  dtype: object
-  description: The type of aggregation of the data, e.g. chunked or whole
+  dtype: category
+  description: The type of aggregation of the data, e.g. by_time or by_station
+
+- name: author
+  dtype: category
+  description: The person or entity responsible for the observation.
+
+- name: external_station_id
+  description: The identifier for a station used by the observation platform.
+  dtype: category
+
+- name: station_id
+  description: A unique identifer for a station, sensor or device.
+  dtype: category
+
+- name: station_name
+  description: A human readable name for a station or device. Not necessarily unique.
+  dtype: category
+
 
 - name: sensor_name
-  dtype: object
+  dtype: string
   description: The name of the sensor that made the observation.
 
 - name: datetime
@@ -26,11 +47,11 @@
 
 - name: start_time
   dtype: datetime64[ns, UTC]
-  description: For chunked data files, the logical begining of the time period of the chunk, possibly rounded.
+  description: For chunked data files, the logical beginning of the time period of the chunk, possibly rounded.
   
 - name: offset_tz
-  description: Uncertain what this means in the Meteotracker data.
-  dtype: object
+  description: The original timezone offset of the data
+  dtype: string
 
 - name: lat
   unit: "EPSG:4326"
@@ -44,69 +65,46 @@
   unit: "EPSG:4326"
   description: "The altitude of the observation, referenced to WGS84 (EPSG: 4326)"
 
-- name: author
-  dtype: object
-  description: The author field from the Meteotracker data
 
 - name: author_uuid
-  dtype: object
-  description: A uuid for the author from the external data source
+  dtype: string
+  description: A uuid for the author from the external data platform.
 
 - name: chunk_date
-  dtype: object
+  dtype: string
   description: The date of the chunk of data in the format YYYYMMDD
 
 - name: chunk_time
-  dtype: object
+  dtype: string
   description: The time of the chunk of data in the format HHMM
 
-- name: living_lab
-  dtype: object
-  description: The living lab associated with this data
-
-- name: track_id
-  description: A unique identifer for a single recorded track from a mobile sensor.
-  dtype: object
-
-- name: station_name
-  description: A human readable name for a station or device. Not necessarily unique.
-  dtype: object
-
-- name: station_id
-  description: A unique identifer for a station, sensor or device.
-  dtype: object
-
-- name: created_at
+- name: station_created_at
+  description: The date and time that the station was created.
   dtype: datetime64[ns, UTC]
 
-- name: city
-  dtype: object
-
-- name: country
-  dtype: object
-
 - name: sensor_type
-  dtype: object
+  description: A label indicating the kind or model of sensor used. 
+  dtype: string
 
-- name: location
-  dtype: int
+# - name: location
+#   dtype: int
 
 - name: location_exposure
-  dtype: object
+  dtype: string
   description: The exposure of the sensor, e.g. indoor, outdoor, roadside.
 
 - name: observation_id
   description: A unique identifer for a stationary sensor.
-  dtype: object
+  dtype: string
 
-- name: external_station_id
-  description: The identifier for a station used by the observation source.
-  dtype: object
+
 
 - name: air_temperature_near_surface
+  description: The temperature of the air near the surface.
   unit: K
 
 - name: relative_humidity_near_surface
+  description: The relative humidity of the air near the surface.
   unit: "%"
 
 - name: humidity_index
@@ -117,7 +115,7 @@
   description: The internal temperature of the sensor.
 
 - name: vertical_temperature_gradient
-  description: 
+  description: The vertical rate of change of the temperature.
   unit: "°C/100m"
 
 
@@ -140,6 +138,7 @@
   unit: K
 
 - name: wind_direction_near_surface
+  description: The direction of the wind near the surface in degrees clockwise from north.
   unit: "°"
 
 - name: wind_speed_near_surface
@@ -152,6 +151,7 @@
   unit: "Degrees"
 
 - name: battery_level
+  description: The battery level of the device.
   unit: "V"
 
 
@@ -213,6 +213,7 @@
   unit: "#/cm3"
 
 - name: typical_particle_size
+  description: A representative diameter of the measured particles.
   unit: "μm"
 
 - name: EPA_Air_Quality
@@ -232,18 +233,20 @@
 
 - name: equivalent_carbon_dioxide
   unit: ppm
+  description: The equivalent amount of CO2 in the air when the warming effects of other greenhouse gases are taken into account.
 
 - name: noise_dB
+  description: The noise level in decibels.
   unit: "dB"
 
 - name: noise_dBA
+  description: The noise level in decibels, A-weighted.
   unit: "dBA"
 
 - name: nitrogen_oxide
+  description: The concentration of nitrogen oxide in the air.
   unit: "ppm"
 
 - name: ambient_light
+  description: The intensity of surrounding light.
   unit: "lux"
-
-- name: unknown
-  unit: "NA"

@@ -86,6 +86,8 @@ def parse_sub_config(yaml_file: Path, globals, schema=SubConfig):
     # Let all the actions initialise themselves with access to the global config
     for action in config.actions:
         action.init(globals, definition_path=yaml_file)
+        if not hasattr(action, "globals"):
+            raise RuntimeError(f"Action {action} has no globals set, did you forget to call super().init in this action's init method?")
 
     # For actions where match has not been specified,
     # we will match with the previous action by default
@@ -168,6 +170,8 @@ def parse_globals(config_dir: Path, **overrides) -> Config:
     )
 
     config.globals.sql_session = sessionmaker(config.globals.sql_engine)
+
+    config.globals.canonical_variables_by_name = {c.name : c for c in config.globals.canonical_variables}
 
     # Parse the global fdb schema file
     # This is used to validate odb files during encoding and before writing to the fdb
@@ -256,6 +260,8 @@ def parse_single_action(config_dir: Path, action_input: Path | str | dict, **ove
     action = parse_config_from_dict(Action, action_dict)
 
     action.init(config.globals, definition_path=definition_path)
+    if not hasattr(action, "globals"):
+        raise RuntimeError(f"Action {action} has no `globals` set, did you forget to call super().init in this action's init method?")
 
     return config, action
 
@@ -291,6 +297,8 @@ def reload_action(config : Config, action : Action) -> tuple[Config, Action]:
     action = parse_config_from_dict(Action, action_dict)
     action.id = action_id
     action.init(config.globals, definition_path=definition_path)
+    if not hasattr(action, "globals"):
+        raise RuntimeError(f"Action {action} has no globals set, did you forget to call super().init in this action's init method?")
 
     return config, action
 
@@ -321,5 +329,7 @@ def load_action_from_paths(config_path : Path, action_path : Path, action_class 
 
     action = parse_config_from_dict(Action, action_dict)
     action.init(config.globals, definition_path=action_path)
+    if not hasattr(action, "globals"):
+        raise RuntimeError(f"Action {action} has no globals set, did you forget to call super().init in this action's init method?")
 
     return config, action

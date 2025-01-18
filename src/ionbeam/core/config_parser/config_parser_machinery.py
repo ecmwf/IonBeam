@@ -16,7 +16,8 @@ LINE_KEY = "__line__"  # special key that tells us what line we're on
 
 @dataclass
 class MissingOverlay:
-    pass
+    def __bool__(self):
+        return False
 
 MISSING_OVERLAY = MissingOverlay()  # special object to indicate that a field is missing in an overlay
 
@@ -41,7 +42,7 @@ def check_matching(context, datacls, input_dict):
     default_keys = {field.name for field in fields(datacls) if has_default(field)}
 
     ignored_keys = {TYPE_KEY, LINE_KEY} | default_keys
-    datacls_keys = {field.name for field in fields(datacls) if not is_post_init_field(field)}
+    datacls_keys = {field.name for field in fields(datacls) if field.init}
     input_keys = set(input_dict.keys())
 
     if context.overlay:
@@ -137,9 +138,6 @@ def is_dict(t):
 
 def is_overlay_dataclass(t):
     return "overlay" in getattr(t, "__metadata__", ())
-
-def is_post_init_field(f : Field):
-    return "post_init" in getattr(f.type, "__metadata__", ())
 
 def is_custom_init_field(f : Field):
     return "custom_init" in getattr(f.type, "__metadata__", ())
@@ -333,14 +331,10 @@ def dataclass_from_dict(context, datacls, input_dict):
             field.name: parse_field(context, field.name, field.type, input_dict[field.name])
                         if field.name in input_dict else MISSING_OVERLAY # If the field is missing and it's an overlay, set it to None
             for field in fields(datacls)
-            if field.name in input_dict or context.overlay # If it's not an overlay, skip this field
+            if field.name in input_dict or (context.overlay and field.init) # If it's not an overlay, skip this field
         }
-    
-    # initialise all the post_init fields to None, leaving it up to the caller to deal with them
-    post_init_fields = {field.name : None for field in fields(datacls) 
-                        if is_post_init_field(field) and field.name not in kwargs}
 
-    return datacls(**kwargs, **post_init_fields)
+    return datacls(**kwargs)
 
 
 def parse_config_from_dict(datacls, input_dict, filepath: Path | str | None = None, overlay = False):
@@ -358,7 +352,7 @@ def merge_overlay(object, overlay):
     
     replacements = {
         field.name: merge_overlay(getattr(object, field.name), getattr(overlay, field.name, MISSING_OVERLAY))
-        for field in fields(object)
+        for field in fields(object) if field.init
     }
 
     return dataclasses.replace(object, **replacements)

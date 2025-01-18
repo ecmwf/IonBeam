@@ -8,8 +8,14 @@
 # does it submit to any jurisdiction.
 #
 
-from .canonicalise import CanonicaliseColumns
-from .compute_metadata import ComputeChunkDateTime, ComputeMARSIdentifier, ComputeStationId, IdentityAction
+from .canonicalise import CanonicaliseColumns, ComputeColumnMappingsByName, ConvertDtypes, FormatChecks
+from .compute_metadata import (
+    ComputeChunkDateTime,
+    ComputeMARSIdentifier,
+    ComputeStationId,
+    ComputeStationNameFromId,
+    IdentityAction,
+)
 from .drop_empty import DropEmpty, DropNaNColumns, DropNaNRows
 from .extract_metadata import ExtractMetaData
 from .splitter import Splitter

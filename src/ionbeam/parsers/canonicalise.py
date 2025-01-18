@@ -10,7 +10,7 @@
 
 import dataclasses
 import logging
-from typing import Annotated, Callable, Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Sequence
 from unicodedata import normalize
 
 import Levenshtein
@@ -20,6 +20,57 @@ from ..core.bases import CanonicalVariable, Mappings, Parser, RawVariable, Tabul
 from ..core.converters import unit_conversions
 
 logger = logging.getLogger(__name__)
+
+@dataclasses.dataclass
+class ComputeColumnMappingsByName(Parser):
+    """Given the mappings, compute the column mappings based purely on the name of each column"""
+    mappings: Mappings
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
+        self.mappings.link(globals.canonical_variables)
+        self.column_mappings_by_key = {c.key : c for c in self.mappings}
+
+    def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
+        for col in msg.data.columns:
+            if col in msg.metadata.columns:
+                continue # already mapped
+            elif col in self.column_mappings_by_key:
+                msg.metadata.columns[col] = self.column_mappings_by_key[col]
+            else:
+                logger.warning(f"ComputeColumnMappingsByName: Column {col} not in mappings")
+        yield msg
+
+@dataclasses.dataclass
+class ConvertDtypes(Parser):
+    """Calls msg.data.convert_dtypes()"""
+    def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
+        msg.data = msg.data.convert_dtypes()
+        yield msg
+
+@dataclasses.dataclass
+class FormatChecks(Parser):
+    def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
+        assert isinstance(msg.data, pd.DataFrame)
+        assert len(set(msg.data.columns)) == len(msg.data.columns), f"Duplicate columns in dataframe {msg.data.columns}"
+        assert isinstance(msg.data.index, pd.DatetimeIndex)
+        assert msg.data.index.name == "datetime"
+
+        expected_columns = [
+            "external_station_id",
+            "station_id",
+            "lat",
+            "lon",
+        ]
+        for col in expected_columns:
+            assert col in msg.data.columns, f"{col} not in msg.data.columns"
+
+        only_meta = [column for column in msg.data.columns if column not in msg.metadata.columns]
+        assert not only_meta, f"{only_meta} in msg.data.columns but not in msg.metadata.columns"
+
+        only_data = [column for column in msg.metadata.columns if column not in msg.data.columns]
+        assert not only_data, f"{only_data} in msg.metadata.columns but not in msg.data.columns"
+            
+        yield msg
 
 @dataclasses.dataclass
 class DataFrameChanges:
@@ -57,7 +108,7 @@ class CanonicaliseColumns(Parser):
     """
     mappings: Mappings
     move_to_front: list[str] = dataclasses.field(default_factory=list)
-    to_discard: Annotated[set[str], "post_init"] = dataclasses.field(default_factory=set)
+    to_discard: set[str] = dataclasses.field(default_factory=set, init=False)
 
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
@@ -152,22 +203,29 @@ class CanonicaliseColumns(Parser):
             rename_columns = self.rename_dict,
         )
     
-    def compute_changes_from_raw_variables(self, df : pd.DataFrame, columns: dict[str, RawVariable]) -> DataFrameChanges:
+    def compute_changes_from_raw_variables(self, df : pd.DataFrame, columns: dict[str, RawVariable | CanonicalVariable]) -> DataFrameChanges:
             unmapped = set(df.columns) - set(col.key for col in columns.values()) - set(self.canonical_variables.keys())
             if unmapped:
                 self.complain_about_unmapped(unmapped)
 
+            all_columns = list(columns.values())
+            raw_columns = [col for col in columns.values() if isinstance(col, RawVariable)]
+            canonical_columns = [col for col in columns.values() if isinstance(col, CanonicalVariable)]
+
+            raw_dtype_conversions = {c.key : c.canonical_variable.dtype for c in raw_columns if c.canonical_variable is not None and c.canonical_variable.dtype is not None}
+            canonical_dtype_conversions = {c.key : c.dtype for c in canonical_columns if c.dtype is not None}
+
             return DataFrameChanges(
-                discard_columns = [col.key for col in columns.values() if col.discard] + list(unmapped),
-                dtype_conversions = {c.key : c.canonical_variable.dtype for c in columns.values() if c.canonical_variable is not None and c.canonical_variable.dtype is not None},
-                unit_conversions = {c.key : c.converter for c in columns.values() if c.converter is not None},
-                rename_columns = {c.key: c.name for c in columns.values()},
+                discard_columns = [col.key for col in all_columns if col.discard] + list(unmapped),
+                dtype_conversions = raw_dtype_conversions | canonical_dtype_conversions,
+                unit_conversions = {c.key : c.converter for c in raw_columns if c.converter is not None},
+                rename_columns = {c.key: c.name for c in raw_columns},
             )
 
     def format_dataframe(self, 
                     df: pd.DataFrame,
-                    columns: dict[str, RawVariable] | None,
-                    ) -> tuple[pd.DataFrame, Mapping[str, CanonicalVariable]]:
+                    columns: dict[str, RawVariable | CanonicalVariable] | None,
+                    ) -> tuple[pd.DataFrame, dict[str, CanonicalVariable]]:
         # df = df.copy()
         
         # For most sources it is sufficient to look at the column name to decide how to canonicalise it
@@ -205,14 +263,16 @@ class CanonicaliseColumns(Parser):
         if not columns:
             new_columns = {c : self.canonical_variables[c] for c in df.columns}
         else: 
-            new_columns = {c.canonical_variable.name : c.make_canonical() for c in columns.values() if c.canonical_variable is not None}
+            filtered_columns = [c for c in columns.values() if c.name in df.columns]
+            new_columns = [c.make_canonical() if isinstance(c, RawVariable) else c
+                          for c in filtered_columns]
+            new_columns = {c.name : c for c in new_columns}
         
+        df.convert_dtypes()
+
         return df, new_columns
 
     def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
-        if msg.metadata.columns:
-            assert all(isinstance(v, RawVariable) for v in msg.metadata.columns.values())
-
         df, column_metadata = self.format_dataframe(msg.data, columns = msg.metadata.columns)
         msg.metadata.columns = column_metadata
         msg.data = df

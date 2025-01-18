@@ -3,6 +3,7 @@ import logging
 import uuid
 from typing import Iterable, List, Self
 
+import orjson
 from geoalchemy2 import Geometry
 from geoalchemy2.shape import from_shape, to_shape
 from shapely.errors import GEOSException
@@ -18,10 +19,9 @@ from sqlalchemy import (
     create_engine,
     func,
 )
-from sqlalchemy.dialects.postgresql import TSTZRANGE
+from sqlalchemy.dialects.postgresql import JSONB, TSTZRANGE
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, validates
 from sqlalchemy.sql import text
-from sqlalchemy.types import JSON
 from sqlalchemy_utils import URLType, UUIDType
 
 from ..core.time import TimeSpan
@@ -169,8 +169,8 @@ class Station(Base):
         secondary=station_author_association_table, back_populates="stations"
     )
 
-    # Internal: Any extra data to keep around for development purposes
-    extra = mapped_column(JSON)
+    # # Internal: Any extra data to keep around for development purposes
+    extra = mapped_column(JSONB)
 
     @property
     def bbox(self) -> Polygon | None:
@@ -220,8 +220,8 @@ class Station(Base):
     
     @validates('aggregation_type')
     def validate_aggregation_type(self, key, value):
-        if value not in ["whole", "chunked"]:
-            raise ValueError("Station.aggregation_type must be 'whole' or 'chunked'")
+        if value not in ["by_time", "by_station"]:
+            raise ValueError("Station.aggregation_type must be 'by_time' or 'by_station'")
         return value
     
     __table_args__ = (
@@ -385,6 +385,9 @@ def init_db(globals):
                 logger.info(f"Adding {source!r} to Authors table")
                 session.add(Author(name=source, description=""))
 
+def orjson_serializer(obj):
+    return orjson.dumps(obj, option=orjson.OPT_SERIALIZE_NUMPY).decode()
+
 
 def create_sql_engine(echo = False, **kwargs):
     engine = create_engine(
@@ -393,6 +396,8 @@ def create_sql_engine(echo = False, **kwargs):
             "options": "-c timezone=utc"
         },  # Tell postgres to return all dates in UTC
         echo=echo,
+        json_serializer=orjson_serializer,
+        json_deserializer=orjson.loads
     )
 
     return engine

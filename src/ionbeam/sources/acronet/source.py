@@ -42,8 +42,6 @@ class AcronetSource(RESTSource):
     maximum_request_size: timedelta = timedelta(days = 2)
     max_time_downloading: timedelta = timedelta(seconds = 10)
 
-    # mappings: List[RawVariable] = dataclasses.field(default_factory=list)
-
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
         self.api = CIMA_API(globals.secrets["ACRONET"],
@@ -147,7 +145,7 @@ class AcronetSource(RESTSource):
             df = pd.concat(station_dfs, axis=1, copy = False)
 
             # Copy relevant station metadata as columns into the dataframe
-            self.perform_copy_metadata_columns(df, dataclasses.asdict(station))
+            self.perform_copy_metadata_columns(df, dataclasses.asdict(station), columns)
             station_dataframes.append(df)
 
         combined_df = pd.concat(
@@ -168,6 +166,7 @@ class AcronetSource(RESTSource):
 
             msg = TabularMessage(
                 metadata=self.generate_metadata(
+                    columns=columns,
                     time_span=time_span,
                 ),
                 data=data,

@@ -1,13 +1,16 @@
 import dataclasses
 import logging
+from time import time
 from typing import Iterable
 
 import pandas as pd
+from pandas.api.types import pandas_dtype
 from shapely.geometry import Point, box
 
 from ..core.bases import CanonicalVariable, Parser, RawVariable, TabularMessage
 from ..core.time import TimeSpan
 from ..metadata import db
+from ..singleprocess_pipeline import fmt_time
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +23,10 @@ class SetConstants(Parser):
 
     def process(self, msg: TabularMessage) -> Iterable[TabularMessage]:
         for k, v in self.set.items():
-            msg.data[k] = v
+            assert k in self.globals.canonical_variables_by_name, f"SetConstant: Column {k} not found in the canonical variables"
+            msg.data.insert(0, k, v, allow_duplicates=False)
+            msg.data[k] = msg.data[k].astype(pandas_dtype(self.globals.canonical_variables_by_name[k].dtype or "string"))
+            msg.metadata.columns[k] = self.globals.canonical_variables_by_name[k]
         yield msg
 
 @dataclasses.dataclass
@@ -70,7 +76,10 @@ class UpdateStationMetadata(Parser):
         assert "lat" in msg.data.columns, "Data must have a lattitude column"
         assert "lon" in msg.data.columns, "Data must have a longitude column"
 
+        t0 = time()
+        stations = 0
         for station_id, data_chunk in msg.data.groupby("station_id"):
+            stations += 1
             data_chunk.dropna(axis=1, how="all", inplace=True)
             data_chunk.dropna(axis=0, how="all", inplace=True)
             if data_chunk.empty:
@@ -114,4 +123,5 @@ class UpdateStationMetadata(Parser):
                                   properties = properties)
 
 
+        logger.debug(f"UpdateStationId Updated {stations} stations in {fmt_time(time() - t0)} {fmt_time((time() - t0) / stations)} per station")
         yield msg

@@ -5,11 +5,18 @@ python -m ionbeam ./config -vvvvvv \
     --env local \
     --download \
     --ingest-to-pipeline \
-    --sources acronet \
+    --sources acronet smart_citizen_kit meteotracker \
     --overwrite-fdb \
-    --die-on-error \
-    --finish-after=1 \
-    --init-db 
+    --die-on-error
+    # --init-db 
+    # --finish-after=1 \
+
+
+    # --finish-after=100 \
+
+
+
+
 
 
     # --reingest_from=2025-01-15 \

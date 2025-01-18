@@ -34,7 +34,7 @@ class DropNaNColumns(Parser):
 
         for col in dropped:
             logger.info(f"Dropped column {col}")
-            msg.metadata.columns.pop(col)
+            msg.metadata.columns.pop(col, None)
 
         yield msg
 

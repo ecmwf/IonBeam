@@ -32,12 +32,15 @@ dependencies = [
     "pe", # For parsing fdb schema files wit with a PEF grammar
     "sqlalchemy", # For managing the SQL database schema
     "sqlalchemy-utils",
+    "sqlalchemy_json",
+    "orjson",
     "geoalchemy2",
     "jinja2",
     "psycopg2-binary",
     "wurlitzer",  # For printing C++ output in the console
     "cachetools",
     "responses",
+
 
     # ECMWF dependencies
     "pyodc @ git+https://github.com/ecmwf/pyodc.git@develop",

@@ -3,7 +3,7 @@
 - name: station_id
 - name: author
 - name: author_uuid
-- name: created_at
+- name: station_created_at
 - name: location_exposure
 
 

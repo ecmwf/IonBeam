@@ -94,9 +94,8 @@ if __name__ == "__main__":
         metavar="NUMBER",
         type=int,
         nargs="?",
-        default=argparse.SUPPRESS,
-        const=1,
-        help="If present, limit the number of processed messages to 1 or the given integer",
+        default=None,
+        help="If present, limit the number of processed messages to the given integer",
     )
     parser.add_argument(
         "--logfile",
