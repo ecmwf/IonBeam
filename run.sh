@@ -8,9 +8,9 @@ python -m ionbeam ./config -vvvvvv \
     --sources smart_citizen_kit acronet meteotracker \
     --overwrite-fdb \
     --die-on-error \
-    --reingest_from=2025-01-19
+    --init-db
 
-    # --init-db \
+        # --reingest_from=2025-01-19
 
 
     # --finish-after=1 \
