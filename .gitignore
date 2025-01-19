@@ -13,6 +13,4 @@ examples/notebooks/
 .ipynb_checkpoints/
 *.odb
 # *.ipynb
-cron_logs.txt
-cron_logs_acronet.txt
-cron_logs_meteotracker.txt
+cron_logs*
