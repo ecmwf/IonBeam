@@ -2,10 +2,12 @@
 Code related to keeping track of the history of messages as they pass through the system.
 """
 
-import subprocess
 import dataclasses
-from typing import Literal, Any
+import subprocess
 from pathlib import Path
+from typing import Any, Literal
+
+from ..core.html_formatters import message_to_html
 
 
 @dataclasses.dataclass
@@ -52,6 +54,9 @@ class ActionInfo:
 class MessageInfo:
     name: str
     metadata: Any
+
+    def __repr_html_(self):
+        return message_to_html(self)
 
 
 @dataclasses.dataclass

@@ -1,5 +1,7 @@
 import dataclasses
 import logging
+import warnings
+from copy import deepcopy
 from time import time
 from typing import Iterable
 
@@ -44,6 +46,7 @@ class SplitOnColumnValue(Parser):
             data_chunk[self.column] = value
             metadata = self.generate_metadata(
                 message=msg,
+                columns = deepcopy(msg.metadata.columns),
             )
 
             output_msg = TabularMessage(
@@ -78,7 +81,12 @@ class UpdateStationMetadata(Parser):
 
         t0 = time()
         stations = 0
-        for station_id, data_chunk in msg.data.groupby("station_id"):
+
+        with warnings.catch_warnings():
+            warnings.simplefilter(action='ignore', category=FutureWarning)
+            groups = msg.data.groupby("station_id")
+            
+        for station_id, data_chunk in groups:
             stations += 1
             data_chunk.dropna(axis=1, how="all", inplace=True)
             data_chunk.dropna(axis=0, how="all", inplace=True)
@@ -97,6 +105,8 @@ class UpdateStationMetadata(Parser):
                 start = data_chunk.index.min(),
                 end = data_chunk.index.max(),
             )
+            if time_span.start is None or time_span.end is None:
+                raise ValueError(f"Time span for station {station_id} is None")
             
             lat, lon = data_chunk["lat"], data_chunk["lon"]
             location = Point(lon.iloc[0], lat.iloc[0])

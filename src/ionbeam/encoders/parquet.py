@@ -30,7 +30,7 @@ class ParquetEncoder(Encoder):
         
 
     def encode(self, msg: TabularMessage) -> Iterable[BytesMessage]:
-        payload = msg.data.to_parquet(index=False)
+        payload = msg.data.to_parquet(index=True)
 
         output_msg = BytesMessage(
             metadata=self.generate_metadata(

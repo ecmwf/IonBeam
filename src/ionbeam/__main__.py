@@ -56,24 +56,25 @@ if __name__ == "__main__":
         action="store_true",
         help="Just parse the config and do nothing else.",
     )
+    # pass --download or --no-download to override the config
     parser.add_argument(
         "--download",
-        action="store_true",
-        help="Run in offline mode.",
+        action=argparse.BooleanOptionalAction,
+        help="Override the download setting in the config.",
     )
     parser.add_argument(
         "--ingest-to-pipeline",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="If specified then ingest data into the pipeline.",
     )
     parser.add_argument(
         "--overwrite-fdb",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="If specified then overwrite data even if it already exists in the database.",
     )
     parser.add_argument(
         "--overwrite-cache",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="If specified then overwrite data even if it already exists in the database.",
     )
     parser.add_argument(
@@ -85,7 +86,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--emit-partial",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="If set, tells the time aggregators to emit messages containing partial information when the program is terminated. By default these are thrown away.",
     )
 
@@ -117,7 +118,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--die-on-error",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="Whether to abort on the first exception or keep going.",
     )
 
@@ -190,6 +191,8 @@ if __name__ == "__main__":
         handlers=handlers,
     )
     logger = logging.getLogger("CMDLINE")
+
+    logger.debug(f"{args.download = }")
 
     from .core.config_parser.config_parser import parse_config
     from .core.source import Source

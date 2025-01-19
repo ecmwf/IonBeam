@@ -125,7 +125,10 @@ class NewTimeAggregator(Aggregator):
         ):
             if data_chunk.empty:
                 continue
-            chunked_message = dataclasses.replace(message, data=data_chunk)
+            chunked_message = dataclasses.replace(message, 
+                data=data_chunk,
+                metadata = deepcopy(metadata)
+            )
             start_time = datetime.combine(date, time(hour=hour, tzinfo=None))
             self.time_chunks[start_time].append(chunked_message)
 

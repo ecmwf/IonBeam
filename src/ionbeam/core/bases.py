@@ -12,6 +12,7 @@ import dataclasses
 import itertools as it
 import re
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -350,7 +351,7 @@ class Action:
         """
         if isinstance(previous_msg, DataMessage):
             message = MessageInfo(
-                name=previous_msg.__class__.__name__, metadata=previous_msg.metadata
+                name=previous_msg.__class__.__name__, metadata=deepcopy(previous_msg.metadata)
             )
         elif isinstance(previous_msg, MessageInfo):
             message = previous_msg

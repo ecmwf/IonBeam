@@ -22,6 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, TSTZRANGE
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, validates
 from sqlalchemy.sql import text
+from sqlalchemy.sql.expression import BooleanClauseList
 from sqlalchemy_utils import URLType, UUIDType
 
 from ..core.time import TimeSpan
@@ -209,14 +210,24 @@ class Station(Base):
             raise TypeError("Station.location must be a Shapely Point, Polygon, or MultiPolygon")
     
     @property
-    def time_span(self) -> TimeSpan:
+    def time_span(self) -> TimeSpan | None:
+        if self._time_span.lower is None or self._time_span.upper is None:
+            return None
         return TimeSpan(self._time_span.lower, self._time_span.upper)
 
     @time_span.setter
     def time_span(self, value: TimeSpan):
         if not isinstance(value, TimeSpan):
             raise TypeError("Station.time_span must be a TimeSpan instance")
-        self._time_span = func.tstzrange(value.start, value.end)
+
+        if value.start is None or value.end is None:
+            raise ValueError("Station.time_span must have a start and end")
+        
+        tz_range = func.tstzrange(value.start, value.end)
+        if tz_range is None:
+            raise ValueError("Failed to create a time range")
+        
+        self._time_span = tz_range
     
     @validates('aggregation_type')
     def validate_aggregation_type(self, key, value):
@@ -239,20 +250,32 @@ class Station(Base):
          # Compute a MARS date range that encloses the data for this station. 
         start_date = self.time_span.start.strftime("%Y%m%d")
         end_date = self.time_span.end.strftime("%Y%m%d")
-        if start_date == end_date:
-            date = start_date
-        else: 
-            date = f"{start_date}/to/{end_date}/by/1"
+        start_time = self.time_span.start.strftime("%H00")
+        end_time = self.time_span.end.strftime("%H00")
+        
+        datetime_args = {}
+        # If multi day period, just use data
+        if start_date != end_date:
+            datetime_args["date"] = f"{start_date}/to/{end_date}/by/1"
+        
+        # If singe day, multi hour period, just use time key with fixed date
+        elif start_time != end_time:
+            datetime_args["date"] = f"{start_date}"
+            datetime_args["time"] = f"{start_time}/to/{end_time}/by/1"
+        
+        # All data within one hour
+        else:
+            datetime_args["date"] = f"{start_date}"
+            datetime_args["time"] = f"{start_time}"
 
         return {
             "class": "rd",
             "expver": "xxxx",
             "stream": "lwda",
             "aggregation_type": self.aggregation_type,
-            "date":  date,
             "platform": self.platform,
-            "internal_id": self.internal_id,
-        }
+            "station_id": self.internal_id,
+        } | datetime_args
 
 
     def as_json(self, type="simple"):
@@ -264,8 +287,9 @@ class Station(Base):
             internal_id=self.internal_id,   
             aggegation_type=self.aggregation_type,
             location= {"lat" : self.location.y, "lon" : self.location.x},
-            time_span=self.time_span.as_json(),
+            time_span=self.time_span.as_json() if self.time_span is not None else None,
             authors=[a.as_json() for a in self.authors],
+            mars_selection = self.mars_selection(),
         )
 
         if type == "full":
@@ -341,7 +365,10 @@ class Station(Base):
         else:
             station.bbox = station.bbox.union(bbox)
 
-        station.time_span = station.time_span.union(time_span)
+        if station.time_span is None:
+            station.time_span = time_span
+        else:
+            station.time_span = station.time_span.union(time_span)
 
         for author in authors:
             if author not in station.authors:
@@ -352,6 +379,12 @@ class Station(Base):
                 station.properties.append(p)
 
         return station
+
+    @classmethod
+    def timespan_overlaps(cls, t: TimeSpan) -> BooleanClauseList:
+        time_range = func.tstzrange(t.start, t.end, '[]')
+        return cls._time_span.op("&&")(time_range)
+        
 
 
 

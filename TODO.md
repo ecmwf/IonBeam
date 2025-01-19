@@ -32,29 +32,39 @@ on system
 [x] Refactor (remove) generate_metadata and tag_message
 [x] swap out sqlalchemy json serialiser for orjson which supports datetimes and numpy arrays
 [x] change JSON to JSONB in the db
+[x] same for MT 
+    [x] make datetime index
+    [x] add external station id
+    [x] use separate raw variable action
+
+[x] When errors are suppressed save them so they can be debugged later with
+```python
+from ionbeam.core.singleprocess_pipeline import load_most_recent_error
+saved_err = load_most_recent_error(config.globals)
+```
+
+[x] get downstream mt working
+[x] port SCK to new ingestion system
+    [ ] Try to triger a 429 and check for Retry-After header
+    [ ] Add logic to exponentially back off if 429s keep happening
 
 
-[ ] same for MT 
-    [ ] make datetime index
-    [ ] add external station id
-    [ ] use separate raw variable action
+[ ]  figure out this ['chunk_date',                                   
+                    'chunk_time'] in                                                
+                    msg.metadata.columns but not in                                 
+                    msg.data.columns   error
+
+[ ] Deploy download cron jobs to server
+[ ] Fix rest api to work with new format
+    [ ] add an endpoint to directly get station data saving the filter step?
 
 [ ] Make it even harder to nuke the ingestion data
 [ ] Add way to nuke just station metadata for one source
 
 
-
-
-
-
 pyarrow.lib.ArrowInvalid: Could not open Parquet input source '<Buffer>': Parquet file size is 0 bytes
 
 [ ] take a look at concatenating parquet files
-
-[/] get downstream mt working
-[/] port SCK to new ingestion system
-    [ ] Try to triger a 429 and check for Retry-After header
-    [ ] Add logic to exponentially back off if 429s keep happening
 
 
 

@@ -127,6 +127,9 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
                 meta = session["meta"]
 
                 data = pd.DataFrame.from_records(data)
+                if len(data) == 0:
+                    continue
+                
                 data[["lat", "lon"]] = np.array(data["lo"].tolist())[:, [1, 0]]
                 data.drop(columns=["lo"], inplace=True)
                 
@@ -136,11 +139,12 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
                     living_lab = "unknown"
                 elif len(living_labs) == 1:
                     living_lab = living_labs.pop()
-                    logger.debug(f"Matched {meta['author'] = } to {living_lab = }")
+                    # logger.debug(f"Matched {meta['author'] = } to {living_lab = }")
                 else:
                     raise ValueError(f"Multiple living labs matched for {session.author = } {living_labs = }")
 
                 # Copy all relevant metadata into columns
+                
                 data.rename(columns={"time": "datetime"}, inplace=True)
                 data["datetime"] = pd.to_datetime(data["datetime"])
 

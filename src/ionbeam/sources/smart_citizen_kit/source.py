@@ -1,5 +1,6 @@
 import dataclasses
 import logging
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -337,6 +338,7 @@ class SmartCitizenKitSource(RESTSource):
                 device = device,
             ),
             columns = column_metadata)
+
             all_dfs.append(df_wide)
 
         combined_df = pd.concat(
@@ -355,12 +357,15 @@ class SmartCitizenKitSource(RESTSource):
         combined_df.sort_index(inplace=True)
         combined_df["external_station_id"] = combined_df["external_station_id"].astype("string")
 
+        if "chunk_date" in combined_df.columns:
+            raise ValueError("chunk_date already in the data")
+
         for time_span in sorted(time_spans, key=lambda x: x.start):
                 data = combined_df.loc[time_span.start : time_span.end]
 
                 msg = TabularMessage(
                     metadata=self.generate_metadata(
-                        columns = column_metadata,
+                        columns = deepcopy(column_metadata),
                         time_span=time_span,
                     ),
                     data=data,

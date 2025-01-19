@@ -18,7 +18,7 @@ class TimeSpan:
     def __post_init__(self):
         if self.start > self.end:
             raise ValueError("start must not be after end")
-        if self.start.tzinfo is not UTC or self.end.tzinfo is not UTC:
+        if self.start.strftime('%Z') != 'UTC' or self.end.strftime('%Z') != 'UTC':
             raise ValueError("start and end must be in UTC")
         
     def union(self, other: Self) -> Self:

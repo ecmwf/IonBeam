@@ -499,6 +499,8 @@ class APISource(Source, AbstractDataSourceMixin):
                         # Completely give up for now if we are rate limited
                         if isinstance(e, RateLimitedException) or (isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 429):
                             logger.warning("Rate limited, giving up for now")
+                            # Todo: write a source level flag to indicate that we are rate limited
+                            # And when we should next attempt this source
                             return
 
     def get_all_data_streams(self, db_session: Session) -> Iterable[DataStream]:
@@ -509,39 +511,8 @@ class APISource(Source, AbstractDataSourceMixin):
         """Override this when the data is very sparse"""
         return chunk.time_span.split_rounded(granularity)
 
-    def generate(self) -> Iterable[TabularMessage]:
-        """
-        Return an iterable of objects representing chunks of data we should download from the API
-        """
-        query_time_span = self.globals.ingestion_time_constants.query_timespan
-        granularity = self.globals.ingestion_time_constants.granularity
 
-        if self.globals.download:
-            # Get all the streams of data we need to download
-            try:
-                data_streams = list(self.get_data_streams(query_time_span))
-            except Exception as e:
-                logger.warning(f"Failed to get data streams for {self.source} with error {e}")
-                if self.globals.die_on_error: raise
-                else: return
-            
-            # Save them to the db
-            with self.globals.sql_session.begin() as db_session:
-                for ds in data_streams:
-                    ds.write_to_db(db_session)
-
-            # Download the data for each stream
-            logger.info(f"For source {self.source}, got data streams {data_streams}")
-            _ = list(self.download_data(data_streams, query_time_span))
-
-        if not self.globals.ingest_to_pipeline:
-            return 
-        
-        # Let the API implementation do any additional processing
-        # and emit the messages
-        emitted_messages = 0
-
-
+    def ingest_to_pipeline(self, data_streams: Iterable[DataStream]):
         # There's a bit of a tradeoff in the design here
         # When doing realtime ingestion we're ingesting in short 5 minute intervals
         # When doing historical ingestion it makes sense to do larger queries
@@ -551,7 +522,11 @@ class APISource(Source, AbstractDataSourceMixin):
         # We call this a timespan group, and we process all the chunks in the group before moving on to the next group
         # This way we can operate on large chunks efficiently
 
+        emitted_messages = 0
         reingest_from = self.globals.reingest_from
+        granularity = self.globals.ingestion_time_constants.granularity
+        query_time_span = self.globals.ingestion_time_constants.query_timespan
+        
         with self.globals.sql_session.begin() as db_session:
 
             new_chunks = [
@@ -626,6 +601,39 @@ class APISource(Source, AbstractDataSourceMixin):
                 # Update the last_ingestion_time for each data stream
                 for ds in data_streams:
                     ds.write_to_db(db_session)
+
+    def generate(self) -> Iterable[TabularMessage]:
+        """
+        Return an iterable of objects representing chunks of data we should download from the API
+        """
+        query_time_span = self.globals.ingestion_time_constants.query_timespan
+
+        if self.globals.download:
+            logger.info(f"Starting downloads for source {self.source}")
+            # Ask the data source what data streams exist for this time span
+            # This may require API requests
+            try:
+                data_streams = list(self.get_data_streams(query_time_span))
+            except Exception as e:
+                logger.warning(f"Failed to get data streams for {self.source} with error {e}")
+                if self.globals.die_on_error: raise
+                else: return
+
+            with self.globals.sql_session.begin() as db_session:
+                for ds in data_streams:
+                    ds.write_to_db(db_session)
+
+            # Download the data for each stream
+            logger.info(f"For source {self.source}, got data streams {data_streams}")
+            _ = list(self.download_data(data_streams, query_time_span))
+
+        if self.globals.ingest_to_pipeline:
+            logger.info(f"Starting to ingest to pipeline for source {self.source}")
+            with self.globals.sql_session.begin() as db_session:
+                data_streams = list(self.get_all_data_streams(db_session))
+            yield from self.ingest_to_pipeline(data_streams)
+        
+
 
 
                 

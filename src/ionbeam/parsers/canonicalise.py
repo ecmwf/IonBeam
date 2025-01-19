@@ -64,11 +64,17 @@ class FormatChecks(Parser):
         for col in expected_columns:
             assert col in msg.data.columns, f"{col} not in msg.data.columns"
 
-        only_meta = [column for column in msg.data.columns if column not in msg.metadata.columns]
-        assert not only_meta, f"{only_meta} in msg.data.columns but not in msg.metadata.columns"
+        only_data = [column for column in msg.data.columns if column not in msg.metadata.columns]
+        if only_data:
+            err_msg = f"{only_data} in msg.data.columns but not in msg.metadata.columns"
+            logger.warning(err_msg)
+            raise ValueError(err_msg)
 
-        only_data = [column for column in msg.metadata.columns if column not in msg.data.columns]
-        assert not only_data, f"{only_data} in msg.metadata.columns but not in msg.data.columns"
+        only_meta = [column for column in msg.metadata.columns if column not in msg.data.columns]
+        if only_data:
+            err_msg = f"{only_meta} in msg.metadata.columns but not in msg.data.columns"
+            logger.warning(err_msg)
+            raise ValueError(err_msg)
             
         yield msg
 

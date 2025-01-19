@@ -138,6 +138,7 @@ def parse_globals(config_dir: Path, **overrides) -> Config:
 
     # Merge config from the command line into the global config keys
     globals_override = parse_config_from_dict(Globals, overrides, overlay=True)
+    logger.debug(f"Overriding global config with {overrides} from command line")
     config.globals = merge_overlay(config.globals, globals_override)
 
     logger.debug("Loaded global config...")

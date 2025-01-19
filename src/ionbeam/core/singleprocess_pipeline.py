@@ -8,16 +8,52 @@
 # # does it submit to any jurisdiction.
 # #
 
+import dataclasses
 import logging
+import pickle
 import sys
 from copy import deepcopy
+from datetime import UTC, datetime
 from itertools import cycle, islice
 from time import time
 from typing import Iterable, Sequence
 
+import dill
+
 from .bases import DataMessage, Globals, Message, MessageStream, Processor
 
 logger = logging.getLogger(__name__)
+
+@dataclasses.dataclass
+class SavedError:
+    exception: Exception
+    globals: dict
+    message: DataMessage
+
+
+def save_message_error(msg : DataMessage, e : Exception, globals : Globals):
+    "Save a message to the error queue"
+    dt = datetime.now(UTC).isoformat()
+    p = globals.data_path / "errors" / f"error_{dt}.pickle"
+    if not p.parent.exists():
+        p.parent.mkdir(parents=True)
+    with p.open("wb") as f:
+        globals_dict = {field.name : val for field in dataclasses.fields(Globals)
+        if dill.pickles(val := getattr(globals, field.name))}
+        
+        pickle.dump(SavedError(
+            message = msg,
+            exception = e, 
+            globals = globals_dict
+            ), f)
+
+def load_most_recent_error(globals : Globals):
+    "Load the most recent error from the error queue"
+    files = sorted(globals.data_path.glob("errors/error_*.pickle"))
+    if not files:
+        return None
+    with files[-1].open("rb") as f:
+        return pickle.load(f)
 
 
 def roundrobin(iterables: Sequence[MessageStream], finish_after : int | None = None) -> MessageStream:
@@ -66,6 +102,7 @@ def fully_process_message(msg: DataMessage, globals: Globals) -> tuple[list[Mess
 
             except Exception as e:
                 logger.warning(f"Failed to process {msg} with {action} with exception {e}")
+                save_message_error(msg, e, globals)
                 if globals.die_on_error:
                     raise e
         if not matches:
