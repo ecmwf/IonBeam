@@ -97,7 +97,7 @@ class DummyProgress():
 def singleprocess_pipeline(globals, sources, actions, emit_partial: bool, 
                            simple_output : bool = False, 
                            die_on_error: bool = False) -> list[Message]:
-    logger.info("Starting single threaded execution...")
+    logger.debug("Starting single threaded execution...")
 
     source = roundrobin(sources)
     source = chain(source, [FinishMessage("Sources Exhausted")])
@@ -129,10 +129,17 @@ def singleprocess_pipeline(globals, sources, actions, emit_partial: bool,
                 # Grab a message from the source if there are any.
                 if not sources_done and len(input_messages) < 500:
                     try:
-                        input_messages.append(next(source))
+                        s = next(source)
+                        input_messages.append(s)
                         total_input_messages += 1
                     except StopIteration:
                         sources_done = True
+                    except Exception as e:
+                        logger.error(f"Source failed with error: {e}")
+                        if die_on_error: 
+                            raise e
+                        else:
+                            continue
 
                 # If we've processed every message we can, empty the aggregators.
                 if not input_messages and not aggregators_emptied:
@@ -166,7 +173,7 @@ def singleprocess_pipeline(globals, sources, actions, emit_partial: bool,
                         input_messages.extend(action.process(msg))
                         log_message_transmission(logger, msg, action, time() - t0)
                     except Exception as e:
-                        logger.warning(f"Failed to process {msg} with {action} with exception {e}")
+                        logger.error(f"Failed to process {msg} with {action} with exception {e}")
                         if die_on_error:
                             raise e
                 if not matches:

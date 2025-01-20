@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from functools import cached_property, reduce
 from pathlib import Path
 from typing import Dict, List, Tuple
+from http.client import HTTPConnection
 
 import Levenshtein
 import pandas as pd
@@ -68,6 +69,11 @@ class CIMA_API:
         cache_file: Path | None = None,
         headers: dict[str, str] = {},
     ):
+        HTTPConnection.debuglevel = 1
+        requests_log = logging.getLogger("requests.packages.urllib3")
+        requests_log.setLevel(logging.DEBUG)
+        requests_log.propagate = True
+
         self.logger = logging.getLogger(__name__)
 
         assert cache_file is not None
@@ -115,6 +121,7 @@ class CIMA_API:
         self.oauth.headers.update(headers)
 
         # Grab a list of sensors names in italian
+        logger.debug("Getting list of sensor classes")
         if "sensor_names" not in self.cache:
             self.sensor_names: Munch[str, str] = Munch(IT=self.get(self.api_url + "sensors/classes").json())
             self.cache["sensor_names"] = self.sensor_names
@@ -143,13 +150,15 @@ class CIMA_API:
                 client_id=self.credentials.client_id,
                 client_secret=self.credentials.client_secret,
             )
+            logger.debug("Got token.")
 
     def get(self, *args, **kwargs) -> requests.Response:
         "Wrap the get command of the underlying oauth object"
-        
         self.authenticate()
         try:
-            r = self.oauth.get(*args, **kwargs)
+            logger.debug(f"GETing {args}, {kwargs}")
+            r = requests.get(*args, **kwargs, timeout = 0.5)
+            # r = self.oauth.get(*args, **kwargs)
             r.raise_for_status()
             return r
         
@@ -390,9 +399,11 @@ class CIMA_API:
         # might be better to use a pre-allocated numpy array here
         columns : defaultdict[SensorName, dict] = defaultdict(lambda : dict(sensor = None, times = [], readings = []))
 
-        for s, e in list(zip(dates[:-1], dates[1:])):
-            self.oauth.token = self.oauth.refresh_token(self.endpoints.token_endpoint)
+        logger.debug("Acronet: Refreshing token")
+        self.oauth.token = self.oauth.refresh_token(self.endpoints.token_endpoint)
 
+        logger.debug("Acronet: Getting station data")
+        for s, e in list(zip(dates[:-1], dates[1:])):
             for sensor_name, sensor in station_info.sensors.items():
                 try:
                     json_data = self._single_request_station_and_sensor(

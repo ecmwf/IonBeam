@@ -269,7 +269,7 @@ class CanonicaliseColumns(Parser):
         if not columns:
             new_columns = {c : self.canonical_variables[c] for c in df.columns}
         else: 
-            filtered_columns = [c for c in columns.values() if c.name in df.columns]
+            filtered_columns = [c for c in columns.values() if c.name in df.columns and not c.discard]
             new_columns = [c.make_canonical() if isinstance(c, RawVariable) else c
                           for c in filtered_columns]
             new_columns = {c.name : c for c in new_columns}

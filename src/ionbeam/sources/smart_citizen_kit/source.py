@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 from unicodedata import normalize
+from time import time
 
 import numpy as np
 import pandas as pd
@@ -14,6 +15,7 @@ from cachetools.keys import hashkey
 
 from ...core.bases import Mappings, RawVariable, TabularMessage, TimeSpan
 from ..API_sources_base import DataChunk, DataStream, RESTSource
+from ...singleprocess_pipeline import fmt_time
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ class SmartCitizenKitSource(RESTSource):
     """
     mappings: Mappings = field(kw_only=True)
 
-    maximum_request_size = timedelta(days=10)
+    maximum_request_size = timedelta(days=1)
     minimum_request_size = timedelta(minutes=5)
     max_time_downloading = timedelta(seconds=10)
     cache_directory: Path = Path("inputs/smart_citizen_kit")
@@ -200,7 +202,7 @@ class SmartCitizenKitSource(RESTSource):
         logger.debug(f"Downloading data for device {device_id} in {time_span}")
         
         # Get the readings for each sensor
-
+        t0 = time()
         min_time = None
         max_time = None
         sensor_data = []
@@ -219,9 +221,9 @@ class SmartCitizenKitSource(RESTSource):
 
             # Extract the maximum and minimum times for the chunk
             df = pd.DataFrame(readings["readings"], columns=["time", "data"])
-            time = pd.to_datetime(df.time, utc=True)
-            min_time = time.min() if min_time is None else min(min_time, time.min())
-            max_time = time.max() if max_time is None else max(max_time, time.max())
+            times = pd.to_datetime(df.time, utc=True)
+            min_time = times.min() if min_time is None else min(min_time, times.min())
+            max_time = times.max() if max_time is None else max(max_time, times.max())
 
             sensor_data.append(dict(
                 sensor = sensor,
@@ -229,9 +231,10 @@ class SmartCitizenKitSource(RESTSource):
                 readings = readings["readings"]
             ))
 
+        logger.debug(f"Got data for SCK device {device_id} in {fmt_time(time() - t0)}")
         if not sensor_data or min_time is None or max_time is None:
             # raise ValueError(f"No data for {device_id = } in {time_span = }")
-            logger.warning(f"No data for {device_id = } in {time_span = }")
+            logger.debug(f"No data for {device_id = } in {time_span = }")
             return DataChunk(
                 source=self.source,
                 key = data_stream.key,

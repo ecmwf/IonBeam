@@ -44,8 +44,8 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
     cache_directory: Path = field(default_factory=Path)
     author_patterns: dict[str, list[str]] = field(default_factory=dict)
 
-    maximum_request_size: timedelta = timedelta(days = 10)
-    max_time_downloading: timedelta = timedelta(seconds = 10)
+    maximum_request_size: timedelta = timedelta(days = 1)
+    max_time_downloading: timedelta = timedelta(seconds = 30)
     
 
     def init(self, globals, **kwargs):
@@ -89,7 +89,7 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
             data = None,
         ) for session in self.api.query_sessions(time_span=time_span)}
         
-        logger.debug(f"Meteotracker will download {len(sessions) = } for this time period.")
+        logger.info(f"Meteotracker will download {len(sessions)} sessions for this time period.")
 
         t0 = time()
         for session in sessions.values():
@@ -98,7 +98,7 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
             session["meta"] = dataclasses.asdict(meta)
         
         if sessions:
-            logger.debug(f"Retrieved {len(sessions)} in {fmt_time((time() - t0)/len(sessions))}")
+            logger.info(f"Meteotracker retrieved {len(sessions)} sessions in {fmt_time((time() - t0)/len(sessions))}")
 
 
         return DataChunk(

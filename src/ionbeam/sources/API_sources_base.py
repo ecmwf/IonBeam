@@ -23,6 +23,8 @@ from ..core.time import (
     TimeSpan,
 )
 from ..metadata.db import Base
+from ..singleprocess_pipeline import fmt_time
+from time import time
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +49,14 @@ class RateLimitedException(APISourcesBaseException):
 
         elif response is not None and "Retry-After" in response.headers:
             retry_after = int(response.headers["Retry-After"])
-            self.retry_at = datetime.now(UTC) + timedelta(seconds=retry_after)
+            logger.debug(f"Retry-After header provided, delaying for {timedelta(seconds=retry_after)}")
+            after = min(timedelta(seconds=retry_after), timedelta(minutes = 30))
+            self.retry_at = datetime.now(UTC) + after
+            
         
         else:
-            self.retry_at = datetime.now(UTC) + timedelta(minutes=5)
+            logger.debug("No Retry-After header, delaying for one minute.")
+            self.retry_at = datetime.now(UTC) + timedelta(minutes=1)
 
 @dataclasses.dataclass(eq=True, frozen=True)
 class DataChunk:
@@ -456,7 +462,7 @@ class APISource(Source, AbstractDataSourceMixin):
             # Check if the source has been rate limited recently
             retry_at = self.check_source_for_errors(db_session, since = start_time - timedelta(days=1))
             if retry_at > start_time:
-                logger.info(f"Source {self.source} was rate limited, waiting until {retry_at} ({retry_at - start_time})")
+                logger.info(f"Downloading from source {self.source} was previously rate limited, waiting {fmt_time((retry_at - start_time).total_seconds())} until trying again.")
                 return
         
             # Get the list of queries we need to make
@@ -468,25 +474,30 @@ class APISource(Source, AbstractDataSourceMixin):
             # Remove any that are done
             gaps_by_datastream = {data_stream : gaps for data_stream, gaps in gaps_by_datastream.items() if gaps}
             for data_stream, gaps in gaps_by_datastream.items():
-                if datetime.now(UTC) - start_time > self.max_time_downloading:
+                time_left = self.max_time_downloading - (datetime.now(UTC) - start_time)
+                logger.info(f"{time_left.total_seconds():.0f} seconds left to download for  {data_stream.key}")
+                if time_left < timedelta(0):
+                    logger.info(f"Stopping downloads for {data_stream.key} after {self.max_time_downloading} seconds.")
                     return
 
-                logger.debug(f"Downloading data for datastream '{data_stream.key}', currently has {len(gaps)} gap(s).")
+                logger.info(f"Downloading data for datastream '{data_stream.key}', currently have {len(gaps)} gap(s) to process.")
                 if not gaps: 
                     continue
                 gap = gaps.pop()
+                logger.info(f"Downloading data for time span {gap}")
 
                 # Start a session here so that if anything goes wrong it gets automatically rolled back
                 with self.globals.sql_session.begin() as db_session:
                     try:
                         if fail: self.fail(fail)
+                        t0 = time()
                         data_chunk = self.download_chunk(data_stream, gap)
                         data_chunk.write_to_db(db_session)
-                        logger.debug(f"Downloaded data and wrote to db for {data_stream.key} {gap.delta()}")
+                        logger.info(f"Downloaded data and wrote to db for stream {data_stream.key} in {fmt_time(time() - t0)}")
                         yield data_chunk
                     
                     except ExistingDataException:
-                        logger.debug(f"Data already exists in db for {data_stream.key} {gap.delta()}")
+                        logger.warning(f"Data already exists in db for {data_stream.key} {gap.delta()}")
                         if self.globals.die_on_error: raise
 
                     except Exception as e:
@@ -644,16 +655,19 @@ class RESTSource(APISource):
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
         self.session = requests.Session()
+        self.session.timeout = 3
 
-        # Add retry for HTTP requests
-        retries = Retry(
-            total=3,
-            backoff_factor=0.1,
-            status_forcelist=[502, 503, 504],
-            allowed_methods={'POST'},
-        )
-        self.session.mount('https://', HTTPAdapter(max_retries=retries))
-        self.session.mount('http://', HTTPAdapter(max_retries=retries))
+        # # Add retry for HTTP requests
+        # retries = Retry(
+        #     total=3,
+        #     backoff_factor=0.1,
+        #     status_forcelist=[502, 503, 504],
+        #     respect_retry_after_header=True,
+        #     allowed_methods=None, # Allow retry on any VERB not just idempotent ones
+        # )
+
+        # self.session.mount('https://', HTTPAdapter(max_retries=retries))
+        # self.session.mount('http://', HTTPAdapter(max_retries=retries))
 
     def get(self, url, *args, **kwargs):
         """

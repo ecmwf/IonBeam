@@ -206,7 +206,7 @@ class RawVariable(Variable):
             self.unit = normalize("NFKD", str(self.unit))
 
     def make_canonical(self) -> CanonicalVariable:
-        assert self.canonical_variable is not None
+        assert self.canonical_variable is not None, f"{self} has no canonical variable!"
         return dataclasses.replace(
             self.canonical_variable,
             raw_variable=self,

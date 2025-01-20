@@ -157,7 +157,7 @@ def process_message(msg: DataMessage, action: Processor) -> Iterable[DataMessage
 def singleprocess_pipeline(config, sources, actions, emit_partial: bool, 
                            simple_output : bool = False, 
                            die_on_error: bool = False) -> list[Message]:
-    logger.info("Starting single threaded execution...")
+    logger.debug("Starting single threaded execution...")
     globals = config.globals
 
     if globals.finish_after is not None:

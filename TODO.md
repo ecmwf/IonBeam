@@ -49,14 +49,20 @@ saved_err = load_most_recent_error(config.globals)
     [ ] Add logic to exponentially back off if 429s keep happening
 
 
-[ ]  figure out this ['chunk_date',                                   
+
+[x]  figure out this ['chunk_date',                                   
                     'chunk_time'] in                                                
                     msg.metadata.columns but not in                                 
                     msg.data.columns   error
 
-[ ] Deploy download cron jobs to server
-[ ] Fix rest api to work with new format
-    [ ] add an endpoint to directly get station data saving the filter step?
+[x] Deploy download cron jobs to server
+[x] Fix rest api to work with new format
+    [x] add an endpoint to directly get station data saving the filter step?
+
+[ ] fix /home/math/IonBeam/src/ionbeam/sources/meteotracker/source.py:149: UserWarning: Could not infer 
+format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing 
+is consistent and as-expected, please specify a format.
+  data["datetime"] = pd.to_datetime(data["datetime"])
 
 [ ] Make it even harder to nuke the ingestion data
 [ ] Add way to nuke just station metadata for one source

@@ -173,7 +173,7 @@ if __name__ == "__main__":
 
     if args.logfile:
         file_handler = logging.FileHandler(args.logfile)
-        file_handler.setLevel(logging.WARNING)
+        file_handler.setLevel(logging.INFO)
         # file_format = logging.Formatter(
         #     "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         #     datefmt="[%Y-%m-%d %H:%M:%S]",
@@ -221,17 +221,17 @@ if __name__ == "__main__":
         else:
             downstream_actions.append(action)
 
-    logger.info("Globals:")
-    logger.info(f"    Environment: {config.globals.environment}")
-    logger.info(f"    Data Path: {config.globals.data_path}")
-    logger.info(f"    Data Path: {config.globals.data_path}")
-    logger.info(f"    Download: {config.globals.download}")
-    logger.info(f"    Ingest to Pipeline: {config.globals.ingest_to_pipeline}")
-    logger.info(f"    Overwrite FDB: {config.globals.overwrite_fdb}")
+    logger.debug("Globals:")
+    logger.debug(f"    Environment: {config.globals.environment}")
+    logger.debug(f"    Data Path: {config.globals.data_path}")
+    logger.debug(f"    Data Path: {config.globals.data_path}")
+    logger.debug(f"    Download: {config.globals.download}")
+    logger.debug(f"    Ingest to Pipeline: {config.globals.ingest_to_pipeline}")
+    logger.debug(f"    Overwrite FDB: {config.globals.overwrite_fdb}")
 
-    logger.info("Sources")
+    logger.debug("Sources")
     for i, a in enumerate(sources):
-        logger.info(f"    {i} {str(a)}")
+        logger.debug(f"    {i} {str(a)}")
 
     if args.validate_config:
         sys.exit()

@@ -131,10 +131,8 @@
   key: ["Relative Humidity", "h", "hum"]
   unit: "%"
 
-- name:
-  key: "ext_h"
   
-- name: relative_humidity_near_surface 
+- name: 
   key: ["ext_h"]
   unit: "%"
   discard: true
@@ -143,13 +141,8 @@
   key: ["Air Temperature", "t"]
   unit: "ºC" # Yes, this degree symbol looks weird, this is actually the unicode character known as "MASCULINE ORDINAL INDICATOR", do not ask me why.
 
-- name:
-  key: "ext_t"
-  unit: "oC"
-  discard: true
-
 # Discard for now because it clashes with the above
-- name: air_temperature_near_surface
+- name: 
   key: ["ext_t"]
   unit: "ºC" # Yes, this degree symbol looks weird, this is actually the unicode character known as "MASCULINE ORDINAL INDICATOR", do not ask me why.
   discard: true
