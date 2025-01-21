@@ -78,8 +78,8 @@ is consistent and as-expected, please specify a format.
 
 
 ## Longer term:
+[ ] Add a file backed DataChunk type to support Sensor.community data
 [ ] Strip out the concept of metadata entirely and make it all data?
-
 [ ] Swap out the config parsing to use pydantic
 [ ] Swap out the command line arguments and config parsing to use conflator
 
