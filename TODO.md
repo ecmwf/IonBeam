@@ -36,6 +36,7 @@ on system
     [x] make datetime index
     [x] add external station id
     [x] use separate raw variable action
+[x] Add arguments to reingest all data but keep db
 
 [x] When errors are suppressed save them so they can be debugged later with
 ```python
@@ -45,7 +46,7 @@ saved_err = load_most_recent_error(config.globals)
 
 [x] get downstream mt working
 [x] port SCK to new ingestion system
-    [ ] Try to triger a 429 and check for Retry-After header
+    [x] Try to triger a 429 and check for Retry-After header
     [ ] Add logic to exponentially back off if 429s keep happening
 
 
@@ -59,35 +60,28 @@ saved_err = load_most_recent_error(config.globals)
 [x] Fix rest api to work with new format
     [x] add an endpoint to directly get station data saving the filter step?
 
-[ ] fix /home/math/IonBeam/src/ionbeam/sources/meteotracker/source.py:149: UserWarning: Could not infer 
+[ ] fix IonBeam/src/ionbeam/sources/meteotracker/source.py:149: UserWarning: Could not infer 
 format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing 
 is consistent and as-expected, please specify a format.
+
   data["datetime"] = pd.to_datetime(data["datetime"])
 
+[ ] Figure out under what conditions timespans can become null/None in the sql database
+
+
+[x] Deploy download cron jobs to server
+[x] Fix rest api to work with new format
 [ ] Make it even harder to nuke the ingestion data
-[ ] Add way to nuke just station metadata for one source
+[ ] Add way to wipe just station metadata for one source
+[ ] Allow parsing ingestion times as a cmd line argumennt
+[ ] Add a way to keep track of average time spent on each action.
 
 
-pyarrow.lib.ArrowInvalid: Could not open Parquet input source '<Buffer>': Parquet file size is 0 bytes
-
-[ ] take a look at concatenating parquet files
-
-
-
-
+## Longer term:
 [ ] Strip out the concept of metadata entirely and make it all data?
 
-match up the column names
-{'Light', 'PN1.0', 'PM 1', 'Air Temperature', 'battery', 'PN10.0', 'Relative Humidity', 'Barometric Pressure', 'TVOC', 'CO2', 'PN5.0', 'PN0.5', 'PM 10', 'eCO2', 'PM 2.5', 'PN0.3', 'PN2.5', 'Noise Level'} != {'pm_avg_10', 'bat', 'bar', 'lat', 'pm_avg_2.5', 'h', 'ext_t', 'station_id', 'ext_h', 'light', 't', 'pm_avg_1', 'author', 'author_uuid', 'eco2', 'location_exposure', 'co2', 'tvoc', 'time', 'lon', 'station_name', 'noise_dba'}
-
-
-
-
-
-[ ] Allow parsing ingestion times as a cmd line argumennt
-[ ] Add arguments to nuke just one source from the db
-[ ] Add arguments to reingest all data but keep db
-
+[ ] Swap out the config parsing to use pydantic
+[ ] Swap out the command line arguments and config parsing to use conflator
 
 
 [ ] Fix this code in codc 
@@ -96,7 +90,6 @@ if dtype == STRING:
     return_arr = return_arr.astype("|S{}".format(max(8, 8 * (1 + ((max(len(s) for s in arr) - 1) // 8)))))
 ```
 it doesn't support unicode bytes.
-
 
 [ ] pyodc does it actually do deduplication?
 [ ] pyodc support deletion
