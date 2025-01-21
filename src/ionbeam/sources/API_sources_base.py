@@ -55,8 +55,8 @@ class RateLimitedException(APISourcesBaseException):
             
         
         else:
-            logger.debug("No Retry-After header, delaying for one minute.")
-            self.retry_at = datetime.now(UTC) + timedelta(minutes=1)
+            logger.debug("No Retry-After header, delaying for 5 minutes.")
+            self.retry_at = datetime.now(UTC) + timedelta(minutes=5)
 
 @dataclasses.dataclass(eq=True, frozen=True)
 class DataChunk:

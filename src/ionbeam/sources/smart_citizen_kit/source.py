@@ -16,6 +16,7 @@ from cachetools.keys import hashkey
 from ...core.bases import Mappings, RawVariable, TabularMessage, TimeSpan
 from ..API_sources_base import DataChunk, DataStream, RESTSource
 from ...singleprocess_pipeline import fmt_time
+from time import sleep
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +214,9 @@ class SmartCitizenKitSource(RESTSource):
                 continue
 
             readings = self.get_readings(device_id, sensor["id"], time_span)
+            
+            # Try to reduce how often we get rate limited by SCK
+            sleep(0.5)
             
             # Skip if there are now readings
             if not readings["readings"]:
