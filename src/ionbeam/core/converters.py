@@ -1,22 +1,24 @@
-# #
-# # (C) Copyright 2023 ECMWF.
-# #
-# # This software is licensed under the terms of the Apache Licence Version 2.0
-# # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# # In applying this licence, ECMWF does not waive the privileges and immunities
-# # granted to it by virtue of its status as an intergovernmental organisation nor
-# # does it submit to any jurisdiction.
-# #
+#
+# (C) Copyright 2023 ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation nor
+# does it submit to any jurisdiction.
+#
 import unicodedata as un
 
+# These get passed the entire pandas column as a numpy array so they're pretty fast
 unit_conversions = {
     "°C -> K": lambda t: t + 273.15,
     "ºC -> K": lambda t: t + 273.15, # Yes, this degree symbol looks weird, this is actually the unicode character known as "MASCULINE ORDINAL INDICATOR"
-    "dB -> dBA": lambda x: x, # This may or may not be wrong, depends on whether there are data sources reporting noise that is genuinely in dB rather than dBA
-    "Degrees -> °": lambda d: d,
-    "m/s -> m.s-1": lambda s: s,
+    "dB -> dBA": None, # This may or may not be wrong, depends on whether there are data sources reporting noise that is genuinely in dB rather than dBA
+    "Degrees -> °": None,
+    "m/s -> m/s": None,
     "km/h -> m/s": lambda s: s * 0.277778,
-    "mbar -> hPa": lambda p: p,
+    'knots -> m/s': lambda s: s * 0.514444,
+    "mbar -> hPa": None,
     "mbar -> Pa": lambda p: p * 100,
     "kPa -> Pa": lambda p: p * 1000,
     "hPa -> Pa": lambda p: p * 100,

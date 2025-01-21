@@ -12,13 +12,21 @@
 
 # Note: I've put some imports after the argparse code to make the cmdline usage feel snappier
 import argparse
-from pathlib import Path
-import sys
-
+import dataclasses
 import logging
-from rich.logging import RichHandler
+import os
 import pdb
+import shutil
+import sys
 import traceback
+from datetime import datetime
+from pathlib import Path
+
+from .core.singleprocess_pipeline import singleprocess_pipeline
+
+os.environ["ODC_ENABLE_WRITING_LONG_STRING_CODEC"] = "1"
+
+from rich.logging import RichHandler
 
 if __name__ == "__main__":
     # Stages:
@@ -33,8 +41,8 @@ if __name__ == "__main__":
     #      the pre-processing configuration can change dynamically.
 
     parser = argparse.ArgumentParser(
-        prog="ECMWF IOT Observation Processor",
-        description="Put IOT data into the FDB",
+        prog="IonBeam",
+        description="Beam IoT data around",
         epilog="See https://github.com/ecmwf-projects for more info.",
     )
     parser.add_argument(
@@ -48,14 +56,25 @@ if __name__ == "__main__":
         action="store_true",
         help="Just parse the config and do nothing else.",
     )
+    # pass --download or --no-download to override the config
     parser.add_argument(
-        "--offline",
-        action="store_true",
-        help="Run in offline mode.",
+        "--download",
+        action=argparse.BooleanOptionalAction,
+        help="Override the download setting in the config.",
     )
     parser.add_argument(
-        "--overwrite",
-        action="store_true",
+        "--ingest-to-pipeline",
+        action=argparse.BooleanOptionalAction,
+        help="If specified then ingest data into the pipeline.",
+    )
+    parser.add_argument(
+        "--overwrite-fdb",
+        action=argparse.BooleanOptionalAction,
+        help="If specified then overwrite data even if it already exists in the database.",
+    )
+    parser.add_argument(
+        "--overwrite-cache",
+        action=argparse.BooleanOptionalAction,
         help="If specified then overwrite data even if it already exists in the database.",
     )
     parser.add_argument(
@@ -67,7 +86,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--emit-partial",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         help="If set, tells the time aggregators to emit messages containing partial information when the program is terminated. By default these are thrown away.",
     )
 
@@ -76,9 +95,8 @@ if __name__ == "__main__":
         metavar="NUMBER",
         type=int,
         nargs="?",
-        default=argparse.SUPPRESS,
-        const=1,
-        help="If present, limit the number of processed messages to 1 or the given integer",
+        default=None,
+        help="If present, limit the number of processed messages to the given integer",
     )
     parser.add_argument(
         "--logfile",
@@ -99,9 +117,27 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--die-on-error",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to abort on the first exception or keep going.",
+    )
+
+    parser.add_argument(
+        "--reingest_from",
+        help="Date to reingest from",
+        type=datetime.fromisoformat,
+    )
+
+    parser.add_argument(
+        "--download_from",
+        help="Date to download from",
+        type=datetime.fromisoformat,
+    )
+
+    parser.add_argument(
         "--init-db",
         action="store_true",
-        help="(Re)initialise the SQL database. THIS WIPES ALL SQL DATA!",
+        help="(Re)initialise all the databases.",
     )
 
     parser.add_argument(
@@ -111,10 +147,11 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--namespace",
-        help="Which namespace to us for the postgres database, defaults to the environment name.",
-    )
-
+    "--sources",
+    type=str,
+    nargs='+',
+    help="Which sources to use, e.g. --sources meteotracker acronet smartcitizenkit"
+)
 
     args = parser.parse_args()
 
@@ -124,17 +161,27 @@ if __name__ == "__main__":
         handlers.append(logging.StreamHandler())
         prompt = input
     else:
-       from rich.traceback import install
-       from rich.prompt import Prompt
-       install(show_locals=False)
+        from rich.prompt import Prompt
+        from rich.traceback import install
 
-       handlers.append(RichHandler(markup=True, rich_tracebacks=True))
+        install(show_locals=False)
 
-       # override the input builtin when using fancy output
-       prompt = Prompt.ask
-    
+        handlers.append(RichHandler(markup=True, rich_tracebacks=True))
+
+        # override the input builtin when using fancy output
+        prompt = Prompt.ask
+
     if args.logfile:
-        handlers.append(logging.FileHandler(args.logfile))
+        file_handler = logging.FileHandler(args.logfile)
+        file_handler.setLevel(logging.INFO)
+        # file_format = logging.Formatter(
+        #     "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        #     datefmt="[%Y-%m-%d %H:%M:%S]",
+        # )
+        # file_handler.setFormatter(file_format)
+        handlers.append(file_handler)
+
+
 
     # Set the log level, default is warnings, -v gives info, -vv for debug
     logging.basicConfig(
@@ -145,14 +192,27 @@ if __name__ == "__main__":
     )
     logger = logging.getLogger("CMDLINE")
 
-    from .core.config_parser.config_parser import parse_config
-    from .core.bases import Source, Aggregator
+    logger.debug(f"{args.download = }")
 
-    config, actions = parse_config(args.config_folder,
-                                    offline=args.offline,
-                                    overwrite=args.overwrite,
-                                    environment=args.environment,
-                                    namespace=args.namespace,)
+    from .core.config_parser.config_parser import parse_config
+    from .core.source import Source
+
+    config, actions = parse_config(
+        args.config_folder,
+        download = args.download,
+        ingest_to_pipeline = args.ingest_to_pipeline,
+        overwrite_fdb = args.overwrite_fdb,
+        environment = args.environment,
+        sources = args.sources,
+        die_on_error = args.die_on_error,
+        reingest_from = args.reingest_from,
+        finish_after = args.finish_after,
+    )
+
+    if args.download_from:
+        config.globals.ingestion_time_constants.query_timespan = dataclasses.replace(
+            config.globals.ingestion_time_constants.query_timespan,
+            start = args.download_from)
 
     sources, downstream_actions = [], []
     for action in actions:
@@ -161,47 +221,62 @@ if __name__ == "__main__":
         else:
             downstream_actions.append(action)
 
-    logger.info(f"Globals:")
-    logger.info(f"    Data Path: {config.globals.data_path}")
-    logger.info(f"    Config Path: {config.globals.config_path}")
-    logger.info(f"    Data Path: {config.globals.data_path}")
-    logger.info(f"    Offline: {config.globals.offline}")
-    logger.info(f"    Overwrite: {config.globals.overwrite}")
-    if config.globals.ingestion_time_constants is not None:
-        logger.info(f"    Ingestion Time Constants:")
-        logger.info(f"         Query Timespan: {tuple(d.isoformat() for d in config.globals.ingestion_time_constants.query_timespan)}")  # fmt: skip
-        logger.info(f"         Emit After (Hours): {config.globals.ingestion_time_constants.emit_after_hours}")
-        logger.info(f"         Granularity: {config.globals.ingestion_time_constants.granularity}")
+    logger.debug("Globals:")
+    logger.debug(f"    Environment: {config.globals.environment}")
+    logger.debug(f"    Data Path: {config.globals.data_path}")
+    logger.debug(f"    Data Path: {config.globals.data_path}")
+    logger.debug(f"    Download: {config.globals.download}")
+    logger.debug(f"    Ingest to Pipeline: {config.globals.ingest_to_pipeline}")
+    logger.debug(f"    Overwrite FDB: {config.globals.overwrite_fdb}")
 
-    logger.info("Sources")
+    logger.debug("Sources")
     for i, a in enumerate(sources):
-        logger.info(f"    {i} {str(a)}")
+        logger.debug(f"    {i} {str(a)}")
 
     if args.validate_config:
         sys.exit()
 
     if args.init_db:
-        host = config.globals.secrets['postgres_database']['host']
-        logger.warning(f"Wiping the postgres database as {host}!")
-        if host != "localhost" and prompt(f"Are you sure you want to wipe the postgres database at {host}? y/n: ") != "y": sys.exit()
+        logger.warning(f"Wiping the postgres, fdb and cache databases for env = {config.globals.environment}!")
+        if (
+            config.globals.environment != "local"
+            and prompt(
+                f"Are you sure you want to wipe the database for env = {config.globals.environment}? y/n: "
+            )
+            != "y"
+        ):
+            sys.exit()
+
+
+        paths = [
+            ["Data", config.globals.data_path],
+            ["FDB Root", config.globals.fdb_root],
+            ["Cache", config.globals.cache_path],
+        ]
+        for name, path in paths:
+            logger.warning(f"Deleting {name} at {path}")
+            shutil.rmtree(path, ignore_errors=True)
+        
+        for name, path in paths:
+            logger.warning(f"Recreating {name} at {path}")
+            path.mkdir(parents=True, exist_ok=True)
+
+
+        logger.warning("Wiping Postgres db")
         from ionbeam.metadata.db import init_db
-        from sqlalchemy import create_engine, URL
-        sql_engine = create_engine(URL.create(
-            "postgresql+psycopg2", **config.globals.secrets["postgres_database"],
-        ), echo = False)
-        init_db(sql_engine, config.globals.canonical_variables)
+        init_db(config.globals)
         logger.warning("SQL Database wiped and reinitialised.")
 
 
-    if "finish_after" in args:
-        logger.warning(f"Telling all sources to finish after emitting {args.finish_after} messages")
-        for source in sources:
-            source.finish_after = args.finish_after
-
-    from .core.singleprocess_pipeline import singleprocess_pipeline
-
     try:
-        singleprocess_pipeline(sources, downstream_actions, emit_partial=args.emit_partial, simple_output = args.simple_output or args.debug)
+        singleprocess_pipeline(
+            config,
+            sources,
+            downstream_actions,
+            emit_partial=args.emit_partial,
+            simple_output=args.simple_output or args.debug,
+            die_on_error=args.die_on_error,
+        )
     except Exception as e:
         if args.debug:
             extype, value, tb = sys.exc_info()
@@ -209,4 +284,3 @@ if __name__ == "__main__":
             pdb.post_mortem(tb)
         else:
             raise e
-

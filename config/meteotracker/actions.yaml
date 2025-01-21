@@ -1,0 +1,95 @@
+actions:
+  - class: MeteoTrackerSource
+    cache_directory: cache/meteotracker
+
+    # wkt_bounding_polygon: "POLYGON ((7.008125020793557 45.56326584931264, 7.008125020793557 38.29891947585193, 10.582293217633804 38.29891947585193, 10.582293217633804 45.56326584931264, 7.008125020793557 45.56326584931264))"
+    author_patterns:
+      Bologna: 
+          - bologna_living_lab_.+
+      Barcelona:
+          - barcelona_living_lab_.+
+          - Barcelona_living_lab_.+
+      Genoa:
+          - CIMA I-Change
+          - genova_living_lab_.+
+      Amsterdam:
+          - Amsterdam_living_lab_ICHANGE
+          - Gert-Jan Steeneveld
+      Ouagadougou:
+          - llwa_living_lab_.+
+      Dublin:
+          - "Dublin LL"
+      Jerusalem:
+          - jerusalem_living_lab_.+
+
+    copy_metadata_to_columns:
+      external_station_id: id
+      author: author
+      living_lab: living_lab
+  
+  - class: ComputeStationId
+  - class: SetConstants
+    set:
+      platform: meteotracker
+      aggregation_type: by_time
+
+  - class: ComputeStationNameFromId
+
+  # Compute the column mappings based on the name of each column
+  - class: ComputeColumnMappingsByName
+    mappings: !include mappings.yaml
+
+
+  - class: FormatChecks
+  - class: ComputeChunkDateTime
+
+  - class: CanonicaliseColumns
+    mappings: !include mappings.yaml
+    move_to_front:
+      - platform
+      - author
+      - station_id
+      - external_station_id
+      - station_name
+      - aggregation_type
+      - chunk_date
+      - chunk_time
+      - datetime
+      - lat
+      - lon
+
+  - class: UpdateStationMetadata 
+  - class: ComputeMARSIdentifier
+    lookup:
+      class: const.rd
+      expver: const.xxxx
+      stream: const.lwda
+      aggregation_type: data.aggregation_type
+      platform: data.platform
+      date: data.chunk_date
+      time: data.chunk_time
+      version: const.1
+
+    forward_to_names: ["final_processing"]     
+
+  # - class: SplitOnColumnValue
+  #   column: station_id
+
+  # - class: DropNaNColumns
+  # - class: DropNaNRows
+  # - class: DropEmpty
+
+  # - class: ComputeMARSIdentifier
+  #   lookup:
+  #     class: const.rd
+  #     expver: const.xxxx
+  #     stream: const.lwda
+  #     aggregation_type: data.aggregation_type
+  #     platform: data.platform
+  #     date: data.chunk_date
+  #     internal_id: data.station_id
+  #     time: data.chunk_time
+  #     version: const.1
+
+  #   forward_to_names: ["final_processing"]
+

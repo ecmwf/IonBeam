@@ -63,6 +63,7 @@ class Date_FDBType(FDBType):
     date_format: str = "%Y%m%d"
 
     def format(self, d: Any) -> str:
+        return d
         if isinstance(d, date):
             return d.strftime(self.date_format)
         if isinstance(d, int):
@@ -71,6 +72,8 @@ class Date_FDBType(FDBType):
             return d
 
     def parse(self, s: datetime | str | int) -> date:
+        return s
+
         if isinstance(s, str):
             return datetime.strptime(s, self.date_format).date()
         elif isinstance(s, datetime):

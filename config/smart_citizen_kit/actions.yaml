@@ -1,0 +1,78 @@
+actions:
+  - class: SmartCitizenKitSource
+    mappings: !include mappings.yaml # Used to rename things before going into the metadata db
+
+    copy_metadata_to_columns:
+      external_station_id: device.id
+      station_name: device.name
+      lat: device.location.latitude
+      lon: device.location.longitude
+      author : device.owner.username
+      station_created_at: device.created_at
+
+      # To add later
+      # location_exposure: device.location.exposure
+      # author_uuid: device.owner.uuid
+      # external_uuid: device.uuid
+      # station_description: device.description
+      # hardware_name: device.hardware.name
+  
+  - class: SetConstants
+    set:
+      platform: smart_citizen_kit
+      aggregation_type: by_time
+
+  - class: ComputeStationId
+  # - class: ConvertDtypes
+  - class: FormatChecks
+  - class: ComputeChunkDateTime
+
+  - class: CanonicaliseColumns
+    mappings: !include mappings.yaml
+    move_to_front:
+      - platform
+      - author
+      - station_id
+      - external_station_id
+      - station_name
+      - aggregation_type
+      - chunk_date
+      - chunk_time
+      - datetime
+      - lat
+      - lon
+
+  - class: UpdateStationMetadata
+  - class: ComputeMARSIdentifier
+    lookup:
+      class: const.rd
+      expver: const.xxxx
+      stream: const.lwda
+      aggregation_type: data.aggregation_type
+      platform: data.platform
+      date: data.chunk_date
+      time: data.chunk_time
+      version: const.1
+
+    forward_to_names: ["final_processing"]     
+
+  # - class: SplitOnColumnValue
+  #   column: station_id
+
+  # - class: DropNaNColumns
+  # - class: DropNaNRows
+  # - class: DropEmpty
+
+  # - class: ComputeMARSIdentifier
+  #   lookup:
+  #     class: const.rd
+  #     expver: const.xxxx
+  #     stream: const.lwda
+  #     aggregation_type: data.aggregation_type
+  #     platform: data.platform
+  #     date: data.chunk_date
+  #     internal_id: data.station_id
+  #     time: data.chunk_time
+  #     version: const.1
+
+  #   forward_to_names: ["final_processing"]

@@ -1,10 +1,11 @@
-from functools import cache
 import dataclasses
-from dataclasses import dataclass, field, Field
-import dataclasses # So we can override is_dataclass and fields with a custom implementation
-from typing import Union, get_origin, get_args, List
 import typing
+from dataclasses import Field, dataclass, field
 from pathlib import Path
+from typing import Union, get_args, get_origin
+
+import Levenshtein
+
 from .common import ConfigError, ConfigMatchError
 
 # TYPE_KEY is a special key that determines which class or type to pick in ambiguous cases.
@@ -15,7 +16,8 @@ LINE_KEY = "__line__"  # special key that tells us what line we're on
 
 @dataclass
 class MissingOverlay:
-    pass
+    def __bool__(self):
+        return False
 
 MISSING_OVERLAY = MissingOverlay()  # special object to indicate that a field is missing in an overlay
 
@@ -40,7 +42,7 @@ def check_matching(context, datacls, input_dict):
     default_keys = {field.name for field in fields(datacls) if has_default(field)}
 
     ignored_keys = {TYPE_KEY, LINE_KEY} | default_keys
-    datacls_keys = {field.name for field in fields(datacls) if not is_post_init_field(field)}
+    datacls_keys = {field.name for field in fields(datacls) if field.init}
     input_keys = set(input_dict.keys())
 
     if context.overlay:
@@ -137,8 +139,11 @@ def is_dict(t):
 def is_overlay_dataclass(t):
     return "overlay" in getattr(t, "__metadata__", ())
 
-def is_post_init_field(f : Field):
-    return "post_init" in getattr(f.type, "__metadata__", ())
+def is_custom_init_field(f : Field):
+    return "custom_init" in getattr(f.type, "__metadata__", ())
+
+def is_custom_init(f : Field):
+    return "custom_init" in getattr(f, "__metadata__", ())
 
 
 def determine_matching_dataclass(context, key, datacls, input_dict):
@@ -158,7 +163,8 @@ def determine_matching_dataclass(context, key, datacls, input_dict):
         cls_name = input_dict[TYPE_KEY]
         try:
             return subclasses[cls_name]
-        except KeyError as e:
+        except KeyError:
+            closest_matches = sorted(subclasses.keys(), key=lambda known_cls: Levenshtein.ratio(cls_name, known_cls), reverse=True)
             raise ConfigLineError(
                 context,
                 key,
@@ -166,8 +172,9 @@ def determine_matching_dataclass(context, key, datacls, input_dict):
                 input_dict,
                 f"Config yaml entry for section '{datacls.__name__}' invalid"
                 f" name: '{cls_name}' could not be found as a subclass of {datacls.__name__}"
+                f", did you mean one of {closest_matches[:3]}"
                 f"\n\nKnown subclasses: {subclasses.keys()}",
-            ) from e
+            ) from None
 
     return datacls
 
@@ -217,7 +224,7 @@ def parse_union(context, key, _type, value):
                 key,
                 _type,
                 value,
-                f"Union types of multiple non-dataclasses are not allowed"
+                "Union types of multiple non-dataclasses are not allowed"
                 " because there's no way to decide which one to use for parsing!",
             )
 
@@ -261,11 +268,16 @@ def parse_field(context, key, _type, value):
 
     """
     try:
-        # print(_type, value)
+        # print(f"parsing {key=}, {_type=}, {value=} {is_custom_init(_type)=}")
+        if is_custom_init(_type):
+            try:
+                return _type.parse(value)
+            except Exception as e:
+                raise e from None
+
         if is_dataclass(_type):
             # possibly use a subclass instead of the base class
             datacls = determine_matching_dataclass(context, key, _type, value)
-            # print(key, _type, value, datacls)
             return dataclass_from_dict(context, datacls, value)
 
         if is_union(_type):
@@ -280,13 +292,18 @@ def parse_field(context, key, _type, value):
         if is_dict(_type):
             return parse_dict(context, key, _type, value)
 
-        try:
-            result = _type(value)
-        except Exception as e:
-            raise ConfigLineError(context, key, _type, value, str(e)) from e
+        if isinstance(value, _type):
+            return value
+        
+        if isinstance(value, dict):
+            return _type(**{k : v for k,v in value.items() if k != "__line__"})
+        
+        return _type(value)
 
-        return result
+
     except Exception as e:
+        if isinstance(e, ConfigMatchError):
+            raise e from None
         raise ConfigError(f"While parsing {key=}, {_type=}, {value=}") from e
 
 
@@ -314,14 +331,10 @@ def dataclass_from_dict(context, datacls, input_dict):
             field.name: parse_field(context, field.name, field.type, input_dict[field.name])
                         if field.name in input_dict else MISSING_OVERLAY # If the field is missing and it's an overlay, set it to None
             for field in fields(datacls)
-            if field.name in input_dict or context.overlay # If it's not an overlay, skip this field
+            if field.name in input_dict or (context.overlay and field.init) # If it's not an overlay, skip this field
         }
-    
-    # initialise all the post_init fields to None, leaving it up to the caller to deal with them
-    post_init_fields = {field.name : None for field in fields(datacls) 
-                        if is_post_init_field(field) and not field.name in kwargs}
 
-    return datacls(**kwargs, **post_init_fields)
+    return datacls(**kwargs)
 
 
 def parse_config_from_dict(datacls, input_dict, filepath: Path | str | None = None, overlay = False):
@@ -337,8 +350,9 @@ def merge_overlay(object, overlay):
     if not is_dataclass(object):
         return overlay if overlay is not MISSING_OVERLAY else object
     
-    for field in fields(object):
-        merged = merge_overlay(getattr(object, field.name), getattr(overlay, field.name, MISSING_OVERLAY))
-        setattr(object, field.name, merged)
+    replacements = {
+        field.name: merge_overlay(getattr(object, field.name), getattr(overlay, field.name, MISSING_OVERLAY))
+        for field in fields(object) if field.init
+    }
 
-    return object
+    return dataclasses.replace(object, **replacements)

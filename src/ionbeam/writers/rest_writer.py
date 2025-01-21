@@ -8,31 +8,19 @@
 # # does it submit to any jurisdiction.
 # #
 
-from typing import Iterable
-from pathlib import Path
-
-import pandas as pd
-
 import dataclasses
-
-from ..core.bases import Writer, Message, FileMessage, FinishMessage
-
-import logging
-import findlibs
-import os
-import yaml
 import json
-from jinja2 import Template
-import shutil
+import logging
+from typing import Iterable
+
+from ..core.bases import FileMessage, FinishMessage, Message, Writer
 
 logger = logging.getLogger(__name__)
 
-import yaml
-import pyodc as odc
-from io import BytesIO
 from dataclasses import dataclass
+
 import requests
-import json
+
 
 @dataclass
 class IonBeamAPI:
@@ -79,8 +67,8 @@ class RESTWriter(Writer):
     def __str__(self):
         return f"{self.__class__.__name__}()"
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         assert self.globals is not None
         assert self.globals.secrets is not None
         assert self.globals.api_hostname is not None
@@ -88,15 +76,14 @@ class RESTWriter(Writer):
         
 
     def process(self, input_message: FileMessage | FinishMessage) -> Iterable[Message]:
-        if isinstance(input_message, FinishMessage):
-            return
+
 
         assert input_message.metadata.filepath is not None
 
         request = input_message.metadata.mars_request.as_strings()
         
         if len(self.api.list(request)) > 0 and not self.globals.overwrite:
-            logger.debug(f"Dropping data because it's already in the database.")
+            logger.debug("Dropping data because it's already in the database.")
         else:
             with open(input_message.metadata.filepath, "rb") as f:
                 resp = self.api.archive(f, request = request)
@@ -106,4 +93,4 @@ class RESTWriter(Writer):
 
         metadata = self.generate_metadata(input_message, mars_request=input_message.metadata.mars_request)
         output_msg = FileMessage(metadata=metadata)
-        yield self.tag_message(output_msg, input_message)
+        yield output_msg

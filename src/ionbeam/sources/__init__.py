@@ -9,25 +9,11 @@
 # #
 
 from pathlib import Path
+
 from ..core.plugins import find_plugin
-from ..core.bases import Source
-
+from ..core.source import Source
+from .acronet import AcronetSource, AddAcronetMetadata
 from .meteotracker.source import MeteoTrackerSource
-from .cima.source import AcronetSource
 from .sensor_community import SensorCommunitySource
-from .multi_file import MultiFileSource
-from .watch_directory import WatchDirectorySource
 from .smart_citizen_kit import SmartCitizenKitSource
-
-__all__ = [
-    "MeteoTrackerSource",
-    "MeteoTrackerOfflineSource",
-    "AcronetSource",
-    "MultiFileSource",
-    "WatchDirectorySource",
-]
-
-
-def load_source(name: str, **kwargs) -> Source:
-    klass = find_plugin(Path(__file__).parent, __name__, "source", name)
-    return klass(**kwargs)
+from .watch_directory import WatchDirectorySource

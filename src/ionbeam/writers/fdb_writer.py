@@ -8,22 +8,20 @@
 # # does it submit to any jurisdiction.
 # #
 
-from typing import Iterable, List, Literal
-from pathlib import Path
-
-import pandas as pd
-
 import dataclasses
-
-from ..core.bases import Writer, Message, FileMessage, FinishMessage
-
 import logging
-import findlibs
 import os
-import yaml
-import json
-from jinja2 import Template
 import shutil
+from pathlib import Path
+from time import time
+from typing import Iterable
+
+import findlibs
+import yaml
+from jinja2 import Template
+
+from ..core.bases import BytesMessage, DataMessage, FileMessage, Message, Writer
+from ..core.singleprocess_pipeline import fmt_time
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +29,14 @@ def install_metkit_overlays(template, keys):
     # Find the location of the metkit library
     metkit_path = findlibs.find("metkit")
     if not metkit_path:
-        raise ValueError(f"Failed to find metkit library")
+        raise ValueError("Failed to find metkit library")
 
     # Check the path conforms to our expectations
     if Path(metkit_path).with_suffix("").parts[-2:] == ('lib', 'libmetkit'):
         base = Path(metkit_path).parents[1]
     else:
         # raise ValueError(f"Unexpected metkit location: {metkit_path}")
-        base = Path("/usr")
+        base = Path("/usr/local")
 
     # Figure out the location of the language.yaml and odb/marsrequest.yaml files
     language_path = base / "share/metkit/language.yaml"
@@ -81,54 +79,87 @@ def install_metkit_overlays(template, keys):
             for k in keys
         ))
 
-
 @dataclasses.dataclass
 class FDBWriter(Writer):
-    FDB5_client_config: dict
+    config: dict | None = None
     debug: list[str] = dataclasses.field(default_factory=list)
 
     def __str__(self):
         return f"{self.__class__.__name__}()"
 
-    def init(self, globals):
-        super().init(globals)
-        self.metadata = dataclasses.replace(self.metadata, state="written")
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
+        self.set_metadata = dataclasses.replace(self.set_metadata, state="written")
         self.metkit_language_template = globals.metkit_language_template
 
-        if "schema" not in self.FDB5_client_config:
-            self.FDB5_client_config["schema"] = str(globals.fdb_schema_path)
+        if not self.config:
+            self.config = dict(
+                engine = "toc",
+                spaces = [
+                    dict(
+                        handler = "Default",
+                        roots = [
+                            dict(
+                                path = str(globals.fdb_root)
+                            )
+                        ]
+                    )
+                ]
+            )
 
-        self.fdb_client = self.configure_fdb_client()
+        if "schema" not in self.config:
+            self.config["schema"] = str(globals.fdb_schema_path)
+
+        self.fdb = self.configure_fdb_client()
 
     def configure_fdb_client(self):
         fdb5_path = findlibs.find("fdb5")
         logger.debug(f"FDBWriter using fdb5 shared library from {fdb5_path}")
 
-        os.environ["FDB5_CONFIG"] = yaml.dump(self.FDB5_client_config)
-
         for lib in self.debug:
             os.environ[f"{lib.upper()}_DEBUG"] = "1"
 
-        logger.debug(f"Installing metkit overlays")
-        install_metkit_overlays(self.metkit_language_template, ["platform", "observation_variable"])
+        logger.debug("Installing metkit overlays")
+        install_metkit_overlays(self.metkit_language_template, self.globals.custom_mars_keys)
 
-        import pyfdb # This has to happen late so that it pucks up the above.
+        import pyfdb
         
-        return pyfdb.FDB()
+        return pyfdb.FDB(self.config)
 
-    def process(self, input_message: FileMessage | FinishMessage) -> Iterable[Message]:
-        if isinstance(input_message, FinishMessage):
-            return
+    def process(self, input_message: FileMessage | BytesMessage) -> Iterable[Message]:
 
-        assert input_message.metadata.filepath is not None
-        fdb = self.configure_fdb_client()
+        
+        assert input_message.metadata.mars_id is not None
+        mars_id = input_message.metadata.mars_id.as_strings()
 
-        if len(list(fdb.list(request))) > 0 and not self.globals.overwrite:
-            logger.debug(f"Dropping data because it's already in the database.")
-        else:
-            with open(input_message.metadata.filepath, "rb") as f:
-                fdb.archive(f.read())
+        t0 = time()
+        existing_matches = list(self.fdb.list(mars_id))
+        n = len(existing_matches)
+        logger.debug(f"Found {n} existing matches for {mars_id} in {fmt_time(time() - t0)}")
 
-        metadata = self.generate_metadata(input_message, mars_request=input_message.metadata.mars_request)
-        output_msg = FileMessage(metadata=metadata)
-        yield self.tag_message(output_msg, input_message)
+        if n == 0:
+            t0 = time()
+            self.fdb.archive_single(input_message.data_bytes(), mars_id)
+            self.fdb.flush()
+            logger.debug(f"Added new data for {mars_id} in {fmt_time(time() - t0)}")
+
+        elif not self.globals.overwrite_fdb:
+            logger.debug("Dropping data because it's already in the database.")
+        
+        elif n == 1:
+            t0 = time()
+            logger.debug(f"Overwriting existing data for {mars_id}")
+            path = existing_matches[0]["path"]
+            logger.debug(f"Overwriting data at {path}")
+            with open(path, "wb") as f:
+                f.seek(0)
+                f.truncate()
+                f.write(input_message.data_bytes())
+            logger.debug(f"Overwrote data for {mars_id} in {fmt_time(time() - t0)}")
+
+        elif n > 1:
+            raise ValueError(f"Multiple matches for {mars_id} in the database.")
+        
+        metadata = self.generate_metadata(input_message)
+        output_msg = DataMessage(metadata=metadata)
+        yield output_msg

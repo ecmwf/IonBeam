@@ -8,22 +8,23 @@
 # # does it submit to any jurisdiction.
 # #
 
-import logging
-import requests
-from datetime import date
-from tqdm.auto import tqdm
-from bs4 import BeautifulSoup
-import re
 import dataclasses
+import logging
 import pickle
-from requests.exceptions import RequestException
-from pathlib import Path
+import re
 import time
+from datetime import date
+from pathlib import Path
+from typing import Iterable
 from urllib.parse import urlparse
 
+import requests
+from bs4 import BeautifulSoup
+from requests.exceptions import RequestException
+from tqdm.auto import tqdm
 
-from ..core.bases import FileMessage, Source, MetaData, Message
-from typing import Literal, Iterable
+from ..core.bases import FileMessage, Message
+from ..core.source import Source
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,8 @@ class SensorCommunitySource(Source):
     finish_after: int | None = None
     base_url: str = "https://archive.sensor.community/"
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         logger.debug(f"Initialialised SensorCommunity source with {self.start_date=}, {self.end_date=}")
         self.cache_file = self.resolve_path(self.cache_file, type="data")
         self.cache_directory = self.resolve_path(self.cache_directory, type="data")

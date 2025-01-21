@@ -8,26 +8,16 @@
 # # does it submit to any jurisdiction.
 # #
 
-from typing import Iterable, List, Literal
+import dataclasses
+import logging
+from typing import Iterable, List
 
 import pandas as pd
 
-import dataclasses
-
 from ..core.bases import (
     Parser,
-    FileMessage,
     TabularMessage,
-    FinishMessage,
-    InputColumns,
 )
-from unicodedata import normalize
-
-from ..core.converters import unit_conversions
-from ..core.html_formatters import make_section, action_to_html, dataframe_to_html
-from dataclasses import asdict
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +36,8 @@ class Splitter(Parser):
     identifying_keys: List[str] = dataclasses.field(default_factory=list)
     metadata_keys: List[str] = dataclasses.field(default_factory=list)
 
-    def init(self, globals):
-        super().init(globals)
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
         self.fixed_column_names = self.metadata_keys + self.identifying_keys
         self.canonical_variables_map = {c.name: c for c in self.globals.canonical_variables}
 
@@ -57,10 +47,7 @@ class Splitter(Parser):
             yield column_name, df[self.fixed_column_names + [column_name]]
 
 
-    def process(self, rawdata: TabularMessage | FinishMessage) -> Iterable[TabularMessage]:
-        if isinstance(rawdata, FinishMessage):
-            return
-
+    def process(self, rawdata: TabularMessage) -> Iterable[TabularMessage]:
         df = rawdata.data
         # Split the data into data frames for each of the value types
         for variable_column, df in self.split_columns(df):
@@ -68,12 +55,12 @@ class Splitter(Parser):
                 message=rawdata,
                 observation_variable=variable_column,
                 filepath=None,
+                columns=[self.canonical_variables_map[c] for c in self.fixed_column_names + [variable_column]],
             )
 
             output_msg = TabularMessage(
                 metadata=metadata,
-                columns=[self.canonical_variables_map[c] for c in self.fixed_column_names + [variable_column]],
                 data=df,
             )
 
-            yield self.tag_message(output_msg, rawdata)
+            yield output_msg

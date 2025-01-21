@@ -8,8 +8,9 @@
 # # does it submit to any jurisdiction.
 # #
 
+from .api import MeteoTracker_API
+from .metadata import AddMeteotrackerMetadata
 from .source import MeteoTrackerSource
-from .meteotracker import MeteoTracker_API
 
 # Expose the Source object at ionbeam.sources.cima.source so that load_source can find it
 source = MeteoTrackerSource

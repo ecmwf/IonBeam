@@ -55,9 +55,9 @@ class NewTimeAggregator(Aggregator):
     def __repr__(self):
         return f"{self.__class__.__name__}({self.match}, {self.granularity}, {self.time_direction})"
 
-    def init(self, globals):
-        super().init(globals)
-        self.metadata = dataclasses.replace(self.metadata, state="time_aggregated")
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
+        self.set_metadata = dataclasses.replace(self.set_metadata, state="time_aggregated")
 
         if self.globals.ingestion_time_constants is not None:
             self.granularity = self.globals.ingestion_time_constants.granularity
@@ -70,7 +70,7 @@ class NewTimeAggregator(Aggregator):
         data = [m.data for m in bucket]
         print(data)
         return TabularMessage(
-            metadata=self.metadata,
+            metadata=self.set_metadata,
             data=pd.concat(data),
         )
 
@@ -125,7 +125,10 @@ class NewTimeAggregator(Aggregator):
         ):
             if data_chunk.empty:
                 continue
-            chunked_message = dataclasses.replace(message, data=data_chunk)
+            chunked_message = dataclasses.replace(message, 
+                data=data_chunk,
+                metadata = deepcopy(metadata)
+            )
             start_time = datetime.combine(date, time(hour=hour, tzinfo=None))
             self.time_chunks[start_time].append(chunked_message)
 

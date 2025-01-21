@@ -8,16 +8,12 @@
 # # does it submit to any jurisdiction.
 # #
 
-from typing import Iterable, List, Literal
-
-import pandas as pd
-
 import dataclasses
-
-from ..core.bases import Writer, Message, FileMessage, FinishMessage
-from ..core.aviso import send_aviso_notification
-
 import logging
+from typing import Iterable
+
+from ..core.aviso import send_aviso_notification
+from ..core.bases import FileMessage, Message, Writer
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +23,13 @@ class AVISONotifier(Writer):
     def __str__(self):
         return f"{self.__class__.__name__}()"
 
-    def init(self, globals):
-        super().init(globals)
-        self.metadata = dataclasses.replace(self.metadata, state="aviso_notified")
+    def init(self, globals, **kwargs):
+        super().init(globals, **kwargs)
+        self.set_metadata = dataclasses.replace(self.set_metadata, state="aviso_notified")
 
-    def process(self, message: FileMessage | FinishMessage) -> Iterable[Message]:
-        if isinstance(message, FinishMessage):
-            return
-
+    def process(self, message: FileMessage) -> Iterable[Message]:
         request = {"database": "fdbdev", "class": "rd"}
-        request |= message.metadata.mars_request.as_strings()
+        request |= message.metadata.mars_id.as_strings()
 
         # Send a notification to AVISO that we put this data into the DB
         logger.debug(f"Sending to aviso {request}")
@@ -44,8 +37,8 @@ class AVISONotifier(Writer):
         logger.debug(f"Aviso response {response}")
 
         # TODO: the explicit mars_keys should not be necessary here.
-        metadata = self.generate_metadata(message, mars_request=message.metadata.mars_request)
+        metadata = self.generate_metadata(message, mars_id=message.metadata.mars_id)
         output_msg = FileMessage(metadata=metadata)
 
-        assert output_msg.metadata.mars_request is not None
-        yield self.tag_message(output_msg, message)
+        assert output_msg.metadata.mars_id is not None
+        yield output_msg
