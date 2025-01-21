@@ -39,8 +39,11 @@ class AcronetSource(RESTSource):
     source: str = "acronet"
     version = 1
     endpoint = "https://webdrops.cimafoundation.org/app/"
-    maximum_request_size: timedelta = timedelta(days = 2)
-    max_time_downloading: timedelta = timedelta(seconds = 10)
+    # Ideally this should be set so that:
+    # Time to download maximum_request_size * number of unique streams of data <    max_time_downloading
+    # The Acronet source has about ten unique streams of data as of writing acronet:TERMOMETRO, ... 
+    maximum_request_size: timedelta = timedelta(days = 2) 
+    max_time_downloading: timedelta = timedelta(seconds = 60)
 
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)

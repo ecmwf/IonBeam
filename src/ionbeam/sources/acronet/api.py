@@ -69,10 +69,10 @@ class CIMA_API:
         cache_file: Path | None = None,
         headers: dict[str, str] = {},
     ):
-        HTTPConnection.debuglevel = 1
-        requests_log = logging.getLogger("requests.packages.urllib3")
-        requests_log.setLevel(logging.DEBUG)
-        requests_log.propagate = True
+        # HTTPConnection.debuglevel = 1
+        # requests_log = logging.getLogger("requests.packages.urllib3")
+        # requests_log.setLevel(logging.DEBUG)
+        # requests_log.propagate = True
 
         self.logger = logging.getLogger(__name__)
 
@@ -156,9 +156,8 @@ class CIMA_API:
         "Wrap the get command of the underlying oauth object"
         self.authenticate()
         try:
-            logger.debug(f"GETing {args}, {kwargs}")
-            r = requests.get(*args, **kwargs, timeout = 0.5)
-            # r = self.oauth.get(*args, **kwargs)
+            # logger.debug(f"GETing {args}, {kwargs}")
+            r = self.oauth.get(*args, **kwargs)
             r.raise_for_status()
             return r
         

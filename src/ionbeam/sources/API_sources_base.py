@@ -655,7 +655,7 @@ class RESTSource(APISource):
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
         self.session = requests.Session()
-        self.session.timeout = 3
+        # self.session.timeout = 3
 
         # # Add retry for HTTP requests
         # retries = Retry(
