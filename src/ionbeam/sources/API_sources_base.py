@@ -534,9 +534,18 @@ class APISource(Source, AbstractDataSourceMixin):
         # This way we can operate on large chunks efficiently
 
         emitted_messages = 0
-        reingest_from = self.globals.reingest_from
+        if self.globals.reingest_from is not None: 
+            # Todo find a cleaner way to enforce this at the config level
+            reingest_from = self.globals.reingest_from.replace(tzinfo = UTC)
+            logger.debug(f"reingesting from {reingest_from}")
+        else:
+            reingest_from = None
+
         granularity = self.globals.ingestion_time_constants.granularity
         query_time_span = self.globals.ingestion_time_constants.query_timespan
+
+        if reingest_from:
+            query_time_span = dataclasses.replace(query_time_span, start = reingest_from)
         
         with self.globals.sql_session.begin() as db_session:
 
@@ -544,7 +553,9 @@ class APISource(Source, AbstractDataSourceMixin):
                 data_chunk
                 for data_stream in self.get_all_data_streams(db_session)
                 for data_chunk in data_stream.get_chunks(db_session, query_time_span, 
-                                                                 ingested_after = reingest_from if reingest_from is not None else data_stream.get_last_ingestion_time(db_session),
+                                                                 # If reingest_from is set then ignore when the chunks were actually ingested 
+                                                                 mode="metadata",
+                                                                 ingested_after = None if reingest_from is not None else data_stream.get_last_ingestion_time(db_session),
                                                                  ) 
             ]
             logger.info(f"New or updated chunks {len(new_chunks)}")
@@ -583,12 +594,14 @@ class APISource(Source, AbstractDataSourceMixin):
 
             logger.info(f"Expanded to group of {len(time_spans_affected_by_this_group)} time spans")
 
-            # Go through and also load all the old chunks we need too
+            # Go through and actually load the chunks
+            chunk_group = set()
             for ts in time_spans_affected_by_this_group:
+                logger.debug(f"Loading all data chunks for {ts}")
                 for data_stream in data_streams:
                     for chunk in data_stream.get_chunks(db_session, ts, ingested_before = data_stream.get_last_ingestion_time(db_session), mode="metadata"):
+                        # Avoid loading the same chunk multiple times
                         if chunk not in chunk_group:
-                            # get the full data for this chunk
                             chunk = chunk.load_data(db_session)
                             chunk_group.add(chunk)
 

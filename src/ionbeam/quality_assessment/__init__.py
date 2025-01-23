@@ -1,1 +1,0 @@
-from .qa import QualityControl
