@@ -19,11 +19,8 @@ from sqlalchemy_utils import UUIDType
 
 from ..core.bases import TabularMessage
 from ..core.source import Source
-from ..core.time import (
-    TimeSpan,
-)
+from ..core.time import TimeSpan, fmt_time
 from ..metadata.db import Base
-from ..singleprocess_pipeline import fmt_time
 
 logger = logging.getLogger(__name__)
 
@@ -568,20 +565,24 @@ class APISource(Source, AbstractDataSourceMixin):
         
         with self.globals.sql_session.begin() as db_session:
 
+            # Lookup the metadata for all chunks that are either new since we last ingested
+            # or if reingest_from is set then we ignore when the chunks were actually ingested
+            # And just load all chunks that pertain to times after reingest_from
             new_chunks = [
                 data_chunk
                 for data_stream in self.get_all_data_streams(db_session)
                 for data_chunk in data_stream.get_chunks(db_session, query_time_span, 
                                                                  # If reingest_from is set then ignore when the chunks were actually ingested 
                                                                  mode="metadata",
+                                                                 empty = False,
                                                                  ingested_after = None if reingest_from is not None else data_stream.get_last_ingestion_time(db_session),
                                                                  ) 
             ]
             logger.info(f"New or updated chunks {len(new_chunks)}")
 
 
-            # Determine the list of output time spans that overlap one of the modified chunks
-            # Create a set of new chunks for each time span
+            # Determine the list of output time spans each chunk affects
+            # creating the mapping affect_time_span -> relevant chunks
             affected_time_spans : dict[TimeSpan, set[DataChunk]] = defaultdict(set)
             for chunk in new_chunks:
                 for ts in self.affected_time_spans(chunk, granularity):
@@ -597,9 +598,14 @@ class APISource(Source, AbstractDataSourceMixin):
             current_time_span, chunk_group = affected_time_spans.popitem()
             logger.info(f"Picked the next time span to work on {current_time_span}")
 
-            # When the chunks are large it makes sense to operate on many time spans at once
-            # get all the timespans affected by all the chunks we have loaded anyway.
-            # This is a heuristic but should define a nice unit of work to do.
+            # This next line takes the current time span
+            # finds all the chunks that affect it
+            # And takes all the time_spans spanned by those chunks
+            # This defines a timespan group
+
+            # Why?
+            # When the chunks are much larger than the timespans it makes sense to operate on many time spans at once
+            # this is attempting to choose a good size for the timespan group
             time_spans_affected_by_this_group = {current_time_span,} | set(
                 t
                 for chunk in chunk_group
@@ -607,20 +613,23 @@ class APISource(Source, AbstractDataSourceMixin):
                 if t in affected_time_spans # Don't process time spans we've already processed
                 )
             
+            # Remove the time spans we're about to process from the affected_time_spans
             for t in time_spans_affected_by_this_group:
                 if t in affected_time_spans:
                     del affected_time_spans[t]
 
-            logger.info(f"Expanded to group of {len(time_spans_affected_by_this_group)} time spans")
+            logger.info(f"Expanded to time span group of {len(time_spans_affected_by_this_group)} time spans")
 
-            # Go through and actually load the chunks
+            # Go through and actually load the chunks that we need
             chunk_group = set()
             for ts in time_spans_affected_by_this_group:
                 logger.debug(f"Loading all data chunks for {ts}")
                 for data_stream in data_streams:
-                    for chunk in data_stream.get_chunks(db_session, ts, ingested_before = data_stream.get_last_ingestion_time(db_session), mode="metadata"):
-                        # Avoid loading the same chunk multiple times
+
+                    # Just load metadata here because we might have already loaded this chunk
+                    for chunk in data_stream.get_chunks(db_session, ts, empty = False, mode="metadata"):
                         if chunk not in chunk_group:
+                            # Only now load the chunk once we've check it's not already loaded
                             chunk = chunk.load_data(db_session)
                             chunk_group.add(chunk)
 
