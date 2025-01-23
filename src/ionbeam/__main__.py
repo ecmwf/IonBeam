@@ -43,7 +43,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="IonBeam",
         description="Beam IoT data around",
-        epilog="See https://github.com/ecmwf-projects for more info.",
+        epilog="See https://github.com/ecmwf/ionbeam for more info.",
     )
     parser.add_argument(
         "config_folder",
@@ -123,13 +123,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--reingest_from",
+        "--reingest-from",
         help="Date to reingest from",
         type=datetime.fromisoformat,
     )
 
     parser.add_argument(
-        "--download_from",
+        "--download-from",
         help="Date to download from",
         type=datetime.fromisoformat,
     )
@@ -283,4 +283,6 @@ if __name__ == "__main__":
             traceback.print_exc()
             pdb.post_mortem(tb)
         else:
+            logger.warning(f"Failed with exeption: {e}")
+            logger.warning(f"Traceback:\n{traceback.format_exc()}")
             raise e

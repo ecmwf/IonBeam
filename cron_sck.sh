@@ -9,5 +9,6 @@ echo smart_citizen_kit `date` >> cron_logs_smart_citizen_kit.txt
     --sources  smart_citizen_kit \
     --download \
     --no-ingest-to-pipeline \
+    --overwrite-fdb \
     --logfile cron_logs_smart_citizen_kit.txt
     

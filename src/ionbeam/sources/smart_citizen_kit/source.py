@@ -34,9 +34,9 @@ class SmartCitizenKitSource(RESTSource):
     """
     mappings: Mappings = field(kw_only=True)
 
-    maximum_request_size = timedelta(days=1)
+    maximum_request_size = timedelta(days=10)
     minimum_request_size = timedelta(minutes=5)
-    max_time_downloading = timedelta(seconds=10)
+    max_time_downloading = timedelta(seconds=60)
     cache_directory: Path = Path("inputs/smart_citizen_kit")
     endpoint = "https://api.smartcitizen.me/v0"
     cache = TTLCache(maxsize=1e5, ttl=20 * 60)  # Cache API responses for 20 minutes
@@ -103,6 +103,14 @@ class SmartCitizenKitSource(RESTSource):
         def filter_by_dates(device):
             if device["last_reading_at"] is None or device["created_at"] is None:
                 return False
+            earliest_reading = datetime.max.replace(tzinfo=UTC)
+            latest_reading = datetine.min.replace
+
+            for sensor in 
+            last_reading_at = max(
+                 datetime.fromisoformat(sensor["created_at"]) if datetime.min.replace(tzinfo=UTC)
+            )
+
             device_start_date = datetime.fromisoformat(device["created_at"])
             device_end_date = datetime.fromisoformat(device["last_reading_at"])
             # see https://stackoverflow.com/questions/325933/determine-whether-two-date-ranges-overlap

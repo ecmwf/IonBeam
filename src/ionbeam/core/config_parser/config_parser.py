@@ -25,7 +25,6 @@ from ... import (  # noqa: F401
     aggregators,
     encoders,
     parsers,
-    quality_assessment,
     sources,
     writers,
 )

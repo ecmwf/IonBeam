@@ -6,8 +6,9 @@ echo Ingestion `date` >> cron_logs_ingest.txt
 /home/math/.venv/bin/python -m ionbeam \
      ./config -vvv \
     --env ewc \
-    --sources  meteotracker smart_citizen_kit acronet \
+    --sources  acronet \
     --no-download \
     --ingest-to-pipeline \
     --overwrite-fdb \
+    --reingest-from=2025-01-19 \
     --logfile cron_logs_ingest.txt
