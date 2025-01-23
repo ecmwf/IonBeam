@@ -152,6 +152,8 @@ class AcronetSource(RESTSource):
             self.perform_copy_metadata_columns(df, dataclasses.asdict(station), columns)
             station_dataframes.append(df)
 
+        if not station_dataframes:
+            return
         combined_df = pd.concat(
             [
                 df.reset_index()  # moves the current DatetimeIndex into a column named 'datetime'
