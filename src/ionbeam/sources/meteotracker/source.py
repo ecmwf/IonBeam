@@ -44,8 +44,10 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
     cache_directory: Path = field(default_factory=Path)
     author_patterns: dict[str, list[str]] = field(default_factory=dict)
 
-    maximum_request_size: timedelta = timedelta(days = 1)
+    maximum_request_size: timedelta = timedelta(days = 10)
+    minimum_request_size: timedelta = timedelta(minutes=5)
     max_time_downloading: timedelta = timedelta(seconds = 30)
+
     
 
     def init(self, globals, **kwargs):
