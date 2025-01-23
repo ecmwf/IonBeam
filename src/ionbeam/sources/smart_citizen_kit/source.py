@@ -13,8 +13,8 @@ import pandas as pd
 from cachetools import TTLCache, cachedmethod
 from cachetools.keys import hashkey
 
-from ...core.bases import Mappings, RawVariable, TabularMessage, TimeSpan
-from ...singleprocess_pipeline import fmt_time
+from ...core.bases import Mappings, RawVariable, TabularMessage
+from ...core.time import TimeSpan, fmt_time
 from ..API_sources_base import DataChunk, DataStream, RESTSource
 
 logger = logging.getLogger(__name__)

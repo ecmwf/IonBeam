@@ -22,8 +22,7 @@ import pandas as pd
 import shapely
 
 from ...core.bases import CanonicalVariable, RawVariable, TabularMessage
-from ...core.time import TimeSpan
-from ...singleprocess_pipeline import fmt_time
+from ...core.time import TimeSpan, fmt_time
 from ..API_sources_base import AbstractDataSourceMixin, DataChunk, DataStream, RESTSource
 from .api import MeteoTracker_API
 

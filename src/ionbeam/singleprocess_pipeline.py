@@ -15,6 +15,7 @@ from time import time
 from typing import Iterable, Sequence
 
 from .core.bases import Aggregator, FinishMessage, Message, MessageStream
+from .core.time import fmt_time
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +59,6 @@ def empty_aggregators(actions) -> Iterable[Message]:
             for m in a.process(FinishMessage("Sources Exhausted")):
                 yield m
 
-def fmt_time(t):
-    units = ["s", "ms", "us", "ns"]
-    for unit in units:
-        if t > 1:
-            return f"{t:.2f} {unit}"
-        t *= 1000
-    return f"{t:.0f} ns"
 
 def log_message_transmission(logger, msg, dest, time):
     "Print a nicely formatted message showing where a message came from and where it got sent."

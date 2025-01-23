@@ -21,7 +21,7 @@ import yaml
 from jinja2 import Template
 
 from ..core.bases import BytesMessage, DataMessage, FileMessage, Message, Writer
-from ..core.singleprocess_pipeline import fmt_time
+from ..core.time import fmt_time
 
 logger = logging.getLogger(__name__)
 

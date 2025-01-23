@@ -2,9 +2,24 @@ import math
 from copy import copy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
+from time import perf_counter
 from typing import Iterable, Self
 
 import pandas as pd
+
+
+def short_iso(dt: datetime) -> str:
+    "Use the datetime.isoformat(timespec = ...) arg to print an ISO formatted datetime in short form"
+    if dt.microsecond != 0:
+        return dt.isoformat(timespec='microseconds')  # Include microseconds
+    elif dt.second != 0:
+        return dt.isoformat(timespec='seconds')  # Include seconds
+    elif dt.minute != 0:
+        return dt.isoformat(timespec='minutes')  # Include minutes
+    elif dt.hour != 0:
+        return dt.isoformat(timespec='hours')  # Include hours only
+    else:
+        return dt.isoformat(timespec='auto')[:10]  # Include only the date
 
 
 @dataclass(eq=True, frozen=True)
@@ -13,7 +28,7 @@ class TimeSpan:
     end: datetime
 
     def __str__(self) -> str:
-        return f"{self.start.isoformat()} - {self.end.isoformat()}"
+        return f"{short_iso(self.start)} - {short_iso(self.end)}"
 
     def __post_init__(self):
         if self.start > self.end:
@@ -207,3 +222,23 @@ def split_df_into_time_chunks(full_df, time_span_chunks, on = "time") -> Iterabl
     for ts in time_span_chunks:
         yield ts, full_df[(full_df[on] >= ts.start) & (full_df[on] < ts.end)]
 
+def fmt_time(t):
+    units = ["s", "ms", "us", "ns"]
+    for unit in units:
+        if t > 1:
+            return f"{t:.2f} {unit}"
+        t *= 1000
+    return f"{t:.0f} ns"
+
+
+class Timeit:
+    def __init__(self, name):
+        self.name = name
+    
+    def __enter__(self):
+        self.start = perf_counter()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.time = perf_counter() - self.start
+        print(f"Did {self.name} in {fmt_time(self.time)}")
