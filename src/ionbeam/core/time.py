@@ -24,6 +24,29 @@ class TimeSpan:
     def union(self, other: Self) -> Self:
         return type(self)(min(self.start, other.start), max(self.end, other.end))
     
+    def overlaps(self, other: Self) -> bool:
+        """Return True if the time spans overlap"""
+        return self.start < other.end and self.end > other.start
+    
+    @classmethod
+    def all_time(cls) -> Self:
+        """Return a time span that covers all possible times"""
+        return cls(datetime.min.replace(tzinfo=UTC), datetime.max.replace(tzinfo=UTC))
+    
+    @classmethod
+    def from_set(cls, times: Iterable[datetime | None]) -> Self | None:
+        """Compute the union of a set of (possibly None) datetimes.
+        Return None if the set is empty or contains only None"""
+        times = [t for t in times if t is not None]
+        if not times:
+            return None
+        return cls(min(times), max(times))
+    
+    @classmethod
+    def max(cls) -> Self:
+        """Return a time span that covers all possible times"""
+        return cls(datetime.min.replace(tzinfo=UTC), datetime.max.replace(tzinfo=UTC))
+    
     @classmethod
     def parse(cls, value: dict[str, str]) -> Self:
         """
@@ -118,6 +141,10 @@ class TimeSpan:
         if not other.tzinfo:
             raise ValueError('Tried to do "o in TimeSpan()" where o was a naive datetime object')
         return self.start <= other < self.end
+    
+    def expand(self, dt: datetime) -> Self:
+        """Expand the time span to include the given datetime"""
+        return type(self)(min(self.start, dt), max(self.end, dt))
 
 def round_datetime(dt: datetime, round_to: timedelta, method: str = "floor") -> datetime:
     if round_to.total_seconds() <= 0:

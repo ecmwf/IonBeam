@@ -3,19 +3,19 @@ import logging
 import uuid
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
+from time import time
 from typing import Any, Iterable, Literal, Self
 from urllib.parse import urljoin
 
 import pandas as pd
 import requests
-from requests.adapters import HTTPAdapter
 from sqlalchemy import Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, Session, load_only, mapped_column
 from sqlalchemy_utils import UUIDType
-from urllib3.util import Retry
 
 from ..core.bases import TabularMessage
 from ..core.source import Source
@@ -24,7 +24,6 @@ from ..core.time import (
 )
 from ..metadata.db import Base
 from ..singleprocess_pipeline import fmt_time
-from time import time
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +57,7 @@ class RateLimitedException(APISourcesBaseException):
             logger.debug("No Retry-After header, delaying for 5 minutes.")
             self.retry_at = datetime.now(UTC) + timedelta(minutes=5)
 
-@dataclasses.dataclass(eq=True, frozen=True)
+@dataclass(eq=True, frozen=True)
 class DataChunk:
     """
     Represents a chunk of a stream of data that has been downloaded from an API and stored in the db
@@ -85,6 +84,18 @@ class DataChunk:
 
     def __repr__(self) -> str:
         return f"DataChunk({self.source}, {self.key}, {self.version}, {self.time_span}, {self.ingestion_time}, {self.success}, {self.empty})"
+
+    @classmethod
+    def make_empty_chunk(cls, data_stream: "DataStream", time_span) -> Self:
+        return cls(
+                source=data_stream.source,
+                key = data_stream.key,
+                version = data_stream.version,
+                empty = True,
+                time_span = time_span,
+                json = {},
+                data = None,
+            )
 
     @classmethod
     def make_error_chunk(cls, data_stream : "DataStream", time_span : TimeSpan, error : Exception, json = {}) -> Self:
@@ -201,7 +212,7 @@ class DBDataChunk(Base):
                 data=pd.read_parquet(BytesIO(self.data)) if not only_metadata and self.data is not None else None
             )
 
-@dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class DataStream:
     """
     Represents a logical stream of data from an API with no time component. 
@@ -227,7 +238,12 @@ class DataStream:
                 success: bool | None = None,
                 ingested_after : datetime | None = None,
                 ingested_before : datetime | None = None,
-                empty : bool | None = False) -> Iterable[DataChunk]:
+
+                # Empty chunks serve as a sentinel that we have queried for data from this timespan but there wasn't any
+                # By default do not return empty chunks, but it's very important to set this to None when deciding 
+                # what data to query for next
+                empty : bool | None = False
+                ) -> Iterable[DataChunk]:
         
         query = db_session.query(DBDataChunk).filter_by(
             source=self.source,
@@ -375,7 +391,7 @@ class AbstractDataSourceMixin(ABC):
         """
         pass
 
-@dataclasses.dataclass
+@dataclass
 class APISource(Source, AbstractDataSourceMixin):
     """
     The generic logic related to sources that periodically query API endpoints.
@@ -394,9 +410,9 @@ class APISource(Source, AbstractDataSourceMixin):
     cache_version: int = 3 # increment this to invalidate the cache
     use_cache: bool = True
     source: str = "should be set by derived class"
-    maximum_request_size: timedelta = timedelta(days=1)
-    minimum_request_size: timedelta = timedelta(minutes=5)
-    max_time_downloading: timedelta = timedelta(seconds = 30)
+    maximum_request_size: timedelta = field(kw_only=True)
+    minimum_request_size: timedelta = field(kw_only=True)
+    max_time_downloading: timedelta = field(kw_only=True)
 
     def init(self, globals, **kwargs):
         super().init(globals, **kwargs)
@@ -428,7 +444,7 @@ class APISource(Source, AbstractDataSourceMixin):
         """Given a DataStream and a time span, return any gaps in the time span that need to be downloaded"""
         
         # Get all the timespan of all chunks that have been ingested sucessfully
-        chunks_time_spans =  list(c.time_span for c in data_stream.get_chunks(db_session, time_span, success=True, empty=False, mode="metadata"))
+        chunks_time_spans =  list(c.time_span for c in data_stream.get_chunks(db_session, time_span, success=True, mode="metadata", empty=None))
         chunks_to_ingest = time_span.remove(chunks_time_spans)
         split_chunks = [
             c 
@@ -457,6 +473,8 @@ class APISource(Source, AbstractDataSourceMixin):
                       fail = False) -> Iterable[DataChunk]:
         
         start_time = datetime.now(UTC)
+        logger.info(f"Starting download for source {self.source}")
+        logger.debug(f"{self.max_time_downloading = }, {self.maximum_request_size = }, {self.minimum_request_size = }")
         
         with self.globals.sql_session.begin() as db_session:
             # Check if the source has been rate limited recently
@@ -493,7 +511,7 @@ class APISource(Source, AbstractDataSourceMixin):
                         t0 = time()
                         data_chunk = self.download_chunk(data_stream, gap)
                         data_chunk.write_to_db(db_session)
-                        logger.info(f"Downloaded data and wrote to db for stream {data_stream.key} in {fmt_time(time() - t0)}")
+                        logger.info(f"Downloaded data and wrote to db for stream {data_stream.key} in {fmt_time(time() - t0)} {data_chunk.empty = }")
                         yield data_chunk
                     
                     except ExistingDataException:
@@ -513,8 +531,9 @@ class APISource(Source, AbstractDataSourceMixin):
                             # Todo: write a source level flag to indicate that we are rate limited
                             # And when we should next attempt this source
                             return
+                    # return
 
-    def get_all_data_streams(self, db_session: Session) -> Iterable[DataStream]:
+    def get_all_data_streams(self, db_session: Session, timespan : TimeSpan | None = None) -> Iterable[DataStream]:
         for ds in db_session.query(DBDataStream).filter_by(source=self.source).all():
             yield ds.to_data_stream()
 
@@ -661,7 +680,7 @@ class APISource(Source, AbstractDataSourceMixin):
 
 
                 
-@dataclasses.dataclass
+@dataclass
 class RESTSource(APISource):
     endpoint = "scheme://example.com/api/v1" # Override this in derived classes
 

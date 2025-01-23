@@ -4,9 +4,9 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from time import sleep, time
 from typing import Iterable
 from unicodedata import normalize
-from time import time
 
 import numpy as np
 import pandas as pd
@@ -14,9 +14,8 @@ from cachetools import TTLCache, cachedmethod
 from cachetools.keys import hashkey
 
 from ...core.bases import Mappings, RawVariable, TabularMessage, TimeSpan
-from ..API_sources_base import DataChunk, DataStream, RESTSource
 from ...singleprocess_pipeline import fmt_time
-from time import sleep
+from ..API_sources_base import DataChunk, DataStream, RESTSource
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +33,10 @@ class SmartCitizenKitSource(RESTSource):
     """
     mappings: Mappings = field(kw_only=True)
 
-    maximum_request_size = timedelta(days=10)
-    minimum_request_size = timedelta(minutes=5)
-    max_time_downloading = timedelta(seconds=60)
+    maximum_request_size: timedelta = timedelta(days=10)
+    minimum_request_size: timedelta = timedelta(minutes=5)
+    max_time_downloading: timedelta = timedelta(minutes=1)
+
     cache_directory: Path = Path("inputs/smart_citizen_kit")
     endpoint = "https://api.smartcitizen.me/v0"
     cache = TTLCache(maxsize=1e5, ttl=20 * 60)  # Cache API responses for 20 minutes
@@ -73,6 +73,7 @@ class SmartCitizenKitSource(RESTSource):
                 "function": "avg",
                 "from": time_span.start.isoformat(),
                 "to": time_span.end.isoformat(),
+                "all_intervals": "false",
             }
         
         return self.get(
@@ -101,21 +102,22 @@ class SmartCitizenKitSource(RESTSource):
         devices = self.get_ICHANGE_devices()
 
         def filter_by_dates(device):
-            if device["last_reading_at"] is None or device["created_at"] is None:
+
+
+            device_timespan = TimeSpan.from_set((
+                dt
+                for sensor in device["data"]["sensors"]
+                for dt in [
+                    datetime.fromisoformat(sensor["created_at"]) if sensor["created_at"] is not None else None,
+                    datetime.fromisoformat(sensor["last_reading_at"]) if sensor["last_reading_at"] is not None else None
+            ]))
+            if device_timespan is None:
                 return False
-            earliest_reading = datetime.max.replace(tzinfo=UTC)
-            latest_reading = datetine.min.replace
+            
+            device["timespan"] = device_timespan.as_json()
 
-            for sensor in 
-            last_reading_at = max(
-                 datetime.fromisoformat(sensor["created_at"]) if datetime.min.replace(tzinfo=UTC)
-            )
-
-            device_start_date = datetime.fromisoformat(device["created_at"])
-            device_end_date = datetime.fromisoformat(device["last_reading_at"])
-            # see https://stackoverflow.com/questions/325933/determine-whether-two-date-ranges-overlap
-            return (device_start_date <= time_span.end) and (device_end_date >= time_span.start)
-
+            return device_timespan.overlaps(time_span)
+        
         devices_in_date_range = [d for d in devices if filter_by_dates(d)]
 
         return devices_in_date_range
@@ -207,6 +209,13 @@ class SmartCitizenKitSource(RESTSource):
     def download_chunk(self, data_stream: DataStream, time_span: TimeSpan) -> DataChunk:
         device = data_stream.data
         device_id = device["id"]
+        device_timespan = time_span.from_json(device["timespan"])
+        
+        # Quick exit if the time spans don't overlap
+        if not device_timespan.overlaps(time_span):
+            return DataChunk.make_empty_chunk(data_stream, time_span)
+
+
         # logger.debug(f"Downloading data for device {device_id} in {time_span} with sensors {[s['name'] for s in device['data']['sensors']]}")
         logger.debug(f"Downloading data for device {device_id} in {time_span}")
         
@@ -224,9 +233,9 @@ class SmartCitizenKitSource(RESTSource):
             readings = self.get_readings(device_id, sensor["id"], time_span)
             
             # Try to reduce how often we get rate limited by SCK
-            sleep(0.5)
+            sleep(0.1)
             
-            # Skip if there are now readings
+            # Skip if there are no readings
             if not readings["readings"]:
                 logger.debug(f"No readings returned for {sensor['name']}, even though the date metadata suggested there should be.")
                 continue
@@ -243,21 +252,12 @@ class SmartCitizenKitSource(RESTSource):
                 readings = readings["readings"]
             ))
 
-        logger.debug(f"Got data for SCK device {device_id} in {fmt_time(time() - t0)}")
         if not sensor_data or min_time is None or max_time is None:
             # raise ValueError(f"No data for {device_id = } in {time_span = }")
             logger.debug(f"No data for {device_id = } in {time_span = }")
-            return DataChunk(
-                source=self.source,
-                key = data_stream.key,
-                version = self.version,
-                empty = True,
-                time_span = time_span,
-                json = {},
-                data = None,
-            )
+            return DataChunk.make_empty_chunk(data_stream, time_span)
 
-
+        logger.debug(f"Got data for SCK device {device_id} in {fmt_time(time() - t0)}")
         return DataChunk(
             source=self.source,
             key = data_stream.key,
@@ -355,6 +355,10 @@ class SmartCitizenKitSource(RESTSource):
             columns = column_metadata)
 
             all_dfs.append(df_wide)
+
+        if not all_dfs:
+            return
+        
 
         combined_df = pd.concat(
                     [
