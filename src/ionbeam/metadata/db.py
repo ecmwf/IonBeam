@@ -19,7 +19,7 @@ from sqlalchemy import (
     create_engine,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, TSTZRANGE
+from sqlalchemy.dialects.postgresql import JSONB, TSTZRANGE, insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, validates
 from sqlalchemy.sql import text
 from sqlalchemy.sql.expression import BooleanClauseList
@@ -70,7 +70,10 @@ class Property(Base):
     Describes a physical property
     """
     __tablename__ = "property"
-    __table_args__ = (UniqueConstraint("name", "unit"),)
+    __table_args__ = (
+        UniqueConstraint("name", "unit"),
+        Index("idx_name_unit", "name", "unit"),
+    )
     name: Mapped[str]
     unit: Mapped[str] = mapped_column(nullable=True)
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -95,13 +98,10 @@ class Property(Base):
     
     @classmethod
     def upsert_multiple(cls, session : Session, properties: list[dict]) -> Iterable[Self]:
-        for p in properties:
-            property = session.query(Property).where(Property.name == p["name"]).one_or_none()
-            if not property:
-                property = cls(**p)
-                session.add(property)
-            
-            yield property
+        stmt = insert(cls).values(properties).on_conflict_do_nothing()
+        session.execute(stmt)
+        property_names = [p["name"] for p in properties]
+        return session.query(cls).filter(cls.name.in_(property_names)).all()
 
 
 class Author(Base):
