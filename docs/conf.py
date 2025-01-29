@@ -1,12 +1,12 @@
-# #
-# # (C) Copyright 2023 ECMWF.
-# #
-# # This software is licensed under the terms of the Apache Licence Version 2.0
-# # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# # In applying this licence, ECMWF does not waive the privileges and immunities
-# # granted to it by virtue of its status as an intergovernmental organisation nor
-# # does it submit to any jurisdiction.
-# #
+#
+# (C) Copyright 2023 ECMWF.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation nor
+# does it submit to any jurisdiction.
+#
 
 # Configuration file for the Sphinx documentation builder.
 #
@@ -33,17 +33,20 @@ release = "0.1"
 extensions = [
     "sphinx.ext.autodoc",  # for generating documentation from the docstrings in our code
     "sphinx.ext.napoleon",  # for parsing Numpy and Google stye docstrings
-    "myst_parser",  # For parsing markdown
+    "sphinxext.opengraph", # adds OpenGraph metadata to the HTML output
+    # "myst_parser",  # For parsing markdown
+    'sphinx_copybutton',  # For adding copy buttons to code blocks
+    "myst_nb",  # For parsing Jupyter notebooks
 ]
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
-source_suffix = {
-    ".rst": "restructuredtext",
-    ".txt": "markdown",
-    ".md": "markdown",
-}
+# source_suffix = {
+#     ".rst": "restructuredtext",
+#     ".txt": "markdown",
+#     ".md": "markdown",
+# }
 
 
 # -- Options for HTML output -------------------------------------------------

@@ -71,8 +71,11 @@ typing = [
 docs = [
     "sphinx",
     "sphinx-rtd-theme",
-    "myst-parser",
-    "sphinx-autobuild"
+    "sphinx-autobuild",
+    "sphinxext-opengraph",
+    "sphinx_copybutton",
+    "myst_nb"
+
 ]
 
 [tool.setuptools.packages.find]

@@ -1,6 +1,3 @@
-IonBeam
-==========
-
 <p align="center">
     <img alt="IonBeam logo, showing a stylized scientific instrument with ion streams." src="_static/ionbeam.png">
 </p>
@@ -12,7 +9,13 @@ IonBeam
 ---
 
 
-### 📡 What is IonBeam?
+```{toctree}
+:maxdepth: 1
+actions.md
+quickstart.md
+api_docs.rst
+./notebooks/all_the_way_through.ipynb
+```
 
 **IonBeam** is a toolkit for **stream based processing of IoT observations**. It allows observational IoT data to be 
 1. 🔗 Ingested from many sources: REST APIs, MQTT brokers, file servers etc.
@@ -37,7 +40,7 @@ Ionbeam uses a **message / action architecture**. Chunks of observations are rep
 
 IonBeam can be used in three ways:
 
-1. **Locally**, as a command line tool. See [Command Line Usage](#).
+1. **Locally**, as a command line tool. See Command Line Usage.
 2. **Docker-compose** setup, for local testing and development.
 3. (🔜 **Coming Soon**): Deployment via a Heml Chart to Kubernetes cluster.
 
@@ -74,7 +77,7 @@ The documentation will be available at on readthedocs.io once this repo is made 
 
 ## 📜 License
 
-[Apache License 2.0](LICENSE) In applying this license, ECMWF does not waive the privileges and immunities
+[Apache License 2.0](./LICENSE.txt) : In applying this license, ECMWF does not waive the privileges and immunities
 granted to it by virtue of its status as an intergovernmental organisation nor does it submit to any jurisdiction.
 
 ## ✅ Testing
@@ -137,32 +140,4 @@ options:
 ```
 The `-vv` and `--finish-after` options are useful for debugging runs.
 
-See [this notebook](examples/notebooks/run_the_pipeline_manually.ipynb) for a walkthrough of assembling the pipeline from various components and then running it. This is useful for debugging the output at various stages in the pipeline.
-
-
-
-Some example heading
-========================
-
-```python
-def function(args, **kwargs) -> int:
-    return 4
-```
-
-
-.. toctree::
-   :maxdepth: 1
-   :glob:
-   :caption: Table of Contents:
-
-   quickstart
-   api_docs
-   examples/*
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+See [this notebook](../notebooks/all_the_way_through.ipynb) for a walkthrough of assembling the pipeline from various components and then running it. This is useful for debugging the output at various stages in the pipeline.
