@@ -112,11 +112,13 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
             data=None,
         )
     
-    def affected_time_spans(self, chunk: DataChunk, granularity: timedelta) -> Iterable[TimeSpan]:
-        assert chunk.source == self.source, f"{chunk.source} != {self.source}"
-        for session in chunk.json.values():
-            start_time = datetime.fromisoformat(session["meta"]["start_time"])
-            yield TimeSpan.from_point(start_time, granularity)
+    # Got rid of this because it requires looking through the data to decide what time granules are affected
+    # This negates any performance benefit
+    # def affected_time_spans(self, chunk: DataChunk, granularity: timedelta) -> Iterable[TimeSpan]:
+    #     assert chunk.source == self.source, f"{chunk.source} != {self.source}"
+    #     for session in chunk.json.values():
+    #         start_time = datetime.fromisoformat(session["meta"]["start_time"])
+    #         yield TimeSpan.from_point(start_time, granularity)
 
     def emit_messages(self, relevant_chunks : Iterable[DataChunk], time_spans: Iterable[TimeSpan]) -> Iterable[TabularMessage]:
         time_spans = set(time_spans)
@@ -147,8 +149,7 @@ class MeteoTrackerSource(RESTSource, AbstractDataSourceMixin):
                 # Copy all relevant metadata into columns
                 
                 data.rename(columns={"time": "datetime"}, inplace=True)
-                data["datetime"] = pd.to_datetime(data["datetime"])
-
+                data["datetime"] = pd.to_datetime(data["datetime"], utc = True, format = "ISO8601")
                 meta["living_lab"] = living_lab
                 self.perform_copy_metadata_columns(data, meta, columns)
                 data_frames.append(data)

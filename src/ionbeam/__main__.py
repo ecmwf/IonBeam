@@ -21,6 +21,7 @@ import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
+from datetime import datetime, UTC
 
 from .core.singleprocess_pipeline import singleprocess_pipeline
 
@@ -123,15 +124,18 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--reingest-from",
-        help="Date to reingest from",
-        type=datetime.fromisoformat,
+        "--time-span",
+        help="Override the time span for downloading and ingestion.",
+        nargs = 2,
+        default = None,
+        type=lambda x: datetime.fromisoformat(x).replace(tzinfo=UTC),
     )
 
     parser.add_argument(
-        "--download-from",
-        help="Date to download from",
-        type=datetime.fromisoformat,
+        "--reingest",
+        help="Reingest all data regardless of whether it has actually changed or not, useful for debugging.",
+        action=argparse.BooleanOptionalAction,
+        default=False,
     )
 
     parser.add_argument(
@@ -199,20 +203,17 @@ if __name__ == "__main__":
 
     config, actions = parse_config(
         args.config_folder,
+        # Flags to control the two main phases, download and ingest
         download = args.download,
         ingest_to_pipeline = args.ingest_to_pipeline,
         overwrite_fdb = args.overwrite_fdb,
         environment = args.environment,
         sources = args.sources,
         die_on_error = args.die_on_error,
-        reingest_from = args.reingest_from,
+        time_span = args.time_span,
+        reingest = args.reingest,
         finish_after = args.finish_after,
     )
-
-    if args.download_from:
-        config.globals.ingestion_time_constants.query_timespan = dataclasses.replace(
-            config.globals.ingestion_time_constants.query_timespan,
-            start = args.download_from)
 
     sources, downstream_actions = [], []
     for action in actions:

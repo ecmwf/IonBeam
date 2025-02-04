@@ -60,10 +60,9 @@ saved_err = load_most_recent_error(config.globals)
 [x] Fix rest api to work with new format
     [x] add an endpoint to directly get station data saving the filter step?
 
-[ ] fix IonBeam/src/ionbeam/sources/meteotracker/source.py:149: UserWarning: Could not infer 
+[x] fix IonBeam/src/ionbeam/sources/meteotracker/source.py:149: UserWarning: Could not infer 
 format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing 
 is consistent and as-expected, please specify a format.
-
   data["datetime"] = pd.to_datetime(data["datetime"])
 
 [ ] Figure out under what conditions timespans can become null/None in the sql database
@@ -73,7 +72,7 @@ is consistent and as-expected, please specify a format.
 [x] Fix rest api to work with new format
 [ ] Make it even harder to nuke the ingestion data
 [ ] Add way to wipe just station metadata for one source
-[ ] Allow parsing ingestion times as a cmd line argumennt
+[x] Allow parsing ingestion times as a cmd line argumennt
 [ ] Add a way to keep track of average time spent on each action.
 
 

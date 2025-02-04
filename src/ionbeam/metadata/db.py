@@ -81,9 +81,6 @@ class Property(Base):
     description: Mapped[str] = mapped_column(nullable=True)
     sensor: Mapped[str] = mapped_column(nullable=True)
 
-    stations: Mapped[List["Station"]] = relationship(
-        secondary=property_station_association_table, back_populates="properties"
-    )
 
     def __repr__(self) -> str:
         return f"Property(name={self.name!r}, unit={self.unit!r}, description={self.description!r})"
@@ -98,10 +95,13 @@ class Property(Base):
     
     @classmethod
     def upsert_multiple(cls, session : Session, properties: list[dict]) -> Iterable[Self]:
-        stmt = insert(cls).values(properties).on_conflict_do_nothing()
-        session.execute(stmt)
-        property_names = [p["name"] for p in properties]
-        return session.query(cls).filter(cls.name.in_(property_names)).all()
+        for p in properties:
+            property = session.query(Property).where(Property.name == p["name"], Property.unit == p["unit"]).one_or_none()
+            if not property:
+                property = cls(**p)
+                session.add(property)
+            
+            yield property
 
 
 class Author(Base):
@@ -109,6 +109,10 @@ class Author(Base):
     Describes an entity that produces data can be associated with one or more stations.
     """
     __tablename__ = "author"
+    __table_args__ = (
+        UniqueConstraint("name"),
+        Index("idx_name", "name"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     external_id: Mapped[str] = mapped_column(
         nullable=True
@@ -116,10 +120,6 @@ class Author(Base):
     name: Mapped[str] = mapped_column(unique=True)
     description: Mapped[str] = mapped_column(nullable=True)
     url = mapped_column(URLType, nullable=True)
-
-    stations: Mapped[list["Station"]] = relationship(
-        secondary=station_author_association_table, back_populates="authors"
-    )
 
     def __repr__(self) -> str:
         return f"Author(id={self.id}, name={self.name!r}, description={self.name!r})"
@@ -160,14 +160,14 @@ class Station(Base):
     _time_span = mapped_column(TSTZRANGE, nullable=False)
 
     properties: Mapped[list[Property]] = relationship(
-        secondary=property_station_association_table, back_populates="stations"
+        secondary=property_station_association_table, cascade="all, delete",
     )
 
     _location = mapped_column("location", Geometry("POINT", srid=4326), nullable=False)
     _bbox = mapped_column("bbox", Geometry("POLYGON", srid=4326), nullable=True)
 
     authors: Mapped[list[Author]] = relationship(
-        secondary=station_author_association_table, back_populates="stations"
+        secondary=station_author_association_table, cascade="all, delete",
     )
 
     # # Internal: Any extra data to keep around for development purposes

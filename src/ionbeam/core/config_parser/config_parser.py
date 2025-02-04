@@ -22,7 +22,6 @@ from yamlinclude import YamlIncludeConstructor
 # This line is necessary to automatically find all the subclasses of things like "Encoder"
 # Even though black desperately wants to remove it as an unused import
 from ... import (  # noqa: F401
-    aggregators,
     encoders,
     parsers,
     sources,
@@ -123,6 +122,11 @@ def parse_globals(config_dir: Path, **overrides) -> Config:
         if "sources" in overrides:
             data["sources"] = overrides["sources"]
             del overrides["sources"]
+
+        if "time_span" in overrides:
+            if (t := overrides["time_span"]) is not None: 
+                data["globals"]["ingestion_time_constants"]["query_timespan"] = dict(start = t[0], end = t[1])
+            del overrides["time_span"]
 
         config = parse_config_from_dict(Config, data, filepath=global_config_file)
         config.globals.source_path = config_dir

@@ -3,10 +3,11 @@ export ODC_ENABLE_WRITING_LONG_STRING_CODEC=1
 
 python -m ionbeam ./config -vvvvvv \
     --env ewc \
-    --download \
-    --ingest-to-pipeline \
-    --sources smart_citizen_kit meteotracker \
+    --no-download \
+    --no-ingest-to-pipeline \
+    --sources smart_citizen_kit meteotracker acronet \
     --overwrite-fdb \
+    --init-db \
     # --die-on-error
     # --init-db
 

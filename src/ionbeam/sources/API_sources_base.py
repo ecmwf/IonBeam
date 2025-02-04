@@ -12,7 +12,7 @@ from urllib.parse import urljoin
 
 import pandas as pd
 import requests
-from sqlalchemy import Index, UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint, desc
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, Session, load_only, mapped_column
 from sqlalchemy_utils import UUIDType
@@ -139,7 +139,7 @@ class DataChunk:
             version=self.version,
             start_datetime=self.time_span.start,
             end_datetime=self.time_span.end,
-        ).one()
+        ).order_by(desc(DBDataChunk.ingestion_time)).first()  # Fetch the first result
         return db_chunk.to_data_chunk()
 
     def write_to_db(self, db_session: Session, delete_previous_tries=True):
@@ -166,6 +166,19 @@ class DataChunk:
             data=self.data.to_parquet() if self.data is not None else None
         )
         db_session.add(chunk)
+
+    def as_json(self):
+        return dict(
+            source = self.source,
+            key = self.key,
+            version = self.version,
+            time_span = self.time_span.as_json(),
+            ingestion_time = self.ingestion_time.isoformat(),
+            json = self.json,
+            data = base64.b64encode(self.data.to_parquet(df)).decode() if self.data is not None else None,
+            success = self.success,
+            empty = self.empty,
+        )
 
 # This is just a flattened version of DataChunk for storage in the SQL database
 class DBDataChunk(Base):
@@ -495,7 +508,7 @@ class APISource(Source, AbstractDataSourceMixin):
                     logger.info(f"Stopping downloads for {data_stream.key} after {self.max_time_downloading} seconds.")
                     return
 
-                logger.info(f"Downloading data for datastream '{data_stream.key}', currently have {len(gaps)} gap(s) to process.")
+                logger.info(f"Downloading data for datastream '{data_stream.key}', there are currently {len(gaps)} gap(s) in the database for the given timespan for the current datastream.")
                 if not gaps: 
                     continue
                 gap = gaps.pop()
@@ -550,35 +563,31 @@ class APISource(Source, AbstractDataSourceMixin):
         # This way we can operate on large chunks efficiently
 
         emitted_messages = 0
-        if self.globals.reingest_from is not None: 
-            # Todo find a cleaner way to enforce this at the config level
-            reingest_from = self.globals.reingest_from.replace(tzinfo = UTC)
-            logger.debug(f"reingesting from {reingest_from}")
-        else:
-            reingest_from = None
+        if self.globals.reingest: 
+            logger.debug(f"Doing re-ingestion so ignoring timestamps of ingestion chunks and just doing them all.")
 
         granularity = self.globals.ingestion_time_constants.granularity
         query_time_span = self.globals.ingestion_time_constants.query_timespan
-
-        if reingest_from:
-            query_time_span = dataclasses.replace(query_time_span, start = reingest_from)
         
         with self.globals.sql_session.begin() as db_session:
 
             # Lookup the metadata for all chunks that are either new since we last ingested
-            # or if reingest_from is set then we ignore when the chunks were actually ingested
-            # And just load all chunks that pertain to times after reingest_from
+            # or if reingest is set then we ignore when the chunks were actually ingested
+            # And just load all chunks in the query_time_span
             new_chunks = [
                 data_chunk
                 for data_stream in self.get_all_data_streams(db_session)
                 for data_chunk in data_stream.get_chunks(db_session, query_time_span, 
-                                                                 # If reingest_from is set then ignore when the chunks were actually ingested 
                                                                  mode="metadata",
                                                                  empty = False,
-                                                                 ingested_after = None if reingest_from is not None else data_stream.get_last_ingestion_time(db_session),
+                                                                 # If we're doing reingestion then ignore timestamps and just get them all. 
+                                                                 ingested_after = data_stream.get_last_ingestion_time(db_session) if not self.globals.reingest else None,
                                                                  ) 
             ]
-            logger.info(f"New or updated chunks {len(new_chunks)}")
+            if self.globals.reingest:
+                logger.info(f"New or updated chunks {len(new_chunks)}")
+            else:
+                logger.info(f"Chunks in reingestion window: {len(new_chunks)}")
 
 
             # Determine the list of output time spans each chunk affects

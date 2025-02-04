@@ -26,15 +26,12 @@ globals:
  # Global constants that override things in the sources and timeaggregator
   ingestion_time_constants:
     query_timespan: 
-      start: datetime.now(tz=timezone.utc) - timedelta(days = 1000)
+      start: datetime.now(tz=timezone.utc) - timedelta(days = 10)
       end: datetime.now(tz=timezone.utc) - timedelta(minutes = 10)
 
     # How big a data granule should be
     granularity:
       hours: 1
-
-    # In what direction the time aggregator expects data to arrive. 
-    time_direction: forwards
 
 sources:
   # - sensor.community

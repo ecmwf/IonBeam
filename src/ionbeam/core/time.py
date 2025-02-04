@@ -4,6 +4,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from time import perf_counter
 from typing import Iterable, Self
+from typing import TypedDict
+
+# The types of various dicts that can be converted to a TimeSpan
+class TimeSpanDict(TypedDict):
+    start: datetime
+    end: datetime
+
+class TimeSpanJSON(TypedDict):
+    start: str
+    end: str
 
 import pandas as pd
 
@@ -65,12 +75,32 @@ class TimeSpan:
     @classmethod
     def parse(cls, value: dict[str, str]) -> Self:
         """
-        Takes a dict of the form: {start : python expression involving datetime and timedelta, end : ...} and outputs a time span
+        First tries the from_dict method, then from_json, if both fail, trys to parse an expression of the form:
+            {
+             start : python expression involving datetime and timedelta,
+             end   : the same
+            }
         """
+        try:
+            return cls.from_dict(value)
+        except Exception as e:
+            print(value)
+            print(e)
+            pass
+
+        try:
+            return cls.from_json(value)
+        except Exception as e:
+            pass
+
         def f(s): return eval(
                     s, dict(datetime=datetime, timedelta=timedelta, timezone=timezone)
                 )
         return cls(f(value["start"]), f(value["end"]))
+
+    @classmethod
+    def from_dict(cls, value: TimeSpanDict) -> Self:
+        return cls(value["start"], value["end"])
     
     @classmethod
     def from_json(cls, value: dict[str, str]) -> Self:

@@ -221,8 +221,6 @@ class IngestionTimeConstants:
     # What size chunks to use for the emitted messages
     granularity: timedelta
 
-    time_direction: Literal["forwards", "backwards"] = "forwards"
-
 
 @dataclass
 class Globals:
@@ -250,7 +248,7 @@ class Globals:
     ingest_to_pipeline : bool = True
     overwrite_fdb: bool = False
 
-    reingest_from: datetime | None = None
+    reingest: bool = False
     finish_after: int | None = None
 
     split_data_columns: bool = True
