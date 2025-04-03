@@ -1,5 +1,6 @@
 import dataclasses
 import logging
+import re
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -44,7 +45,18 @@ class SmartCitizenKitSource(RESTSource):
 
     @cachedmethod(lambda self: self.cache, key=saltedmethodkey("devices_by_tag"))
     def get_devices_by_tag(self, tag: str):
-        return self.get(f"/devices?with_tags={tag}")
+        link_pattern = r'<([^>]+)>;\s*rel="([^"]+)"'
+        request = f"{self.endpoint}/devices?with_tags={tag}&per_page=100"
+        devices = []
+        while True:
+            resp = self.session.get(request)
+            resp.raise_for_status()
+            devices.extend(resp.json())
+            links = {k: v for v, k in re.findall(link_pattern, resp.headers["Link"])}
+            if "next" not in links: break
+            request = links["next"]
+
+        return devices
 
     @cachedmethod(lambda self: self.cache, key=saltedmethodkey("users"))
     def get_users(self, username_contains):
