@@ -1,0 +1,11 @@
+This dataset combines low cost sensor data from Smart Citizen Kit, Meteotracker and Acronet.
+"Particulate Matter (10\xB5m)":
+  description: The mass concentration of fine particulate matter (particles with a
+    diameter of 10 micrometers or less) present in the ambient air. Values are derived
+    from a mixture of data from low cost sensors and and the CAMHS Air Quality Forecast.
+  units: "\xB5g m^-3"
+"Particulate Matter (2.5\xB5m)":
+  description: The mass concentration of fine particulate matter (particles with a
+    diameter of 2.5 micrometers or less) present in the ambient air. Values are derived
+    from a mixture of data from low cost sensors and and the CAMHS Air Quality Forecast.
+  units: "\xB5g m^-3"

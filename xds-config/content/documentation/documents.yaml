@@ -1,0 +1,15 @@
+- url: https://github.com/ecmwf/IonBeam/
+  description: A git repository that holds code, data and documentation for the tool that scrapes this dataset from various sources.
+  title: Git Repository
+
+- url: https://smartcitizen.me/
+  description: OPEN TOOLS FOR ENVIRONMENTAL MONITORING
+  title: Smart Citizen Kit
+
+- url: https://meteotracker.com/
+  description: Patented technology for professional mobile weather measurements
+  title: MeteoTracker
+
+- url: https://www.acronet.cc/en/
+  description: Open Hardware Environmental monitoring and control systems
+  title: AcroNet

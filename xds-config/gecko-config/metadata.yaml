@@ -1,0 +1,44 @@
+Title: Near surface variables from 1979 to present derived from reanalysis
+Creator Name: AD4GD
+Publisher: ECMWF
+Publication year: 2025
+responsible_individual: TODO
+portal: xds
+responsible_organisation: ECMWF
+responsible_organisation_website: https://www.ecmwf.int/
+responsible_organisation_tf: null
+responsible_organisation_role: pointOfContact
+contactemail: https://support.ecmwf.int
+use_limitation:
+  Content accessible through the CDS may only be used under the terms
+  of the licenses attributed to each particular resource.
+publication_date: 2020-02-11
+ds_responsible_individual: Copernicus Climate Change Service
+ds_responsible_organisation_website: null
+ds_responsible_organisation_tf: null
+ds_responsible_organisation: ECMWF
+ds_contactemail: https://support.ecmwf.int
+ds_responsible_organisation_role: publisher
+inspire_theme: Atmospheric conditions and meteorological geographical features
+data_type: grid
+unit_measure: dd
+representative_fraction: 0.25
+topic: climatologyMeteorologyAtmosphere
+bboxN: 89
+bboxW: 0
+bboxS: -89
+bboxE: 360
+begin_date: 1979-01-01
+end_date: 2018-12-31
+file_format: grib
+format_version: null
+lineage: EC Copernicus program
+resource_type: dataset
+doi: 10.24381/cds.20d54e34
+licences:
+  - licence-to-use-copernicus-products
+keywords:
+  - "Product type: Derived reanalysis"
+  - "Spatial coverage: Global"
+  - "Variable domain: Atmosphere (surface)"
+  - "Temporal coverage: Past"

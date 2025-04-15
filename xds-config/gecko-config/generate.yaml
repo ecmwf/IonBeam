@@ -1,0 +1,49 @@
+adaptor: url
+# manifest:
+#   - url to get the manifest file from provider (myself)
+regex:
+  - (?P<__0>.*)date=(?P<date>\d{8})&platform=(?P<platform>[^&]*)&time=(?P<time>\d{4})&version=1&format=parquet
+
+# import:
+#   - area-selector-widget
+# labels:
+#   variable:
+#     PM2_5: Grid-point altitude
+#     PM10: Near-surface wind speed
+#   reference_dataset:
+#     CRU: CRU (Climate Research Unit)
+#     CRU+GPCC:
+#       CRU and GPCC (Climate Research Unit and Global Precipitation Climatology
+#       Centre)
+order:
+  version:
+    - "2.1"
+    - "2.0"
+    - "1.1"
+    - deprecated (1.0)
+remap:
+  version:
+    "1.0": deprecated (1.0)
+defaults:
+  version:
+    - "2.1"
+columns:
+  variable: 2
+  reference_dataset: 1
+widget_order:
+  - variable
+  - reference_dataset
+  - year
+  - month
+  - version
+widget_types:
+  reference_dataset: StringChoiceWidget
+helps:
+  reference_dataset:
+    '"CRU and GPCC" uses data from a larger number of stations for
+    the bias correction of the precipitation fields but the temporal coverage ends
+    at the end of 2016.'
+  version:
+    Version 1.0 of this dataset has been deprecated due to an issue which affects
+    the "Surface downwelling shortwave radiation" data. Access to version 1.0 is provided
+    for traceability purposes only. Version 1.1 provides corrected data.
