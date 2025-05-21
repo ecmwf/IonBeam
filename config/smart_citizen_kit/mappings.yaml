@@ -158,6 +158,11 @@
   discard: true 
   unit: V
 
+- name: Noise Sensor TA120
+  key: ta120noise
+  discard: true
+  unit: dBA
+
 - name: unknown
   key: 
     - adc_48_0
