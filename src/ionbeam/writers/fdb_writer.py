@@ -139,7 +139,7 @@ class FDBWriter(Writer):
 
         if n == 0:
             t0 = time()
-            self.fdb.archive_single(input_message.data_bytes(), mars_id)
+            self.fdb.archive(input_message.data_bytes(), key=mars_id)
             self.fdb.flush()
             logger.debug(f"Added new data for {mars_id} in {fmt_time(time() - t0)}")
 
