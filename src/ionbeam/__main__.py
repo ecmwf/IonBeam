@@ -157,6 +157,13 @@ if __name__ == "__main__":
     help="Which sources to use, e.g. --sources meteotracker acronet smartcitizenkit"
 )
 
+
+    parser.add_argument(
+    "--version",
+    type=int,
+    help="Override the version used by the download pipeline, use this implement multiple passes at different times."
+    )
+
     args = parser.parse_args()
 
     handlers = []
@@ -218,6 +225,9 @@ if __name__ == "__main__":
     sources, downstream_actions = [], []
     for action in actions:
         if isinstance(action, Source):
+            if args.version is not None:
+                logger.warning(f"Overriding {action.version = } to {args.version}")
+                action.version = args.version
             sources.append(action)
         else:
             downstream_actions.append(action)

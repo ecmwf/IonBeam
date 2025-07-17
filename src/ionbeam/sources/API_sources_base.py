@@ -508,7 +508,7 @@ class APISource(Source, AbstractDataSourceMixin):
                     logger.info(f"Stopping downloads for {data_stream.key} after {self.max_time_downloading} seconds.")
                     return
 
-                logger.info(f"Downloading data for datastream '{data_stream.key}', there are currently {len(gaps)} gap(s) in the database for the given timespan for the current datastream.")
+                logger.info(f"Downloading data for datastream '{data_stream.key}', {data_stream.version = } there are currently {len(gaps)} gap(s) in the database for the given timespan for the current datastream.")
                 if not gaps: 
                     continue
                 gap = gaps.pop()
@@ -544,7 +544,7 @@ class APISource(Source, AbstractDataSourceMixin):
                     # return
 
     def get_all_data_streams(self, db_session: Session, timespan : TimeSpan | None = None) -> Iterable[DataStream]:
-        for ds in db_session.query(DBDataStream).filter_by(source=self.source).all():
+        for ds in db_session.query(DBDataStream).filter_by(source=self.source, version=self.version).all():
             yield ds.to_data_stream()
 
     def affected_time_spans(self, chunk : DataChunk, granularity : timedelta) -> Iterable[TimeSpan]:
@@ -585,9 +585,9 @@ class APISource(Source, AbstractDataSourceMixin):
                                                                  ) 
             ]
             if self.globals.reingest:
-                logger.info(f"New or updated chunks {len(new_chunks)}")
+                logger.info(f"New or updated chunks {len(new_chunks)} {self.version = }")
             else:
-                logger.info(f"Chunks in reingestion window: {len(new_chunks)}")
+                logger.info(f"Chunks in reingestion window: {len(new_chunks)} {self.version = }")
 
 
             # Determine the list of output time spans each chunk affects
@@ -685,11 +685,11 @@ class APISource(Source, AbstractDataSourceMixin):
                     ds.write_to_db(db_session)
 
             # Download the data for each stream
-            logger.info(f"For source {self.source}, got data streams {data_streams}")
+            logger.info(f"For source {self.source}, got {len(data_streams)} data streams: {data_streams}")
             _ = list(self.download_data(data_streams, query_time_span))
 
         if self.globals.ingest_to_pipeline:
-            logger.info(f"Starting to ingest to pipeline for source {self.source}")
+            logger.info(f"Starting to ingest to pipeline for source {self.source} {self.version = }")
             with self.globals.sql_session.begin() as db_session:
                 data_streams = list(self.get_all_data_streams(db_session))
             yield from self.ingest_to_pipeline(data_streams)

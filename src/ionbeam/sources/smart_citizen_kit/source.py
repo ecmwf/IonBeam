@@ -307,12 +307,14 @@ class SmartCitizenKitSource(RESTSource):
             all_sensor_keys : list[np.ndarray] = []
             
             for d in sensor_data:
+                
                 sensor = d["sensor"]
                 sensor_key = d["sensor_key"] # e.g "tvoc" the name of the column
                 readings = d["readings"]
-                unit = normalize("NFKD", sensor["unit"])
-                # logger.debug(f"Processing sensor {sensor_key =} {sensor['name'] = } {unit = }")
-               
+                # logger.debug(f"Processing sensor {sensor_key =} {sensor['name'] = } {sensor['unit'] = }")
+                unit = normalize("NFKD", sensor["unit"] or "")
+
+
                 mapping_key = (sensor_key, unit)
                 if mapping_key not in self.mappings_variable_unit_dict:
                     logger.warning(f"Sensor {sensor_key} with unit {unit} not found in mappings!")
