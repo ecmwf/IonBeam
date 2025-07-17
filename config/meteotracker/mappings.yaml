@@ -69,6 +69,12 @@
 - name: carbon_dioxide
   key: CO2
   unit: ppm
+- name: carbon_monoxide
+  key: CO
+  unit: ppm
+- name: sulphur_dioxide
+  key: SO2
+  unit: ppm
 - name: particulate_matter_1
   key: m1
   unit: "μg/m3"
@@ -114,3 +120,8 @@
 
 - name: observation_id
   key: _id
+
+- name: unknown
+  key: D
+  unit: "?"
+  ignore: True

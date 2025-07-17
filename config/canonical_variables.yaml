@@ -179,6 +179,9 @@
 - name: carbon_monoxide
   unit: ppm
 
+- name: sulphur_dioxide
+  unit: ppm
+
 - name: particulate_matter_1
   unit: "μg/m3"
 
@@ -250,3 +253,6 @@
 - name: ambient_light
   description: The intensity of surrounding light.
   unit: "lux"
+
+- name: unknown
+  unit: "?"

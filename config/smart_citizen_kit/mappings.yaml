@@ -48,8 +48,13 @@
   unit: "dB"
 
 - name: noise_dBA
-  key: ["Noise Level", "noise_dba"]
+  key: ["Noise Level", "noise_dba", "ta120noise"]
   unit: "dBA"
+
+- name: noise_dBA
+  key: ["ta120noise"]
+  unit: "dBA"
+  discard: true
 
 - name: air_pressure_near_surface
   key: ["Barometric Pressure", "bar"]
@@ -169,4 +174,14 @@
     - adc_49_2
     - adc_49_3
   unit: V
+  discard: true
+
+- name: unknown
+  key: sdcard
+  unit: ""
+  discard: true
+
+- name: unknown
+  key: wifi
+  unit: dBm
   discard: true
