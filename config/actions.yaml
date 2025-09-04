@@ -1,8 +1,0 @@
-actions:
-  - class: IdentityAction
-    name: final_processing
-
-  - class: ParquetEncoder
-  - class: FDBWriter
-
-

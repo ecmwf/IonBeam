@@ -1,7 +1,0 @@
-variables:
-  Particulate Matter (2.5µm):
-    description: The mass concentration of fine particulate matter (particles with a diameter of 2.5 micrometers or less) present in the ambient air. Values are derived from a mixture of data from low cost sensors and and the CAMHS Air Quality Forecast.
-    units: µg m^-3
-  Particulate Matter (10µm):
-    description: The mass concentration of fine particulate matter (particles with a diameter of 10 micrometers or less) present in the ambient air. Values are derived from a mixture of data from low cost sensors and and the CAMHS Air Quality Forecast.
-    units: µg m^-3

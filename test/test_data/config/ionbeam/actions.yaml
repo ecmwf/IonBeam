@@ -1,5 +1,0 @@
-actions:
-  - class: RESTWriter
-    match:
-    - state: odc_encoded
-    endpoint: "https://ionbeam-dev.ecmwf.int/api/v1/" # Deployed Frontend

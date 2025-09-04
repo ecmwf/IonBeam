@@ -1,8 +1,0 @@
-numpy
-scipy
-geopandas
-pandas
-matplotlib
-
-# From ECMWF
-pyodc
