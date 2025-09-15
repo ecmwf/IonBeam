@@ -1,0 +1,33 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+.ruff_cache
+.mypy_cache
+.cache/
+.DS_Store
+/pygeoapi/
+
+*.env
+*.csv
+
+config.yaml
+pygeoapi-config.yaml
+
+
+data*/
+/projections/
+raw-data/
+
+
+!*.example.env
+
+# temporary
+ionbeam/cli

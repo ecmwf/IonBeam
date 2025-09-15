@@ -1,0 +1,60 @@
+server:
+  bind:
+    host: 0.0.0.0
+    port: 80
+  url: http://localhost/edr/
+  gzip: false
+  language: en-US
+  cors: true
+  pretty_print: true
+  limits:
+    default_items: 50
+    max_items: 1000
+    max_distance_x: 25
+    max_distance_y: 25
+    max_distance_units: m
+    on_exceed: throttle
+  admin: false
+  map:
+    url: https://tile.openstreetmap.org/{z}/{x}/{y}.png
+    attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap
+      contributors</a>'
+  ogc_schemas_location: /schemas.opengis.net
+logging:
+  default: true
+  level: INFO
+metadata:
+  identification:
+    title: Environmental Data Retrieval API | Ionbeam
+    description: An OGC EDR compatible REST API
+    keywords:
+    - ionbeam
+    - geospatial
+    - ecmwf
+    - data
+    - api
+    keywords_type: theme
+    terms_of_service: https://creativecommons.org/licenses/by/4.0/
+    url: https://example.org
+  license:
+    name: CC-BY 4.0 license
+    url: https://creativecommons.org/licenses/by/4.0/
+  provider:
+    name: European Centre for Medium-Range Weather Forecasts (ECMWF)
+    url: https://www.ecmwf.int/
+  contact:
+    name: Lastname, Firstname
+    position: Position Title
+    address: Mailing Address
+    city: City
+    stateorprovince: Administrative Area
+    postalcode: Zip or Postal Code
+    country: Country
+    phone: +xx-xxx-xxx-xxxx
+    fax: +xx-xxx-xxx-xxxx
+    email: you@example.org
+    url: Contact URL
+    hours: Mo-Fr 08:00-17:00
+    instructions: During hours of service. Off on weekends.
+    role: pointOfContact
+resources: {}

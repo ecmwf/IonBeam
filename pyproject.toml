@@ -1,0 +1,54 @@
+[project]
+name = "ionbeam"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiostream>=0.7.0",
+    "beautifulsoup4>=4.13.4",
+    "cf-units>=3.3.0",
+    "click>=8.0.0",
+    "dependency-injector[yaml]>=4.48.1",
+    "eccodes>=2.42.0",
+    "faststream[cli,rabbit]==0.5.48",
+    "geopandas>=1.1.1",
+    "httpx>=0.28.1",
+    "httpx-retries>=0.4.0",
+    "influxdb-client[async]>=1.49.0",
+    "isodate>=0.7.2",
+    "lxml>=6.0.1",
+    "numpy>=2.3.2",
+    "pandas>=2.3.0",
+    "pyarrow>=21.0.0",
+    "pydantic>=2.11.7",
+    "pyodc>=1.5.0",
+    "pyyaml>=6.0.2",
+    "redis>=6.4.0",
+    "shapely>=2.1.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["ionbeam/"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.17.1",
+    "pandas-stubs>=2.3.0.250703",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
+    "ruff>=0.12.9",
+]
+
+[tool.ruff]
+line-length = 150
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"

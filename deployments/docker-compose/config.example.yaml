@@ -1,0 +1,108 @@
+broker:
+  url: amqp://guest:guest@rabbitmq:5672/
+redis:
+  redis_url: redis://redis:6379
+influxdb_common:
+  influxdb_org: ionbeam-example
+  influxdb_url: http://influxdb2:8086
+  influxdb_token: token
+  influxdb_bucket: ionbeam
+
+dataset_aggregator:
+  data_path: /data
+  delete_after_export: False
+
+sources:
+  scheduler:
+    windows:
+      - source_name: ioncannon
+        window_size: "PT05"
+        trigger_interval: "PT05"
+  ioncannon:
+    data_path: ./raw-data
+  sensor_community:
+    base_url: ''
+    timeout_seconds: 60
+    concurrency: 5
+    use_cache: False
+    data_path: /raw-data
+  meteotracker:
+    base_url: ''
+    token_endpoint: ''
+    refresh_endpoint: ''
+    timeout: 30
+    max_retries: 5
+    max_queries: 100
+    username: ''
+    password: ''
+    use_cache: False
+    data_path: /raw-data
+  netatmo:
+    base_url: ''
+    username: ''
+    password: ''
+    data_path: /raw-data
+projections:
+  odb_service:
+    input_path: /data
+    output_path: /projections
+    variable_map:
+      - varno: 108
+        mapped_from:
+          - standard_name: air_pressure_at_mean_sea_level
+            level: 2.0
+            method: mean
+            period: PT1H
+      - varno: 107
+        mapped_from:
+          - standard_name: air_pressure
+            level: 0.0
+            method: point
+            period: PT0S
+      - varno: 39
+        mapped_from:
+          - standard_name: air_temperature
+            level: 2.0
+            method: point
+            period: PT0S
+      - varno: 40
+        mapped_from:
+          - standard_name: dew_point_temperature
+            level: 2.0
+            method: point
+            period: PT0S
+      - varno: 58
+        mapped_from:
+          - standard_name: relative_humidity
+            level: 2.0
+            method: point
+            period: PT0S
+      - varno: 62
+        mapped_from:
+          - standard_name: visibility_in_air
+            level: 2.0
+            method: point
+            period: PT0S
+      - varno: 111
+        mapped_from:
+          - standard_name: wind_from_direction
+            level: 10.0
+            method: mean
+            period: PT1H
+      - varno: 112
+        mapped_from:
+          - standard_name: wind_speed
+            level: 10.0
+            method: mean
+            period: PT1H
+      - varno: 261
+        mapped_from:
+          - standard_name: wind_speed_of_gust
+            level: 10.0
+            method: mean
+            period: PT1H
+  pygeoapi_service:
+    input_path: /data
+    output_path: /projections
+    config_path: /pygeoapi/local.config.yml
+

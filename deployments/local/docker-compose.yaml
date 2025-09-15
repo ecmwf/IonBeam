@@ -1,0 +1,49 @@
+services:
+  rabbitmq:
+    image: rabbitmq:management-alpine
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 5s
+      timeout: 30s
+      retries: 3
+    networks:
+      - ionbeam
+    ports:
+      - 5672:5672
+      - 15672:15672 # Management UI port
+  influxdb2:
+    image: influxdb:2
+    ports:
+      - 8086:8086
+    env_file:
+      - influxdb.example.env
+    volumes:
+      - type: volume
+        source: influxdb2-data
+        target: /var/lib/influxdb2
+      - type: volume
+        source: influxdb2-config
+        target: /etc/influxdb2
+    networks:
+      - ionbeam
+  redis:
+    image: redis:latest
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ionbeam
+    ports:
+      - 6379:6379
+    volumes:
+      - redis_data:/data
+    command: ["redis-server"]
+volumes:
+  influxdb2-data:
+  influxdb2-config:
+  redis_data:
+
+networks:
+  ionbeam:

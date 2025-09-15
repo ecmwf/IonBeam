@@ -1,0 +1,101 @@
+services:
+  caddy:
+    image: caddy:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - ionbeam
+      - pygeoapi
+    networks:
+      - ionbeam
+
+  ionbeam:
+    depends_on:
+      influxdb2:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    build:
+      context: ../../
+      dockerfile: ./Dockerfile
+      target: ionbeam
+    #image: eccr.ecmwf.int/ionbeam/ionbeam-next # Not published yet
+    environment:
+      - IONBEAM_CONFIG_PATH=/config/config.yaml
+    volumes:
+      - ./config.example.yaml:/config/config.yaml
+      - ./projections:/projections # store for projected data
+      - ./data:/data # store for aggregated datasets
+      - ./cache:/app/.cache
+      - ./raw-data:/raw-data # store for data-source outputs
+      - ./pygeoapi.yaml:/pygeoapi/local.config.yml
+    networks:
+      - ionbeam
+
+  rabbitmq:
+    image: rabbitmq:management-alpine
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 5s
+      timeout: 30s
+      retries: 3
+    networks:
+      - ionbeam
+    ports:
+      - 5672:5672
+      - "15672:15672" # Management UI port
+
+  influxdb2:
+    image: influxdb:2
+    ports:
+      - 8086:8086
+    env_file:
+      - influxdb.example.env
+    volumes:
+      - type: volume
+        source: influxdb2-data
+        target: /var/lib/influxdb2
+      - type: volume
+        source: influxdb2-config
+        target: /etc/influxdb2
+    networks:
+      - ionbeam
+  redis:
+    image: redis:latest
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ionbeam
+    volumes:
+      - redis_data:/data
+    command: ["redis-server"]
+  pygeoapi:
+    build:
+      context: .
+      dockerfile: ../../Dockerfile.pygeoapi # We need to use a custom container because our geoparquet providers requires some depedency fixes
+    platform: linux/amd64 # no available aarch64 tag
+    image: ionbeam-geopythonapi
+    restart: no
+    volumes:
+      - ./pygeoapi.yaml:/pygeoapi/local.config.yml
+      - ./projections:/projections
+    networks:
+      - ionbeam
+
+volumes:
+  influxdb2-data:
+  influxdb2-config:
+  caddy_data:
+  caddy_config:
+  redis_data:
+
+networks:
+  ionbeam:
