@@ -17,6 +17,7 @@ wheels/
 
 *.env
 *.csv
+*.http
 
 config.yaml
 pygeoapi-config.yaml
