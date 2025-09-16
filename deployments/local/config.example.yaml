@@ -21,15 +21,15 @@ sources:
   ioncannon:
     data_path: ./data-raw
   sensor_community:
-    base_url: https://archive.sensor.community
+    base_url: ''
     timeout_seconds: 60
     concurrency: 5
     use_cache: False
     data_path: ./data-raw
   meteotracker:
-    base_url: https://app.meteotracker.com/api/
-    token_endpoint: https://app.meteotracker.com/auth/login/api
-    refresh_endpoint: https://app.meteotracker.com/auth/refreshtoken
+    base_url: ''
+    token_endpoint: ''
+    refresh_endpoint: ''
     timeout: 30
     max_retries: 5
     max_queries: 100
