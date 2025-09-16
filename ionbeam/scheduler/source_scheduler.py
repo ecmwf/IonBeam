@@ -72,6 +72,36 @@ class SourceScheduler:
             self._publishers[source_name] = pub
         return pub
 
+    async def trigger_source(self, source_name: str, start_time: datetime, end_time: datetime) -> Optional[StartSourceCommand]:
+        """
+        Trigger a source manually without scheduling.
+        This is the core business logic for starting sources.
+        """
+        try:
+            command = StartSourceCommand(
+                id=uuid4(),
+                source_name=source_name,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            publisher = self._publisher_for(source_name)
+            await publisher.publish(command)
+
+            logger.info(
+                "triggered.source",
+                extra={
+                    "source": source_name,
+                    "start": start_time.isoformat(),
+                    "end": end_time.isoformat(),
+                },
+            )
+            return command
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Failed to trigger source %s", source_name)
+            return None
+
     async def _startSource(self, window: SourceSchedule) -> Optional[StartSourceCommand]:
         """
         Compute the window and publish a StartSourceCommand.
@@ -81,32 +111,21 @@ class SourceScheduler:
         window_start, window_end = window.get_window_bounds(now)
 
         try:
-            command = StartSourceCommand(
-                id=uuid4(),
-                source_name=window.source_name,
-                start_time=window_start,
-                end_time=window_end,
-            )
-            publisher = self._publisher_for(window.source_name)
-            # If your broker expects JSON, do: await publisher.publish(command.model_dump())
-            await publisher.publish(command)
-
-            logger.info(
-                "published.start_source",
-                extra={
-                    "source": window.source_name,
-                    "window_id": str(window.id),
-                    "event_time": now.isoformat(),
-                    "start": window_start.isoformat(),
-                    "end": window_end.isoformat(),
-                },
-            )
-            return command
+            result = await self.trigger_source(window.source_name, window_start, window_end)
+            if result:
+                logger.info(
+                    "scheduled.start_source",
+                    extra={
+                        "window_id": str(window.id),
+                        "event_time": now.isoformat(),
+                    },
+                )
+            return result
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception(
-                "Failed to publish StartSourceCommand for %s (%s)",
+                "Failed to start scheduled source %s (%s)",
                 window.source_name,
                 window.id,
             )

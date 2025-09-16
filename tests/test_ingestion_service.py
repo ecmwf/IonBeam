@@ -6,6 +6,7 @@ from uuid import uuid4
 import pandas as pd
 import pytest
 
+from ionbeam.core.constants import LatitudeColumn, LongitudeColumn
 from ionbeam.models.models import (
     CanonicalVariable,
     DataAvailableEvent,
@@ -107,7 +108,7 @@ class TestIngestionService:
             end_time=datetime(2024, 1, 1, 1, tzinfo=timezone.utc)
         )
         
-        result = await ingestion_service.ingest(command)
+        result = await ingestion_service.handle(command)
         
         # Assert event structure
         assert isinstance(result, DataAvailableEvent)
@@ -133,7 +134,7 @@ class TestIngestionService:
         written_df = write_call['record']
         
         # Check all expected columns are present (covers axis normalization and canonical renaming)
-        expected_columns = {'timestamp', 'lat', 'lon', 'air_temperature__deg_C______', 'station_id'}
+        expected_columns = {'timestamp', LatitudeColumn, LongitudeColumn, 'air_temperature__deg_C__0.0__point__PT0S', 'station_id'}
         assert set(written_df.columns) == expected_columns
         
         # Assert original columns were removed during transformation
@@ -143,9 +144,9 @@ class TestIngestionService:
         
         # Assert data integrity and types
         assert len(written_df) == 10  # All rows preserved
-        assert written_df['lat'].iloc[0] == 52.5
-        assert written_df['lon'].iloc[0] == 13.4
-        assert written_df['air_temperature__deg_C______'].iloc[0] == 20.0
+        assert written_df[LatitudeColumn].iloc[0] == 52.5
+        assert written_df[LongitudeColumn].iloc[0] == 13.4
+        assert written_df['air_temperature__deg_C__0.0__point__PT0S'].iloc[0] == 20.0
         assert written_df['station_id'].iloc[0] == 'test_station'
         
         # Assert timestamp processing

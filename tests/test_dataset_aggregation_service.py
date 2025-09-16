@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 import pandas as pd
 import pytest
 
+from ionbeam.core.constants import LatitudeColumn, LongitudeColumn
 from ionbeam.models.models import (
     CanonicalVariable,
     DataAvailableEvent,
@@ -74,7 +75,7 @@ class MockTimeSeriesDatabase(TimeSeriesDatabase):
             records.append({
                 '_time': timestamp,
                 '_measurement': measurement,
-                '_field': 'lat',
+                '_field': LatitudeColumn,
                 '_value': 52.5,
                 'station_id': 'test_station'
             })
@@ -82,7 +83,7 @@ class MockTimeSeriesDatabase(TimeSeriesDatabase):
             records.append({
                 '_time': timestamp,
                 '_measurement': measurement,
-                '_field': 'lon',
+                '_field': LongitudeColumn,
                 '_value': 13.4,
                 'station_id': 'test_station'
             })
@@ -206,7 +207,7 @@ class TestDatasetAggregatorService:
         
         # Process aggregation
         datasets: List[DataSetAvailableEvent] = []
-        async for dataset_event in aggregation_service.aggregate_dataset(event):
+        async for dataset_event in await aggregation_service.handle(event):
             datasets.append(dataset_event)
         
         # Assert dataset was created
@@ -266,7 +267,7 @@ class TestDatasetAggregatorService:
         # Process all events through aggregation service
         all_datasets: List[DataSetAvailableEvent] = []
         for event in events:
-            async for dataset_event in aggregation_service.aggregate_dataset(event):
+            async for dataset_event in await aggregation_service.handle(event):
                 all_datasets.append(dataset_event)
         
         # Should create exactly one daily dataset after processing all 24 events
@@ -322,7 +323,7 @@ class TestDatasetAggregatorService:
         
         # Process the single large event
         datasets: List[DataSetAvailableEvent] = []
-        async for dataset_event in aggregation_service.aggregate_dataset(event):
+        async for dataset_event in await aggregation_service.handle(event):
             datasets.append(dataset_event)
         
         # Should create 3 hourly datasets from the single event
@@ -405,7 +406,7 @@ class TestDatasetAggregatorService:
         # Process all events
         all_datasets: List[DataSetAvailableEvent] = []
         for event in [event1, event2, event3]:
-            async for dataset_event in aggregation_service.aggregate_dataset(event):
+            async for dataset_event in await aggregation_service.handle(event):
                 all_datasets.append(dataset_event)
         
         # Should only create 1 dataset for the 11:00-12:00 window (complete coverage)
@@ -462,7 +463,7 @@ class TestDatasetAggregatorService:
         
         # Process the event
         datasets: List[DataSetAvailableEvent] = []
-        async for dataset_event in aggregation_service.aggregate_dataset(event):
+        async for dataset_event in await aggregation_service.handle(event):
             datasets.append(dataset_event)
         
         # Should create no datasets due to STC window restriction
@@ -504,7 +505,7 @@ class TestDatasetAggregatorService:
         )
         
         first_datasets: List[DataSetAvailableEvent] = []
-        async for dataset_event in aggregation_service.aggregate_dataset(first_event):
+        async for dataset_event in await aggregation_service.handle(first_event):
             first_datasets.append(dataset_event)
         
         # Verify first window was processed
@@ -526,7 +527,7 @@ class TestDatasetAggregatorService:
         )
         
         second_datasets: List[DataSetAvailableEvent] = []
-        async for dataset_event in aggregation_service.aggregate_dataset(second_event):
+        async for dataset_event in await aggregation_service.handle(second_event):
             second_datasets.append(dataset_event)
         
         # Verify only the new window was processed
@@ -578,7 +579,7 @@ class TestDatasetAggregatorService:
         )
         
         first_datasets: List[DataSetAvailableEvent] = []
-        async for dataset_event in aggregation_service.aggregate_dataset(first_event):
+        async for dataset_event in await aggregation_service.handle(first_event):
             first_datasets.append(dataset_event)
         
         # Verify first window was processed
@@ -597,7 +598,7 @@ class TestDatasetAggregatorService:
         )
         
         second_datasets: List[DataSetAvailableEvent] = []
-        async for dataset_event in aggregation_service.aggregate_dataset(second_event):
+        async for dataset_event in await aggregation_service.handle(second_event):
             second_datasets.append(dataset_event)
         
         # Should create 2 datasets: reprocessed 10:00-11:00 and new 11:00-12:00
@@ -658,7 +659,7 @@ class TestDatasetAggregatorService:
         
         # Process the event
         datasets: List[DataSetAvailableEvent] = []
-        async for dataset_event in aggregation_service.aggregate_dataset(event):
+        async for dataset_event in await aggregation_service.handle(event):
             datasets.append(dataset_event)
         
         # Should create no datasets due to incomplete window coverage
@@ -691,7 +692,7 @@ class TestDatasetAggregatorService:
         
         # Process complementary events
         for comp_event in [complementary_event1, complementary_event2]:
-            async for dataset_event in aggregation_service.aggregate_dataset(comp_event):
+            async for dataset_event in await aggregation_service.handle(comp_event):
                 datasets.append(dataset_event)
         
         # Now should have 2 datasets (both windows have complete coverage)
@@ -775,7 +776,7 @@ class TestDatasetAggregatorService:
         # Process in order simulating late backfill (B, C first; A last)
         all_datasets: List[DataSetAvailableEvent] = []
         for ev in [event_b, event_c, event_a_full]:
-            async for dataset_event in aggregation_service.aggregate_dataset(ev):
+            async for dataset_event in await aggregation_service.handle(ev):
                 all_datasets.append(dataset_event)
 
         assert len(all_datasets) == 1, f"Expected 1 dataset, got {len(all_datasets)}"

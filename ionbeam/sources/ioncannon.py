@@ -9,9 +9,8 @@ import pandas as pd
 import pyarrow as pa
 from pydantic import BaseModel
 
-from ionbeam.core.handler import BaseHandler
-from ionbeam.utilities.parquet_tools import stream_dataframes_to_parquet
-
+from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
+from ..core.handler import BaseHandler
 from ..models.models import (
     CanonicalVariable,
     DataIngestionMap,
@@ -24,6 +23,7 @@ from ..models.models import (
     StartSourceCommand,
     TimeAxis,
 )
+from ..utilities.parquet_tools import stream_dataframes_to_parquet
 
 
 class IonCannonConfig(BaseModel):
@@ -172,9 +172,9 @@ class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand
             
             for timestamp in timestamps:
                 row = {
-                    "datetime": timestamp,
-                    "lat": lat,
-                    "lon": lon,
+                    ObservationTimestampColumn: timestamp,
+                    LatitudeColumn: lat,
+                    LongitudeColumn: lon,
                     "station_id": f"SYNTH_{station_id:04d}",
                 }
                 
@@ -199,9 +199,9 @@ class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand
 
             # Build schema from ingestion_map (same as other sources)
             schema_fields: List[Tuple[str, pa.DataType]] = [
-                (self.metadata.ingestion_map.datetime.from_col or 'datetime', pa.timestamp('ns', tz='UTC')),
-                (self.metadata.ingestion_map.lat.from_col or 'lat', pa.float64()),
-                (self.metadata.ingestion_map.lon.from_col or 'lon', pa.float64()),
+                (self.metadata.ingestion_map.datetime.from_col or ObservationTimestampColumn, pa.timestamp('ns', tz='UTC')),
+                (self.metadata.ingestion_map.lat.from_col or LatitudeColumn, pa.float64()),
+                (self.metadata.ingestion_map.lon.from_col or LongitudeColumn, pa.float64()),
             ]
 
             for var in self.metadata.ingestion_map.canonical_variables + self.metadata.ingestion_map.metadata_variables:

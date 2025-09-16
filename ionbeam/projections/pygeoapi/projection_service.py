@@ -7,6 +7,7 @@ import yaml
 from pydantic import BaseModel
 from shapely.geometry import Point
 
+from ionbeam.core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ionbeam.core.handler import BaseHandler
 
 from ...models.models import DataSetAvailableEvent, DatasetMetadata
@@ -96,9 +97,9 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
             name="Parquet",
             data=ProviderData(source=str(dataset_dir)),
             id_field="id",
-            time_field="datetime",
-            x_field="lon",
-            y_field="lat",
+            time_field=ObservationTimestampColumn,
+            x_field=LongitudeColumn,
+            y_field=LatitudeColumn,
         )
 
         resource = Resource(
@@ -148,12 +149,12 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         end_str = event.end_time.strftime("%Y%m%d_%H%M")
         file_path = dataset_dir / f"{start_str}_{end_str}.parquet"
         
-        geometry = [Point(xy) for xy in zip(incoming_df["lon"], incoming_df["lat"])]
+        geometry = [Point(xy) for xy in zip(incoming_df[LongitudeColumn], incoming_df[LatitudeColumn])]
         incoming_gdf = gpd.GeoDataFrame(incoming_df, geometry=geometry, crs="EPSG:4326")
         
         # Sort by timestamp for consistent ordering within file
-        if 'datetime' in incoming_gdf.columns:
-            incoming_gdf = incoming_gdf.sort_values('datetime').reset_index(drop=True)
+        if ObservationTimestampColumn in incoming_gdf.columns:
+            incoming_gdf = incoming_gdf.sort_values(ObservationTimestampColumn).reset_index(drop=True)
         
         # Get next available ID range starting from max existing ID
         start_id = self._get_max_id_from_dataset(event.metadata.name) + 1
@@ -196,6 +197,6 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         with open(self.config.config_path, "w") as f:
             yaml.dump(config, f, sort_keys=False)
         
-        dataset_dir = self.config.output_path / event.metadata.name
+        dataset_dir = self.config.output_path / 'pygeoapi' / event.metadata.name
         file_count = len(list(dataset_dir.glob("*.parquet"))) if dataset_dir.exists() else 0
         self.logger.info(f"Updated PyGeoAPI config for {event.metadata.name} with directory containing {file_count} file(s)")

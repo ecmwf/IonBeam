@@ -201,7 +201,7 @@ sources:
 - **IonCannon** (Load Testing): Synthetic data generator for performance testing
 ```yaml
 ioncannon:
-  data_path: ./raw-data
+  data_path: ./data-raw
 ```
 
 - **MeteoTracker**: 
@@ -216,7 +216,7 @@ meteotracker:
   username: 'your-username'
   password: 'your-password'
   use_cache: false
-  data_path: ./raw-data
+  data_path: ./data-raw
 ```
 
 - **NetAtmo**:
@@ -225,7 +225,7 @@ netatmo:
   base_url: ''
   username: 'your-username'
   password: 'your-password'
-  data_path: ./raw-data
+  data_path: ./data-raw
 ```
 
 - **Sensor.Community**: Air quality sensor network data
@@ -235,7 +235,7 @@ sensor_community:
   timeout_seconds: 60
   concurrency: 5
   use_cache: false
-  data_path: ./raw-data
+  data_path: ./data-raw
 ```
 
 ### Projection Services
@@ -245,7 +245,7 @@ sensor_community:
 projections:
   pygeoapi_service:
     input_path: ./data                          # Input aggregated datasets
-    output_path: ./projections                  # Output GeoParquet files
+    output_path: ./data-projections                  # Output GeoParquet files
     config_path: ./pygeoapi/local.config.yml   # PyGeoAPI configuration
 ```
 
@@ -254,7 +254,7 @@ projections:
 projections:
   odb_service:
     input_path: ./data
-    output_path: ./projections
+    output_path: ./data-projections
     variable_map:                               # Map CF standard names to ODB variable numbers
       - varno: 108                              # Mean sea level pressure
         mapped_from:

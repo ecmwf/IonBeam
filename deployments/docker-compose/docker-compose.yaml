@@ -29,10 +29,10 @@ services:
       - IONBEAM_CONFIG_PATH=/config/config.yaml
     volumes:
       - ./config.example.yaml:/config/config.yaml
-      - ./projections:/projections # store for projected data
+      - ./data-projections:/projections # store for projected data
       - ./data:/data # store for aggregated datasets
       - ./cache:/app/.cache
-      - ./raw-data:/raw-data # store for data-source outputs
+      - ./data-raw:/data-raw # store for data-source outputs
       - ./pygeoapi.yaml:/pygeoapi/local.config.yml
     networks:
       - ionbeam
@@ -86,7 +86,7 @@ services:
     restart: no
     volumes:
       - ./pygeoapi.yaml:/pygeoapi/local.config.yml
-      - ./projections:/projections
+      - ./data-projections:/projections
     networks:
       - ionbeam
 

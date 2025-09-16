@@ -57,13 +57,13 @@ import pyarrow as pa
 from isodate import duration_isoformat
 from pydantic import BaseModel
 
-from ionbeam.core.handler import BaseHandler
-from ionbeam.utilities.dataframe_tools import coerce_types
-
+from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
+from ..core.handler import BaseHandler
 from ..models.models import DataAvailableEvent, DataSetAvailableEvent, IngestionMetadata
 from ..services.models import IngestionRecord
 from ..storage.event_store import EventStore
 from ..storage.timeseries import TimeSeriesDatabase
+from ..utilities.dataframe_tools import coerce_types
 from ..utilities.parquet_tools import stream_dataframes_to_parquet
 
 
@@ -272,9 +272,9 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
         
         # Build schema from ingestion_map
         schema_fields: List[Tuple[str, pa.DataType]] = [
-            ('datetime', pa.timestamp('ns', tz='UTC')),
-            ('lat', pa.float64()),
-            ('lon', pa.float64()),
+            (ObservationTimestampColumn, pa.timestamp('ns', tz='UTC')),
+            (LatitudeColumn, pa.float64()),
+            (LongitudeColumn, pa.float64()),
         ]
         for var in metadata.ingestion_map.canonical_variables + metadata.ingestion_map.metadata_variables:
             pa_type = pa.string() if var.dtype == "string" or var.dtype == "object" else pa.from_numpy_dtype(np.dtype(var.dtype))
@@ -289,20 +289,20 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
 
                 # Keep long-form columns + tags; normalize
                 df = df_long.drop(columns=["result", "table", "_start", "_stop"], errors="ignore")
-                df = df.rename(columns={"_time": "datetime", "_measurement": "source"})
+                df = df.rename(columns={"_time": ObservationTimestampColumn, "_measurement": "source"})
 
                 if df.empty:
                     return df
 
                 # Ensure datetime dtype
-                if "datetime" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["datetime"]):
-                    df["datetime"] = pd.to_datetime(df["datetime"], utc=True, errors="coerce")
+                if ObservationTimestampColumn in df.columns and not pd.api.types.is_datetime64_any_dtype(df[ObservationTimestampColumn]):
+                    df[ObservationTimestampColumn] = pd.to_datetime(df[ObservationTimestampColumn], utc=True, errors="coerce")
 
                 # Derive tag columns automatically: non-underscore, not helper columns
-                helper = {"datetime", "source", "_field", "_value"}
+                helper = {ObservationTimestampColumn, "source", "_field", "_value"}
                 tag_cols = [c for c in df.columns if not c.startswith("_") and c not in helper]
 
-                index_cols = ["datetime", "source"] + tag_cols
+                index_cols = [ObservationTimestampColumn, "source"] + tag_cols
                 df_wide = (
                     df.pivot_table(
                         index=index_cols,

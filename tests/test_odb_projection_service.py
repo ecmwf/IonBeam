@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from ionbeam.core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ionbeam.models.models import (
     CanonicalStandard,
     DataSetAvailableEvent,
@@ -81,9 +82,9 @@ def sample_canonical_parquet_file(temp_data_path: Path) -> Path:
     mslp_col = "air_pressure_at_mean_sea_level__Pa__1.0__mean__PT1M"          # maps to varno 110
 
     df = pd.DataFrame({
-        "datetime": pd.to_datetime(["2025-01-01T00:00:00Z", "2025-01-01T01:00:00Z"], utc=True),
-        "lat": [50.7, 51.7],
-        "lon": [7.1, 7.2],
+        ObservationTimestampColumn: pd.to_datetime(["2025-01-01T00:00:00Z", "2025-01-01T01:00:00Z"], utc=True),
+        LatitudeColumn: [50.7, 51.7],
+        LongitudeColumn: [7.1, 7.2],
         "station_id": ["A", "B"],
         temp_col: [285.45, np.nan],   # K -> K (no conversion needed)
         wind_col: [5.5, 3.2],         # m s-1 -> m s-1
@@ -122,10 +123,10 @@ class TestODBProjectionService:
         )
         
         # Process the event
-        await odb_service.create_projection(event)
+        await odb_service.handle(event)
         
         # Assert output directory and files were created
-        output_dir = temp_data_path / "output"
+        output_dir = temp_data_path / "output" / "ecmwf"
         assert output_dir.exists()
         
         expected_odb_file = output_dir / "test_canonical_data.odb"

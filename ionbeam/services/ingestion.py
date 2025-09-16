@@ -5,15 +5,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pydantic import BaseModel
 
-from ionbeam.core.handler import BaseHandler
-from ionbeam.utilities.dataframe_tools import coerce_types
-
+from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
+from ..core.handler import BaseHandler
 from ..models.models import DataAvailableEvent, IngestDataCommand
 from ..storage.timeseries import TimeSeriesDatabase
-
-# Pseudo standard for Ionbeam ingested data - this needs to be defined somewhere
-standard_name_time = ["datetime"]
-standard_name_location = ["lat", "lon"]
+from ..utilities.dataframe_tools import coerce_types
 
 
 class IngestionConfig(BaseModel):
@@ -31,9 +27,9 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
         self.logger.info("Chunk size: %d", self.config.parquet_chunk_size)
 
         ingestion_map = event.metadata.ingestion_map
-        time_col = ingestion_map.datetime.from_col or "datetime"
-        lat_col = ingestion_map.lat.from_col or "lat"
-        lon_col = ingestion_map.lon.from_col or "lon"
+        time_col = ingestion_map.datetime.from_col or ObservationTimestampColumn
+        lat_col = ingestion_map.lat.from_col or LatitudeColumn
+        lon_col = ingestion_map.lon.from_col or LongitudeColumn
 
         parquet_file = pq.ParquetFile(event.payload_location)
         total_written = 0
@@ -67,10 +63,10 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
                     df_chunk.rename(columns=rename_map, inplace=True)
 
                 # Normalize lat/lon names
-                if lat_col != "lat":
-                    df_chunk.rename(columns={lat_col: "lat"}, inplace=True)
-                if lon_col != "lon":
-                    df_chunk.rename(columns={lon_col: "lon"}, inplace=True)
+                if lat_col != LatitudeColumn:
+                    df_chunk.rename(columns={lat_col: LatitudeColumn}, inplace=True)
+                if lon_col != LongitudeColumn:
+                    df_chunk.rename(columns={lon_col: LongitudeColumn}, inplace=True)
 
                 # Ensure timestamp column is datetime[ns, UTC]
                 df_chunk[time_col] = pd.to_datetime(df_chunk[time_col], utc=True, errors="coerce") # TODO - this shouldn't be needed as it's already done as part of coerce_types above
@@ -78,7 +74,7 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
                 df_chunk.sort_values([time_col], kind="mergesort", inplace=True) # this is only sorting a chunk - not the full DF but that' doesn't matter as we only sort to speed up writes to influxdb
 
                 # Drop rows where all fields are NaN
-                field_cols = ["lat", "lon"] + [f for (_, f, _) in canonical_vars]
+                field_cols = [LatitudeColumn, LongitudeColumn] + [f for (_, f, _) in canonical_vars]
                 df_chunk.dropna(subset=field_cols, how="all", inplace=True)
 
                 n_points = len(df_chunk)

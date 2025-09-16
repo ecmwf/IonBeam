@@ -18,10 +18,8 @@ from bs4 import BeautifulSoup
 from httpx_retries import Retry, RetryTransport
 from pydantic import BaseModel
 
-from ionbeam.core.handler import BaseHandler
-from ionbeam.utilities.dataframe_tools import coerce_types
-from ionbeam.utilities.parquet_tools import stream_dataframes_to_parquet
-
+from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
+from ..core.handler import BaseHandler
 from ..models.models import (
     CanonicalVariable,
     DataIngestionMap,
@@ -34,6 +32,8 @@ from ..models.models import (
     StartSourceCommand,
     TimeAxis,
 )
+from ..utilities.dataframe_tools import coerce_types
+from ..utilities.parquet_tools import stream_dataframes_to_parquet
 
 
 @dataclass
@@ -240,9 +240,9 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
             
             # Build schema from ingestion_map
             schema_fields: List[Tuple[str, pa.DataType]] = [
-                (self.metadata.ingestion_map.datetime.from_col or 'datetime', pa.timestamp('ns', tz='UTC')),
-                (self.metadata.ingestion_map.lat.from_col or 'lat', pa.float64()),
-                (self.metadata.ingestion_map.lon.from_col or 'lon', pa.float64()),
+                (self.metadata.ingestion_map.datetime.from_col or ObservationTimestampColumn, pa.timestamp('ns', tz='UTC')),
+                (self.metadata.ingestion_map.lat.from_col or LatitudeColumn, pa.float64()),
+                (self.metadata.ingestion_map.lon.from_col or LongitudeColumn, pa.float64()),
             ]
 
             for var in self.metadata.ingestion_map.canonical_variables + self.metadata.ingestion_map.metadata_variables:

@@ -5,28 +5,25 @@ from dependency_injector import containers, providers
 from faststream.rabbit import RabbitBroker
 from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
 
-# from ionbeam.projections.bufr.projection_service import BUFRProjectionService, BUFRProjectionServiceConfig
-from ionbeam.projections.odb.projection_service import ODBProjectionService, ODBProjectionServiceConfig
-from ionbeam.services.dataset_aggregation import DatasetAggregatorConfig, DatasetAggregatorService
-from ionbeam.sources.ioncannon import IonCannonConfig, IonCannonSource
-from ionbeam.sources.netatmo import NetAtmoConfig, NetAtmoSource
-from ionbeam.storage.event_store import RedisEventStore
-from ionbeam.storage.timeseries import InfluxDBTimeSeriesDatabase
-
-from .projections.pygeoapi.projection_service import (
+from ..projections.odb.projection_service import ODBProjectionService, ODBProjectionServiceConfig
+from ..projections.pygeoapi.projection_service import (
     PyGeoApiConfig,
     PyGeoApiProjectionService,
 )
-from .scheduler.source_scheduler import SchedulerConfig, SourceScheduler
-from .services.ingestion import IngestionConfig, IngestionService
-from .sources.meteotracker import MeteoTrackerConfig, MeteoTrackerSource
-from .sources.sensor_community import SensorCommunityConfig, SensorCommunitySource
+from ..scheduler.source_scheduler import SchedulerConfig, SourceScheduler
+from ..services.dataset_aggregation import DatasetAggregatorConfig, DatasetAggregatorService
+from ..services.ingestion import IngestionConfig, IngestionService
+from ..sources.ioncannon import IonCannonConfig, IonCannonSource
+from ..sources.meteotracker import MeteoTrackerConfig, MeteoTrackerSource
+from ..sources.metno.netatmo import NetAtmoConfig, NetAtmoSource
+from ..sources.sensor_community import SensorCommunityConfig, SensorCommunitySource
+from ..storage.event_store import RedisEventStore
+from ..storage.timeseries import InfluxDBTimeSeriesDatabase
 
 config_path = os.getenv("IONBEAM_CONFIG_PATH", "config.yaml")
 
 
 class IonbeamContainer(containers.DeclarativeContainer):
-    wiring_config = containers.WiringConfiguration(modules=["ionbeam.apps.faststream"])
     config = providers.Configuration(yaml_files=[config_path])
 
     broker = providers.Resource(RabbitBroker, url=config.broker.url)
@@ -94,7 +91,3 @@ class IonbeamContainer(containers.DeclarativeContainer):
     # ODB projection service
     odb_projection_service_config = providers.Factory(lambda cfg: ODBProjectionServiceConfig(**cfg), config.projections.odb_service)
     odb_projection_service = providers.Factory(ODBProjectionService, config=odb_projection_service_config)
-    
-    # BUFR projection service
-    # bufr_projection_service_config = providers.Factory(lambda cfg: BUFRProjectionServiceConfig(**cfg), config.projections.bufr_service)
-    # bufr_projection_service = providers.Factory(BUFRProjectionService, config=bufr_projection_service_config)

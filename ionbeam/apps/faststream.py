@@ -4,17 +4,17 @@ from dependency_injector.wiring import Provide, inject
 from faststream import FastStream
 from faststream.rabbit import ExchangeType, RabbitBroker, RabbitExchange, RabbitQueue
 
-from ionbeam.containers import IonbeamContainer
-from ionbeam.models.models import DataAvailableEvent, DataSetAvailableEvent, IngestDataCommand, StartSourceCommand
-from ionbeam.projections.odb.projection_service import ODBProjectionService
-from ionbeam.projections.pygeoapi.projection_service import PyGeoApiProjectionService
-from ionbeam.scheduler.source_scheduler import SourceScheduler
-from ionbeam.services.dataset_aggregation import DatasetAggregatorService
-from ionbeam.services.ingestion import IngestionService
-from ionbeam.sources.ioncannon import IonCannonSource
-from ionbeam.sources.meteotracker import MeteoTrackerSource
-from ionbeam.sources.netatmo import NetAtmoSource
-from ionbeam.sources.sensor_community import SensorCommunitySource
+from ..core.containers import IonbeamContainer
+from ..models.models import DataAvailableEvent, DataSetAvailableEvent, IngestDataCommand, StartSourceCommand
+from ..projections.odb.projection_service import ODBProjectionService
+from ..projections.pygeoapi.projection_service import PyGeoApiProjectionService
+from ..scheduler.source_scheduler import SourceScheduler
+from ..services.dataset_aggregation import DatasetAggregatorService
+from ..services.ingestion import IngestionService
+from ..sources.ioncannon import IonCannonSource
+from ..sources.meteotracker import MeteoTrackerSource
+from ..sources.metno.netatmo import NetAtmoSource
+from ..sources.sensor_community import SensorCommunitySource
 
 dataset_available_exchange = RabbitExchange("ionbeam.dataset.available", type=ExchangeType.FANOUT)
 
@@ -101,7 +101,10 @@ async def factory():
     
     container = IonbeamContainer()
     container.wire(modules=["ionbeam.apps.faststream"])
-    container.init_resources()
+    
+    init = container.init_resources()
+    if(init is not None):
+        await init
     await create_faststream_handlers()
     
     broker: RabbitBroker = await container.broker() # type: ignore
@@ -119,6 +122,8 @@ async def factory():
     async def shutdown():
         """Stop the source scheduler when the app shuts down"""
         await scheduler.stop()
-        container.shutdown_resources()
+        shutdown = container.shutdown_resources()
+        if(shutdown is not None):
+            await shutdown
     
     return app

@@ -10,8 +10,8 @@ import httpx
 import pandas as pd
 from pydantic import BaseModel
 
-from ionbeam.core.handler import BaseHandler
-
+from ..core.constants import LatitudeColumn, LongitudeColumn
+from ..core.handler import BaseHandler
 from ..models.models import (
     CanonicalVariable,
     DataIngestionMap,
@@ -389,7 +389,7 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
         df["station_id"] = session.id
 
         if "lo" in df:
-            df["lat"], df["lon"] = (
+            df[LatitudeColumn], df[LongitudeColumn] = (
                 [r[1] for r in df["lo"].values],
                 [r[0] for r in df["lo"].values],
             )
@@ -412,11 +412,11 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
 
         return df
 
-    async def _handle(self, command: StartSourceCommand) -> Optional[IngestDataCommand]:
-        self.logger.info(f"Handling TimeSpanEvent: {command.start_time} to {command.end_time}")
+    async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
+        self.logger.info(f"Handling TimeSpanEvent: {event.start_time} to {event.end_time}")
 
         try:
-            sessions_metadata = await self._fetch_session_metadata(command.start_time, command.end_time)
+            sessions_metadata = await self._fetch_session_metadata(event.start_time, event.end_time)
             self.logger.debug(sessions_metadata)
 
             # TODO - implement streaming to file?
@@ -434,7 +434,7 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
 
             # Save to parquet
             path = (
-                self.config.data_path / f"{self.metadata.dataset.name}_{command.start_time}-{command.end_time}_{datetime.now(timezone.utc)}.parquet"
+                self.config.data_path / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
             )
             complete_df.to_parquet(path, engine="pyarrow")
 
@@ -444,8 +444,8 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
                 id=uuid4(),
                 metadata=self.metadata,
                 payload_location=path,
-                start_time=command.start_time,
-                end_time=command.end_time,
+                start_time=event.start_time,
+                end_time=event.end_time,
             )
 
         except Exception as e:

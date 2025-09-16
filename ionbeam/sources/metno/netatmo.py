@@ -14,8 +14,9 @@ import pyarrow as pa
 from httpx_retries import Retry, RetryTransport
 from pydantic import BaseModel
 
-from ionbeam.core.handler import BaseHandler
-from ionbeam.models.models import (
+from ...core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
+from ...core.handler import BaseHandler
+from ...models.models import (
     CanonicalVariable,
     DataIngestionMap,
     DatasetMetadata,
@@ -27,9 +28,9 @@ from ionbeam.models.models import (
     StartSourceCommand,
     TimeAxis,
 )
-from ionbeam.utilities.cache import cached
-from ionbeam.utilities.dataframe_tools import coerce_types
-from ionbeam.utilities.parquet_tools import stream_dataframes_to_parquet
+from ...utilities.cache import cached
+from ...utilities.dataframe_tools import coerce_types
+from ...utilities.parquet_tools import stream_dataframes_to_parquet
 
 
 class NetAtmoConfig(BaseModel):
@@ -395,7 +396,7 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
                 for y_index, y in enumerate(ys):
                     for x_index, x in enumerate(xs):
                         flat_index = (t_index * len(ys) * len(xs)) + (y_index * len(xs)) + x_index
-                        row = {"datetime": timestamp, "lon": x, "lat": y}
+                        row = {ObservationTimestampColumn: timestamp, LongitudeColumn: x, LatitudeColumn: y}
                         # Add platform and instrument information if available
                         if platform_info:
                             row["station_id"] = platform_info.get("platform")
@@ -420,24 +421,24 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
         df = coerce_types(df, self.metadata.ingestion_map)
         return df
 
-    async def _handle(self, command: StartSourceCommand) -> Optional[IngestDataCommand]:
+    async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
         # TODO - implement streaming to file?
         all_chunks = []
-        async for chunk in self.crawl_netatmo_in_chunks(command.start_time, command.end_time, command.use_cache):
+        async for chunk in self.crawl_netatmo_in_chunks(event.start_time, event.end_time, event.use_cache):
             all_chunks.append(chunk)
 
-        path = self._config.data_path / f"{self.metadata.dataset.name}_{command.start_time}-{command.end_time}_{datetime.now(timezone.utc)}.parquet"
+        path = self._config.data_path / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
         
         async def dataframe_stream():
-                async for chunk in self.crawl_netatmo_in_chunks(command.start_time, command.end_time, command.use_cache):
+                async for chunk in self.crawl_netatmo_in_chunks(event.start_time, event.end_time, event.use_cache):
                     if chunk is not None:
                         yield chunk
 
         # Build schema from ingestion_map
         schema_fields: List[Tuple[str, pa.DataType]] = [
-            (self.metadata.ingestion_map.datetime.from_col or 'datetime', pa.timestamp('ns', tz='UTC')),
-            (self.metadata.ingestion_map.lat.from_col or 'lat', pa.float64()),
-            (self.metadata.ingestion_map.lon.from_col or 'lon', pa.float64()),
+            (self.metadata.ingestion_map.datetime.from_col or ObservationTimestampColumn, pa.timestamp('ns', tz='UTC')),
+            (self.metadata.ingestion_map.lat.from_col or LatitudeColumn, pa.float64()),
+            (self.metadata.ingestion_map.lon.from_col or LongitudeColumn, pa.float64()),
         ]
 
         for var in self.metadata.ingestion_map.canonical_variables + self.metadata.ingestion_map.metadata_variables:
@@ -463,15 +464,15 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
             id=uuid4(),
             metadata=self.metadata,
             payload_location=path,
-            start_time=command.start_time,
-            end_time=command.end_time,
+            start_time=event.start_time,
+            end_time=event.end_time,
         )
 
 
 async def main():
     config = NetAtmoConfig(
         base_url='',
-        data_path=pathlib.Path("./raw-data"),
+        data_path=pathlib.Path("./data-raw"),
         username="",
         password="")
     source = NetAtmoSource(config)

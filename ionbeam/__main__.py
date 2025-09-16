@@ -1,6 +1,6 @@
 import asyncio
 
-from ionbeam.apps.faststream import factory
+from .apps.faststream import factory
 
 
 async def main():

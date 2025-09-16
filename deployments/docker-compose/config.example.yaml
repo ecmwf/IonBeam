@@ -16,16 +16,16 @@ sources:
   scheduler:
     windows:
       - source_name: ioncannon
-        window_size: "PT05"
-        trigger_interval: "PT05"
+        window_size: PT05M
+        trigger_interval: PT05M
   ioncannon:
-    data_path: ./raw-data
+    data_path: ./data-raw
   sensor_community:
     base_url: ''
     timeout_seconds: 60
     concurrency: 5
     use_cache: False
-    data_path: /raw-data
+    data_path: /data-raw
   meteotracker:
     base_url: ''
     token_endpoint: ''
@@ -36,16 +36,16 @@ sources:
     username: ''
     password: ''
     use_cache: False
-    data_path: /raw-data
+    data_path: /data-raw
   netatmo:
     base_url: ''
     username: ''
     password: ''
-    data_path: /raw-data
+    data_path: /data-raw
 projections:
   odb_service:
     input_path: /data
-    output_path: /projections
+    output_path: /data-projections
     variable_map:
       - varno: 108
         mapped_from:
@@ -103,6 +103,6 @@ projections:
             period: PT1H
   pygeoapi_service:
     input_path: /data
-    output_path: /projections
+    output_path: /data-projections
     config_path: /pygeoapi/local.config.yml
 

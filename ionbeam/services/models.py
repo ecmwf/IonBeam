@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from ionbeam.models.models import IngestionMetadata
+from ..models.models import IngestionMetadata
 
 
 class IngestionRecord(BaseModel):

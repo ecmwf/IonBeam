@@ -10,6 +10,7 @@ import pandas as pd
 import pyodc as odc
 from pydantic import BaseModel
 
+from ionbeam.core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ionbeam.core.handler import BaseHandler
 
 from ...models.models import CanonicalStandard, CanonicalVariable, DataSetAvailableEvent, DatasetMetadata
@@ -55,7 +56,7 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         odb_frames: List[pd.DataFrame] = []
 
         # Extract header values
-        ts = pd.to_datetime(df['datetime'], utc=True)
+        ts = pd.to_datetime(df[ObservationTimestampColumn], utc=True)
         date_hdr = ts.dt.strftime("%Y%m%d").astype(int)
         time_hdr = ts.dt.strftime("%H%M%S").astype(int)
 
@@ -110,13 +111,13 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         base["codetype@hdr"] = codetype
         base["groupid@hdr"] = group_id
         base["statid@hdr"] = statid_series
-        base["lat@hdr"] = pd.to_numeric(df["lat"], errors="coerce")
-        base["lon@hdr"] = pd.to_numeric(df["lon"], errors="coerce")
+        base["lat@hdr"] = pd.to_numeric(df[LatitudeColumn], errors="coerce")
+        base["lon@hdr"] = pd.to_numeric(df[LongitudeColumn], errors="coerce")
         base["date@hdr"] = date_hdr
         base["time@hdr"] = time_hdr
 
         # Iterate per canonical data column
-        ignore_cols = {'datetime', 'lat', 'lon', 'station_id'}
+        ignore_cols = {ObservationTimestampColumn, LatitudeColumn, LongitudeColumn, 'station_id'}
         for col in df.columns:
             if col in ignore_cols:
                 continue
@@ -177,11 +178,11 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
             output_filename = dataset_path.stem + ".odb"
             
             # Ensure output directory exists
-            self.config.output_path.mkdir(parents=True, exist_ok=True)
-            
-            odb_path = str(self.config.output_path / output_filename)
-            odb_df.to_parquet(odb_path.replace(".odb", ".parquet")) # easy debugging
-            odc.encode_odb(odb_df, odb_path)
+            odb_path = self.config.output_path / 'ecmwf'
+            odb_path.mkdir(parents=True, exist_ok=True)
+
+            odb_df.to_parquet(str(odb_path / output_filename).replace(".odb", ".parquet")) # easy debugging
+            odc.encode_odb(odb_df, str(odb_path / output_filename))
             logger.info("Written odb file to %s", odb_path)
         else:
             logger.error("Dataset file not found: %s", dataset_path)
@@ -194,9 +195,9 @@ if __name__ == "__main__":
     mslp_col = "air_pressure_at_mean_sea_level__hPa__1.0__mean__PT1M"          # maps to varno 110
 
     df = pd.DataFrame({
-        "datetime": pd.to_datetime(["2025-01-01T00:00:00Z", "2025-01-01T01:00:00Z"], utc=True),
-        "lat": [50.7, 51.7],
-        "lon": [7.1, 7.2],
+        ObservationTimestampColumn: pd.to_datetime(["2025-01-01T00:00:00Z", "2025-01-01T01:00:00Z"], utc=True),
+        LatitudeColumn: [50.7, 51.7],
+        LongitudeColumn: [7.1, 7.2],
         "station_id": ["A", "B"],
         temp_col: [12.3, np.nan],     # degC -> K
         wind_col: [5.5, 3.2],         # m s-1 -> m s-1
@@ -205,8 +206,8 @@ if __name__ == "__main__":
 
 
     config = ODBProjectionServiceConfig(
-        input_path=pathlib.Path("./raw-data"),
-        output_path=pathlib.Path("./raw-data"),
+        input_path=pathlib.Path("./data-raw"),
+        output_path=pathlib.Path("./data-raw"),
         variable_map=[
             VarNoMapping(
                 varno=39,
