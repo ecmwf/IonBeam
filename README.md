@@ -1,10 +1,26 @@
-# Ionbeam
+![Static Badge](https://github.com/ecmwf/codex/raw/refs/heads/main/Project%20Maturity/emerging_badge.svg)
 
-**⚠️ PROTOTYPE SOFTWARE** - This is a prototype IoT data ingestion and processing platform for environmental monitoring data. While basic functionality exists, it has not been thoroughly tested in production environments.
+> [!WARNING]
+> This project is ALPHA and will be experimental for the foreseeable future. Interfaces and functionality are likely to change. DO NOT use this software in any project/software that is operational.
 
-## Overview
+<p align="center">
+    <img alt="IonBeam logo, showing a stylized scientific instrument with ion streams." src="https://github.com/ecmwf-projects/iot-ingester/blob/ac8c020bda2a1143d0c4ffb6a29ff58eb0e2c790/ionbeam.png">
+</p>
 
-Ionbeam is an event-driven platform that collects, standardizes, and processes data from multiple IoT environmental monitoring sources including MeteoTracker, NetAtmo, and Sensor.Community.
+<p align="center">
+    <em>⚡️ A library for IoT data wrangling ⚡️</em>
+</p>
+
+---
+
+## What is IonBeam?
+
+**IonBeam** is a event-driven platform for **stream based processing of IoT observations**. It allows observational IoT data to be 
+1. 🔗 Ingested from many sources: REST APIs, MQTT brokers, file servers etc.
+2. 🔄 Transformed, cleaned, combined and aggregated.
+3. 💾 Output into multiple storage formats.
+
+**Ionbeam** uses an **event-sourcing** architecture Incoming IoT observations are captured as events, stored, and processed into projections - query-optimized read models tailored to a specific downstream use-case.
 
 Key capabilities:
 - **Multi-source data ingestion** from various IoT environmental monitoring platforms
@@ -39,8 +55,7 @@ flowchart LR
       %% Services
       ING[Ingestion<br/>Service]
       AGG[Dataset<br/>Aggregator]
-      ODB[ODB<br/>Projection]
-      BUFR[BUFR<br/>Projection]
+      ODB[ECMWF<br/>Projection]
       PYGEO[PyGeoApi<br/>Projection]
 
       %% Storage (inside Core)
@@ -72,7 +87,6 @@ flowchart LR
       %% Events (UNCHANGED)
       ING -->|DataAvailableEvent| AGG
       AGG -->|DataSetAvailableEvent| ODB
-      AGG -->|DataSetAvailableEvent| BUFR
       AGG -->|DataSetAvailableEvent| PYGEO
 
       %% Other data/service usage (dotted)
@@ -80,7 +94,6 @@ flowchart LR
       AGG <-.-> |Track Events| REDIS
       AGG -.->|Write Canonicalised Parquet| CANFILES
       CANFILES -.->|Read Parquet data| ODB
-      CANFILES -.->|Read Parquet data| BUFR
       CANFILES -.->|Read Parquet data| PYGEO
     end
 
@@ -89,14 +102,12 @@ flowchart LR
       direction TB
       ODBF[ODB<br/>Files]
       PARQUET[Parquet<br/>Files]
-      BUFRF[BUFR<br/>Files]
       PYGEOF[PyGeoApi<br/>Config + GeoParquet]
     end
 
     %% Output generation (data flows - dotted)
     ODB -.->|Generate| ODBF
     ODB -.->|Generate| PARQUET
-    BUFR -.->|Generate| BUFRF
     PYGEO -.->|Generate| PYGEOF
 
     %% Styling (nodes only; unchanged)
@@ -105,10 +116,10 @@ flowchart LR
     classDef external fill:#fff3bf,stroke:#f59f00,stroke-width:2px,color:#000
     classDef output fill:#d3f9d8,stroke:#37b24d,stroke-width:2px,color:#000
 
-    class SCHED,METEO,NETATMO,SCOMM,ING,AGG,ODB,BUFR,PARQ,PYGEO service
+    class SCHED,METEO,NETATMO,SCOMM,ING,AGG,ODB,PARQ,PYGEO service
     class INFLUX,REDIS,FILES,CANFILES storage
     class EXT external
-    class PARQUET,ODBF,BUFRF,PYGEOF output
+    class PARQUET,ODBF,PYGEOF output
 ```
 
 ### Core Ionbeam Services
@@ -119,7 +130,7 @@ flowchart LR
 
 - **Dataset Aggregation Service**: Creates time-windowed datasets with configurable aggregation periods. Manages out-of-order events, detects data gaps, handles overlapping time spans, and implements subject-to-change windows to prevent processing of recent data that may still be updated.
 
-### Data Sources (Pluggable)
+### Data Sources
 
 - **IonCannon Source**: Synthetic data generator for load testing and performance validation. Generates data with configurable station counts, measurement frequencies to help testing
 
@@ -133,7 +144,7 @@ flowchart LR
 
 - **ODB Projection Service**: Creates ODB format files compatible with ECMWF and numerical weather prediction systems. Maps CF standard names to ODB variable numbers (varno).
 
-- **PyGeoAPI Projection Service**: Generates time-partitioned GeoParquet files for OGC EDR-compliant API servers. Creates monolithic datasets with spatial indexing and automatically updates PyGeoAPI configuration files with temporal and spatial extents.
+- **PyGeoAPI Projection Service**: Generates time-partitioned GeoParquet files for OGC EDR-compliant API service. Creates monolithic datasets with spatial indexing and automatically updates PyGeoAPI configuration files with temporal and spatial extents.
 
 ### Technology Stack
 
@@ -213,9 +224,8 @@ meteotracker:
   timeout: 30
   max_retries: 5
   max_queries: 100
-  username: 'your-username'
-  password: 'your-password'
-  use_cache: false
+  username: ''
+  password: ''
   data_path: ./data-raw
 ```
 
@@ -223,8 +233,8 @@ meteotracker:
 ```yaml
 netatmo:
   base_url: ''
-  username: 'your-username'
-  password: 'your-password'
+  username: ''
+  password: ''
   data_path: ./data-raw
 ```
 
@@ -244,12 +254,12 @@ sensor_community:
 ```yaml
 projections:
   pygeoapi_service:
-    input_path: ./data                          # Input aggregated datasets
-    output_path: ./data-projections                  # Output GeoParquet files
+    input_path: ./data                         # Input aggregated datasets
+    output_path: ./data-projections            # Output GeoParquet files
     config_path: ./pygeoapi/local.config.yml   # PyGeoAPI configuration
 ```
 
-**ODB Service**: Creates meteorological database format files with variable mapping
+**ODB Service**: Creates ODB format files based on variable mapping
 ```yaml
 projections:
   odb_service:
@@ -271,25 +281,6 @@ projections:
       # ... additional variable mappings
 ```
 
-### Configuration Parameters
-
-**Time Windows**: All time-related parameters use ISO 8601 duration format
-- `PT5M` = 5 minutes
-- `PT1H` = 1 hour  
-- `P1D` = 1 day
-- `window_lag`: Optional delay to account for data availability latency
-
-**File Paths**: All paths are relative to the application working directory
-- `data_path`: Where raw data files are stored
-- `input_path`: Source directory for processing
-- `output_path`: Destination for generated files
-
-**Data Source Parameters**:
-- `timeout_seconds`: HTTP request timeout
-- `concurrency`: Maximum parallel requests
-- `use_cache`: Enable/disable local caching
-- `max_retries`: Number of retry attempts for failed requests
-
 ## Usage
 
 ### Local Development
@@ -305,7 +296,7 @@ docker compose up -d
 IONBEAM_CONFIG_PATH=deployments/local/config.example.yaml python -m ionbeam
 ```
 
-### Docker Compose Deployment
+### Docker-Compose Deployment
 
 For complete containerized deployment:
 
@@ -319,9 +310,21 @@ docker compose up -d
 # - PyGeoAPI EDR API: http://localhost/edr/
 ```
 
+### Helm Deployment
+
+```
+
+```
+
 ## Event-Driven Architecture
 
-Ionbeam uses an event-driven architecture built on FastStream and RabbitMQ for reliable message passing between services. The system uses both direct queues for commands and fanout exchanges for event broadcasting.
+Ionbeam follows an event-driven, CQRS-oriented architecture designed to decouple ingestion, aggregation, and read-based concerns.
+
+Incoming data flows as commands that initiate ingestion processes, while events represent immutable facts like “data has been ingested” or “a dataset is now available.” These events are broadcast so multiple downstream consumers can react independently without introducing tight coupling.
+
+This separation keeps the ingestion pipeline focused on write concerns - namely collecting, validating, and normalizing raw data — while read concerns, like generating specialized formats, are handled by dedicated projection workers. For example, projections can produce GeoParquet files for a PyGeoAPI-backed EDR API or ODB files for domain-specific workflows without impacting ingestion throughput or latency.
+
+By decoupling these responsibilities, Ionbeam is easier to scale, safer to evolve, and inherently auditable. New data sources or projection formats can be added without disrupting existing processes, and the immutable event stream ensures historical state can always be reconstructed when needed.
 
 ### Message Flow
 
@@ -330,10 +333,10 @@ The messaging architecture follows this pattern:
 2. **Events** are published to fanout exchanges to notify multiple subscribers
 3. **Projections** subscribe to dataset events via dedicated queues
 
-### Messaging Topics and Exchanges
+### Messaging Topics, Exchanges and Queues
 
-| Topic/Exchange | Type | Publisher | Subscriber | Message Type | Description |
-|----------------|------|-----------|------------|--------------|-------------|
+| Name | Type | Publisher | Subscriber | Message Type | Description |
+|------|------|-----------|------------|--------------|-------------|
 | `ionbeam.source.netatmo.start` | Queue | Scheduler | NetAtmo Source | `StartSourceCommand` | Triggers NetAtmo data collection |
 | `ionbeam.source.ioncannon.start` | Queue | Scheduler | IonCannon Source | `StartSourceCommand` | Triggers load test data generation |
 | `ionbeam.source.sensor_community.start` | Queue | Scheduler | Sensor.Community Source | `StartSourceCommand` | Triggers Sensor.Community data collection |
@@ -341,27 +344,21 @@ The messaging architecture follows this pattern:
 | `ionbeam.ingestion.ingestV1` | Queue | Data Sources | Ingestion Service | `IngestDataCommand` | Commands data ingestion with payload location |
 | `ionbeam.data.available` | Fanout Exchange | Ingestion Service | Dataset Aggregator | `DataAvailableEvent` | Broadcasts when new data has been ingested |
 | `ionbeam.dataset.available` | Fanout Exchange | Dataset Aggregator | Projection Services | `DataSetAvailableEvent` | Broadcasts when aggregated dataset is ready |
+| `ionbeam.data.available.aggregation` | Queue (bound to `ionbeam.data.available`) | Ingestion Service | Dataset Aggregator | — | Processes ingested data into time-windowed parquet datasets |
+| `ionbeam.dataset.available.pygeoapi` | Queue (bound to `ionbeam.dataset.available`) | Dataset Aggregator | PyGeoAPI Projection | — | Generates GeoParquet files for OGC EDR API |
+| `ionbeam.dataset.available.odb` | Queue (bound to `ionbeam.dataset.available`) | Dataset Aggregator | ODB Projection | — | Creates ODB files |
 
-### Projection Service Queues
-
-Projection services use dedicated queues bound to the dataset fanout exchange:
-
-| Queue | Bound to Exchange | Subscriber | Purpose |
-|-------|-------------------|------------|---------|
-| `ionbeam.data.available.aggregation` | `ionbeam.data.available` | Dataset Aggregator | Processes ingested data into time-windowed parquet datasets |
-| `ionbeam.dataset.available.pygeoapi` | `ionbeam.dataset.available` | PyGeoAPI Projection | Generates GeoParquet files for OGC EDR API |
-| `ionbeam.dataset.available.odb` | `ionbeam.dataset.available` | ODB Projection | Creates ODB files |
 
 ## Data Models
 
-Ionbeam uses a structured event-driven data model with standardized commands and events that flow through the system. All data follows CF (Climate and Forecast) conventions for meteorological variables.
+Ionbeam uses a structured event-driven data model with standardized commands and events that flow through the system.
 
-### Core Command Models
+### Command Models
 
 **StartSourceCommand** - Triggers data collection from external sources
 ```python
 StartSourceCommand(
-    id: UUID,                    # Unique command identifier
+    id: UUID,                   # Unique command identifier
     source_name: str,           # Source identifier (e.g., "meteotracker", "netatmo")
     start_time: datetime,       # Collection window start (UTC)
     end_time: datetime,         # Collection window end (UTC)
@@ -380,7 +377,7 @@ IngestDataCommand(
 )
 ```
 
-### Core Event Models
+### Event Models
 
 **DataAvailableEvent** - Signals when raw data has been ingested into InfluxDB
 ```python
@@ -414,7 +411,7 @@ StartSourceCommand(
     end_time=datetime(2024, 1, 1, 13, 0, 0, tzinfo=timezone.utc)
 )
 
-# 2. NetAtmo source collects data and requests ingestion
+# 2. NetAtmo source collects data and initiates ingestion
 IngestDataCommand(
     id=uuid4(),
     metadata=IngestionMetadata(
