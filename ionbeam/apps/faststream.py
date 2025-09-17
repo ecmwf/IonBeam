@@ -14,6 +14,7 @@ from ..services.ingestion import IngestionService
 from ..sources.ioncannon import IonCannonSource
 from ..sources.meteotracker import MeteoTrackerSource
 from ..sources.metno.netatmo import NetAtmoSource
+from ..sources.metno.netatmo_mqtt import NetAtmoMQTTSource
 from ..sources.sensor_community import SensorCommunitySource
 
 dataset_available_exchange = RabbitExchange("ionbeam.dataset.available", type=ExchangeType.FANOUT)
@@ -109,6 +110,7 @@ async def factory():
     
     broker: RabbitBroker = await container.broker() # type: ignore
     scheduler: SourceScheduler = await container.source_scheduler() # type: ignore
+    netatmo_mqtt_source: NetAtmoMQTTSource = container.netatmo_mqtt_source() # type: ignore
 
 
     app = FastStream(broker)
@@ -117,6 +119,7 @@ async def factory():
     async def startup():
         """Start the source scheduler when the app starts"""
         scheduler.start()
+        await netatmo_mqtt_source.start()
     
     @app.on_shutdown
     async def shutdown():
@@ -125,5 +128,6 @@ async def factory():
         shutdown = container.shutdown_resources()
         if(shutdown is not None):
             await shutdown
+        await netatmo_mqtt_source.stop()
     
     return app

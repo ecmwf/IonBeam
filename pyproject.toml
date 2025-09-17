@@ -5,13 +5,17 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aio-pika>=9.5.7",
+    "aiomqtt>=2.4.0",
     "aiostream>=0.7.0",
     "beautifulsoup4>=4.13.4",
+    "brotlipy>=0.7.0",
     "cf-units>=3.3.0",
     "click>=8.0.0",
     "dependency-injector[yaml]>=4.48.1",
     "eccodes>=2.42.0",
     "faststream[cli,rabbit]==0.5.48",
+    "geojson>=3.2.0",
     "geopandas>=1.1.1",
     "httpx>=0.28.1",
     "httpx-retries>=0.4.0",

@@ -12,18 +12,13 @@ from pydantic import BaseModel
 from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ..core.handler import BaseHandler
 from ..models.models import (
-    CanonicalVariable,
-    DataIngestionMap,
     DatasetMetadata,
     IngestDataCommand,
     IngestionMetadata,
-    LatitudeAxis,
-    LongitudeAxis,
-    MetadataVariable,
     StartSourceCommand,
-    TimeAxis,
 )
 from ..utilities.parquet_tools import stream_dataframes_to_parquet
+from .metno.netatmo import netatmo_metadata
 
 
 class IonCannonConfig(BaseModel):
@@ -58,96 +53,7 @@ class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand
                 source_links=[],
                 keywords=["synthetic", "loadtest", "performance"],
             ),
-            ingestion_map=DataIngestionMap(
-                datetime=TimeAxis(),
-                lat=LatitudeAxis(standard_name="latitude", cf_unit="degrees_north"),
-                lon=LongitudeAxis(standard_name="longitude", cf_unit="degrees_east"),
-                canonical_variables=[
-                    CanonicalVariable(
-                        column="air_pressure_at_mean_sea_level_2_0_mean_PT1H",
-                        standard_name="air_pressure_at_mean_sea_level",
-                        cf_unit="hPa",
-                        level=2.0,
-                        method="mean",
-                        period="PT1H",
-                    ),
-                    CanonicalVariable(
-                        column="air_temperature_2_0_maximum_PT1H",
-                        standard_name="air_temperature",
-                        cf_unit="degC",
-                        level=2.0,
-                        method="maximum",
-                        period="PT1H",
-                    ),
-                    CanonicalVariable(
-                        column="air_temperature_2_0_minimum_PT1H",
-                        standard_name="air_temperature",
-                        cf_unit="degC",
-                        level=2.0,
-                        method="minimum",
-                        period="PT1H",
-                    ),
-                    CanonicalVariable(
-                        column="air_temperature_2_0_point_PT0S",
-                        standard_name="air_temperature",
-                        cf_unit="degC",
-                        level=2.0,
-                        method="point",
-                        period="PT0S",
-                    ),
-                    CanonicalVariable(
-                        column="dew_point_temperature_2_0_point_PT0S",
-                        standard_name="dew_point_temperature",
-                        cf_unit="degC",
-                        level=2.0,
-                        method="point",
-                        period="PT0S",
-                    ),
-                    CanonicalVariable(
-                        column="relative_humidity_2_0_point_PT0S",
-                        standard_name="relative_humidity",
-                        cf_unit="1",
-                        level=2.0,
-                        method="point",
-                        period="PT0S",
-                    ),
-                    CanonicalVariable(
-                        column="solar_irradiance_2_0_mean_PT1H",
-                        standard_name="solar_irradiance",
-                        cf_unit="W m-2",
-                        level=2.0,
-                        method="mean",
-                        period="PT1H",
-                    ),
-                    CanonicalVariable(
-                        column="surface_air_pressure_2_0_point_PT0S",
-                        standard_name="surface_air_pressure",
-                        cf_unit="hPa",
-                        level=2.0,
-                        method="point",
-                        period="PT0S",
-                    ),
-                    CanonicalVariable(
-                        column="wind_from_direction_10_0_mean_PT1H",
-                        standard_name="wind_from_direction",
-                        cf_unit="degree",
-                        level=10.0,
-                        method="mean",
-                        period="PT1H",
-                    ),
-                    CanonicalVariable(
-                        column="wind_speed_10_0_mean_PT1H",
-                        standard_name="wind_speed",
-                        cf_unit="m s-1",
-                        level=10.0,
-                        method="mean",
-                        period="PT1H",
-                    ),
-                ],
-                metadata_variables=[
-                    MetadataVariable(column="station_id"),
-                ],
-            ),
+            ingestion_map=netatmo_metadata.ingestion_map,
             version=1,
         )
 
