@@ -23,7 +23,7 @@ class NetAtmoMQTTConfig(BaseModel):
     username: str
     password: str
     client_id: str
-    keepalive: int = 60
+    keepalive: int = 120
     use_tls: bool = True
     data_path: Path
     url: str
@@ -85,7 +85,7 @@ class NetAtmoMQTTSource:
                     async for msg in client.messages:
                         if self._stop.is_set():
                             break
-                        self.logger.info("Handling %s", msg)
+                        # self.logger.info("Handling %s", msg)
                         await self._handle_message(msg)
             except Exception as e:
                 self.logger.info(f"MQTT error: {e}, retrying in 5s")
@@ -101,8 +101,12 @@ class NetAtmoMQTTSource:
 
     async def _aggregate_and_publish(self):
         while not self._stop.is_set():
-            await asyncio.sleep(300)  # every 5 minutes
+            self.logger.info("Aggregate and publish worker started")
+            if(len(self._buffer) < 50000): # TODO - add time check to always purge buffer
+                await asyncio.sleep(5)  # every 5 seconds
+                continue
             async with self._lock:
+                self.logger.info("Draining...")
                 drained = self._buffer
                 self._buffer = []
             if not drained:
@@ -110,6 +114,7 @@ class NetAtmoMQTTSource:
             await self._process_and_send(drained)
 
     async def _process_and_send(self, buffer: List[dict]):
+        self.logger.info("prcessing %s messages...", len(buffer))
         rows = []
         for idx, d in enumerate(buffer):
             if not isinstance(d, dict):
@@ -153,7 +158,7 @@ class NetAtmoMQTTSource:
             method = props.get("function")
             period = props.get("period")
             parts = [standard_name, level, method, period]
-            param = "_".join([str(p) for p in parts if p not in (None, "")])
+            param = ":".join([str(p) for p in parts if p not in (None, "")])
 
             coords = geom.get("coordinates")
             if not isinstance(coords, dict):
@@ -204,8 +209,8 @@ class NetAtmoMQTTSource:
         wide.columns.name = None
         wide = wide.sort_values(["station_id", "datetime"]).reset_index(drop=True)
 
-        start_time = df["timestamp"].min()
-        end_time = df["timestamp"].max()
+        start_time = df["datetime"].min()
+        end_time = df["datetime"].max()
 
         # Save to file
         self.config.data_path.mkdir(parents=True, exist_ok=True)
