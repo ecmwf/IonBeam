@@ -14,6 +14,7 @@ from ..services.ingestion import IngestionService
 from ..sources.ioncannon import IonCannonSource
 from ..sources.meteotracker import MeteoTrackerSource
 from ..sources.metno.netatmo import NetAtmoSource
+from ..sources.metno.netatmo_archive import NetAtmoArchiveSource
 from ..sources.metno.netatmo_mqtt import NetAtmoMQTTSource
 from ..sources.sensor_community import SensorCommunitySource
 
@@ -26,6 +27,7 @@ async def create_faststream_handlers(
     ioncannon_source: IonCannonSource = Provide[IonbeamContainer.ion_cannon_source],
     sensor_community_source: SensorCommunitySource = Provide[IonbeamContainer.sensor_community_source],
     meteotracker_source: MeteoTrackerSource = Provide[IonbeamContainer.meteotracker_source],
+    netatmo_archive_source: NetAtmoArchiveSource = Provide[IonbeamContainer.netatmo_archive_source],
     ingestion_service: IngestionService = Provide[IonbeamContainer.ingestion_service],
     dataset_aggregation_service: DatasetAggregatorService = Provide[IonbeamContainer.dataset_aggregator_service],
     pygeoapi_projection_service: PyGeoApiProjectionService = Provide[IonbeamContainer.pygeoapi_projection_service],
@@ -74,6 +76,11 @@ async def create_faststream_handlers(
         if (result := await meteotracker_source.handle(command)):
             await broker.publish(result, "ionbeam.ingestion.ingestV1")
 
+    @broker.subscriber("ionbeam.source.netatmo_archive.start")
+    async def handle_netatmo_archive(command: StartSourceCommand):
+        if (result := await netatmo_archive_source.handle(command)):
+            await broker.publish(result, "ionbeam.ingestion.ingestV1")
+
     @broker.subscriber("ionbeam.ingestion.ingestV1")
     async def handle_ingestion(command: IngestDataCommand) -> None:
         event: DataAvailableEvent = await ingestion_service.handle(command)
@@ -119,7 +126,7 @@ async def factory():
     async def startup():
         """Start the source scheduler when the app starts"""
         scheduler.start()
-        await netatmo_mqtt_source.start()
+        # await netatmo_mqtt_source.start()
     
     @app.on_shutdown
     async def shutdown():
@@ -128,6 +135,6 @@ async def factory():
         shutdown = container.shutdown_resources()
         if(shutdown is not None):
             await shutdown
-        await netatmo_mqtt_source.stop()
+        # await netatmo_mqtt_source.stop()
     
     return app

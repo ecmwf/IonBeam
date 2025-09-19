@@ -6,6 +6,7 @@ from faststream.rabbit import RabbitBroker
 from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
 
 from ionbeam.sources.metno.netatmo_mqtt import NetAtmoMQTTConfig, NetAtmoMQTTSource
+from ..sources.metno.netatmo_archive import NetAtmoArchiveConfig, NetAtmoArchiveSource
 
 from ..projections.odb.projection_service import ODBProjectionService, ODBProjectionServiceConfig
 from ..projections.pygeoapi.projection_service import (
@@ -78,6 +79,10 @@ class IonbeamContainer(containers.DeclarativeContainer):
     # netatmo - mqtt
     netatmo_mqtt_config = providers.Factory(lambda cfg: NetAtmoMQTTConfig(**cfg), config.sources.netatmo_mqtt)
     netatmo_mqtt_source = providers.Factory(NetAtmoMQTTSource, config=netatmo_mqtt_config)
+
+    # netatmo - archive
+    netatmo_archive_config = providers.Factory(lambda cfg: NetAtmoArchiveConfig(**cfg), config.sources.netatmo_archive)
+    netatmo_archive_source = providers.Factory(NetAtmoArchiveSource, config=netatmo_archive_config)
 
     # ioncannon - stress tester
     ion_cannon_config = providers.Factory(lambda cfg: IonCannonConfig(**cfg), config.sources.ioncannon)

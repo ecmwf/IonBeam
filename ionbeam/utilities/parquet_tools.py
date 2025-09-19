@@ -2,7 +2,7 @@
 
 import logging
 import pathlib
-from typing import AsyncIterator, List, Tuple
+from typing import AsyncIterator, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 async def stream_dataframes_to_parquet(
     dataframe_stream: AsyncIterator[pd.DataFrame],
     output_path: pathlib.Path,
-    schema_fields: List[Tuple[str, pa.DataType]]
+    schema_fields: Optional[List[Tuple[str, pa.DataType]]] = None
 ) -> int:
     """
     Stream pandas DataFrames to a parquet file.
@@ -24,28 +24,36 @@ async def stream_dataframes_to_parquet(
     Args:
         dataframe_stream: Async iterator of pandas DataFrames
         output_path: Path where parquet file will be written
-        schema_fields: parquet schema structure - used to ensure all we don't drop fields by only using the cols from the first batch
+        schema_fields: Optional parquet schema. If None, it will be inferred from the
+                       first non-empty dataframe and applied to all subsequent batches.
     """
-    schema = pa.schema(schema_fields)
+    schema = pa.schema(schema_fields) if schema_fields else None
     total_rows = 0
     chunk_count = 0
-    
-    with pq.ParquetWriter(output_path, schema=schema) as writer:
+    writer: Optional[pq.ParquetWriter] = None
+
+    try:
         async for data in dataframe_stream:
             if data is None or data.empty:
                 continue
-                
+
+            # Lazily initialize schema/writer from first non-empty batch if not provided
+            if writer is None:
+                if schema is None:
+                    # Infer schema from the first batch
+                    table = pa.Table.from_pandas(data, preserve_index=False)
+                    schema = table.schema
+                writer = pq.ParquetWriter(output_path, schema=schema)
+
             # Ensure all schema columns exist, fill missing ones with defaults
             for col_name, col_type in zip(schema.names, schema.types):
                 if col_name not in data.columns:
-                    # logger.warning("Not found %s when creating parquet schema", col_name)
-                    # logger.warning(data.head())
                     data[col_name] = "" if pa.types.is_string(col_type) else np.nan
-            
+
             # Select only schema columns in correct order
             data = data[schema.names]
-            
-            # Convert to PyArrow RecordBatch
+
+            # Convert to PyArrow RecordBatch and write
             try:
                 batch = pa.RecordBatch.from_pandas(
                     data,
@@ -55,13 +63,16 @@ async def stream_dataframes_to_parquet(
                 writer.write_batch(batch)
                 total_rows += len(data)
                 chunk_count += 1
-                
+
                 if chunk_count % 100 == 0:
                     logger.info(f"Processed {chunk_count} chunks, {total_rows} rows so far")
-                    
+
             except Exception as e:
                 logger.error(f"Failed to write batch: {e}")
                 raise
-    
+    finally:
+        if writer is not None:
+            writer.close()
+
     return total_rows
 

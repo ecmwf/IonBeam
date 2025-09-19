@@ -174,5 +174,5 @@ def run(ctx, source_name, start_date, end_date):
     asyncio.run(execute())
 
 
-if __name__ == "__main__":
-    cli()
+
+

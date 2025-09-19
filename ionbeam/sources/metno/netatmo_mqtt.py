@@ -15,6 +15,8 @@ from pydantic import BaseModel
 from ionbeam.models.models import IngestDataCommand
 
 from .netatmo import netatmo_metadata
+from .netatmo_processing import process_netatmo_geojson_messages_to_df, netatmo_dataframe_stream
+from ionbeam.utilities.parquet_tools import stream_dataframes_to_parquet
 
 
 class NetAtmoMQTTConfig(BaseModel):
@@ -111,128 +113,54 @@ class NetAtmoMQTTSource:
                 self._buffer = []
             if not drained:
                 continue
-            await self._process_and_send(drained)
 
-    async def _process_and_send(self, buffer: List[dict]):
-        self.logger.info("prcessing %s messages...", len(buffer))
-        rows = []
-        for idx, d in enumerate(buffer):
-            if not isinstance(d, dict):
-                self.logger.warning("chunk[%d]: not a mapping; skipping", idx)
+            # Determine time bounds from drained buffer without materializing full DataFrame
+            times = pd.to_datetime(
+                [d.get("properties", {}).get("datetime") for d in drained],
+                utc=True,
+                errors="coerce",
+            ).dropna()
+            if times.empty:
+                self.logger.warning("No valid datetimes in drained buffer; skipping write")
                 continue
+            start_time = times.min()
+            end_time = times.max()
 
-            props = d.get("properties")
-            if not isinstance(props, dict):
-                self.logger.warning("chunk[%d]: missing 'properties'; skipping", idx)
-                continue
+            # Save to file using streaming writer
+            self.config.data_path.mkdir(parents=True, exist_ok=True)
+            path = self.config.data_path / f"{self.metadata.dataset.name}_{start_time}-{end_time}_{datetime.now(timezone.utc)}.parquet"
 
-            content = props.get("content")
-            if not isinstance(content, dict):
-                self.logger.warning("chunk[%d]: missing 'properties.content'; skipping", idx)
-                continue
-
-            geom = d.get("geometry")
-            if not isinstance(geom, dict):
-                self.logger.warning("chunk[%d]: missing 'geometry'; skipping", idx)
-                continue
-
-            station_id = props.get("platform")
-            if not station_id:
-                self.logger.warning("chunk[%d]: missing 'properties.platform'; skipping", idx)
-                continue
-
-            obs_time = pd.to_datetime(props.get("datetime"), utc=True, errors="coerce")
-            if pd.isna(obs_time):
-                self.logger.warning("chunk[%d]: invalid 'properties.datetime'; skipping", idx)
-                continue
-
-            pub_time = pd.to_datetime(props.get("pubtime"), utc=True, errors="coerce")
-
-            standard_name = content.get("standard_name")
-            if not standard_name:
-                self.logger.warning("chunk[%d]: missing 'content.standard_name'; skipping", idx)
-                continue
-
-            # Build parameter from available parts (no extra sanitization)
-            level = props.get("level")
-            method = props.get("function")
-            period = props.get("period")
-            parts = [standard_name, level, method, period]
-            param = ":".join([str(p) for p in parts if p not in (None, "")])
-
-            coords = geom.get("coordinates")
-            if not isinstance(coords, dict):
-                self.logger.warning("chunk[%d]: 'geometry.coordinates' must be a mapping with lat/lon; skipping", idx)
-                continue
+            async def drained_stream():
+                for obj in drained:
+                    yield obj
 
             try:
-                lat = float(coords.get("lat"))
-                lon = float(coords.get("lon"))
-            except (TypeError, ValueError):
-                self.logger.warning("chunk[%d]: invalid lat/lon; skipping", idx)
+                df_stream = netatmo_dataframe_stream(drained_stream(), batch_size=50000, logger=self.logger)
+                await stream_dataframes_to_parquet(df_stream, path, schema_fields=None)
+            except Exception as e:
+                self.logger.info(f"Failed to write parquet: {e}")
                 continue
 
-            value = pd.to_numeric(content.get("value"), errors="coerce")
-            # Keep NaN values; they will show up as NaN in the pivot.
-
-            rows.append(
-                {
-                    "_row_idx": idx,  # arrival order within this chunk (fallback tie-break)
-                    "station_id": station_id,
-                    "datetime": obs_time,
-                    "lat": lat,
-                    "lon": lon,
-                    "pubtime": pub_time,  # may be NaT
-                    "parameter": param,
-                    "value": value,
-                }
+            ingestion_command = IngestDataCommand(
+                id=uuid4(),
+                metadata=self.metadata,
+                payload_location=path,
+                start_time=start_time,
+                end_time=end_time,
             )
 
-        if not rows:
-            return pd.DataFrame(columns=["station_id", "datetime", "lat", "lon"])
+            try:
+                connection = await aio_pika.connect_robust(self.config.url)
+                async with connection:
+                    channel = await connection.channel()
+                    exchange = channel.default_exchange
+                    await exchange.publish(
+                        aio_pika.Message(body=ingestion_command.model_dump_json().encode()),
+                        routing_key=self.config.routing_key,
+                    )
+            except Exception as e:
+                self.logger.info(f"AMQP send error: {e}")
 
-        df = pd.DataFrame(rows)
-        key = ["station_id", "datetime", "lat", "lon", "parameter"]
-
-        # Keep the latest by pubtime; if equal/missing pubtime, prefer latest arrival.
-        # We sort so the desired record is LAST, then drop_duplicates(keep="last").
-        df["has_pubtime"] = df["pubtime"].notna()
-        df = df.sort_values(
-            by=["has_pubtime", "pubtime", "_row_idx"],
-            ascending=[True, True, True],  # NaT/False first, earlier pubtime first, earlier arrival first
-            kind="stable",
-        )
-        dedup = df.drop_duplicates(subset=key, keep="last").drop(columns=["has_pubtime", "_row_idx"])
-
-        # Pivot to wide
-        wide = dedup.pivot(index=["station_id", "datetime", "lat", "lon"], columns="parameter", values="value").reset_index()
-        wide.columns.name = None
-        wide = wide.sort_values(["station_id", "datetime"]).reset_index(drop=True)
-
-        start_time = df["datetime"].min()
-        end_time = df["datetime"].max()
-
-        # Save to file
-        self.config.data_path.mkdir(parents=True, exist_ok=True)
-        path = self.config.data_path / f"{self.metadata.dataset.name}_{start_time}-{end_time}_{datetime.now(timezone.utc)}.parquet"
-        wide.to_parquet(path, engine="pyarrow")
-
-        ingestion_command = IngestDataCommand(
-            id=uuid4(),
-            metadata=self.metadata,
-            payload_location=path,
-            start_time=start_time,
-            end_time=end_time,
-        )
-
-        try:
-            connection = await aio_pika.connect_robust(self.config.url)
-            async with connection:
-                channel = await connection.channel()
-                exchange = channel.default_exchange
-                await exchange.publish(
-                    aio_pika.Message(body=ingestion_command.model_dump_json().encode()),
-                    routing_key=self.config.routing_key,
-                )
-        except Exception as e:
-            self.logger.info(f"AMQP send error: {e}")
+    def process_message_buffer_to_df(self, buffer: List[dict]):
+        # Delegates to shared processing utility for reuse across tools.
+        return process_netatmo_geojson_messages_to_df(buffer, self.logger)
