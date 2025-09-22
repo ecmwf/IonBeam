@@ -57,7 +57,7 @@ import pyarrow as pa
 from isodate import duration_isoformat
 from pydantic import BaseModel
 
-from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
+from ..core.constants import LatitudeColumn, LongitudeColumn, MaximumCachePeriod, ObservationTimestampColumn
 from ..core.handler import BaseHandler
 from ..models.models import DataAvailableEvent, DataSetAvailableEvent, IngestionMetadata
 from ..services.models import IngestionRecord
@@ -79,6 +79,9 @@ class DatasetAggregatorConfig(BaseModel):
     delete_after_export: Optional[bool] = False
     data_path: pathlib.Path # aggregated data output
     page_size: int = 500  # Number of records to fetch per page
+    # TODO - setting this means data coming in within time-to-change will not get aggregated
+    # - need long term solution
+    only_process_spanned_windows: bool = True 
 
 
 class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[DataSetAvailableEvent]]):
@@ -156,7 +159,11 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
         
         # Store the event IDs used for this window
         events_key = f"window_events:{dataset_name}:{window_id}"
-        await self.event_store.store_event(events_key, json.dumps(event_ids))
+        await self.event_store.store_event(
+            events_key,
+            json.dumps(event_ids),
+            ttl=int(MaximumCachePeriod.total_seconds())
+        )
         
         self.logger.info(f"Recorded events for window {window_id}: {event_ids}")
 
@@ -177,7 +184,7 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
             self.logger.warning(f"No previous events found for dataset: {dataset_name}")
             return EventAggregateAnalysis(events=[], overall_start=None, overall_end=None, gaps=[])
 
-        events = [IngestionRecord.model_validate_json(event_data) for event_data in event_data_list]
+        events: List[IngestionRecord] = [IngestionRecord.model_validate_json(event_data) for event_data in event_data_list]
         if not events:
             self.logger.warning(f"No valid events found for dataset: {dataset_name}")
             return EventAggregateAnalysis(events=[], overall_start=None, overall_end=None, gaps=[])
@@ -373,8 +380,7 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
 
     async def _handle(self, event: DataAvailableEvent) -> AsyncIterator[DataSetAvailableEvent]: # type: ignore
         """Main aggregation logic
-            - This will check all dataset windows based on the events stored in redis, regardless of if the current event is relevant to that window or not
-            - TODO: define TTLs on the redis keys to ensure we tidy up old event data (not currently implemented)"""
+            - This will check all dataset windows based on the events stored in redis, regardless of if the current event is relevant to that window or not"""
         metadata = event.metadata
         dataset_name = metadata.dataset.name
         self.logger.info(f"Aggregating dataset: {dataset_name}")
@@ -382,7 +388,11 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
         # Save current ingestion event to event store for aggregation tracking
         event_key = f"ingestion_events:{metadata.dataset.name}:{event.id}"
         ingestion_event = IngestionRecord(id=event.id, metadata=metadata, start_time=event.start_time, end_time=event.end_time)
-        await self.event_store.store_event(event_key, ingestion_event.model_dump_json())
+        await self.event_store.store_event(
+            event_key,
+            ingestion_event.model_dump_json(),
+            ttl=int(MaximumCachePeriod.total_seconds())
+        )
 
         # Load all events and analyze data span/gaps
         parsed_events = await self._load_and_parse_data_events(dataset_name)
@@ -393,12 +403,20 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
         now = datetime.now(timezone.utc)
         stc_cutoff = now - metadata.dataset.subject_to_change_window
         aggregation_span = metadata.dataset.aggregation_span
-        start_time = self._align_to_aggregation(parsed_events.overall_start, aggregation_span)
+        if self.config.only_process_spanned_windows:
+            start_time = self._align_to_aggregation(event.start_time, aggregation_span)
+            iter_end = self._align_to_aggregation(event.end_time, aggregation_span)
+            if iter_end < event.end_time:
+                iter_end = iter_end + aggregation_span
+            iteration_end = iter_end
+        else:
+            start_time = self._align_to_aggregation(parsed_events.overall_start, aggregation_span)
+            iteration_end = parsed_events.overall_end
         self.logger.info(f"Aligned start time for aggregation: {start_time}")
 
         # Process each aggregation window
         window_start = start_time
-        while window_start < parsed_events.overall_end:
+        while window_start < iteration_end:
             window_end = window_start + aggregation_span
 
             # Check basic processing conditions (coverage, gaps, STC)

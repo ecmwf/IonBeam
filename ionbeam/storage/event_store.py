@@ -13,8 +13,8 @@ class EventStore(ABC):
         pass
     
     @abstractmethod
-    async def store_event(self, key: str, event_json: str) -> None:
-        """Store an event with the given key."""
+    async def store_event(self, key: str, event_json: str, ttl: Optional[int] = None) -> None:
+        """Store an event with the given key. TTL in seconds; None means no expiry."""
         pass
     
     @abstractmethod
@@ -34,9 +34,9 @@ class RedisEventStore(EventStore):
         result = await self.client.get(key)
         return result.decode('utf-8') if result else None
 
-    async def store_event(self, key: str, event_json: str) -> None:
+    async def store_event(self, key: str, event_json: str, ttl: Optional[int] = None) -> None:
         """Store an event with the given key."""
-        await self.client.set(key, event_json)
+        await self.client.set(key, event_json, ex=ttl)
 
     async def get_events(self, pattern: str) -> List[str]:
         """Get all events matching the pattern."""

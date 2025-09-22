@@ -21,6 +21,7 @@ from ionbeam.models.models import (
     TimeAxis,
 )
 from ionbeam.services.dataset_aggregation import DatasetAggregatorConfig, DatasetAggregatorService
+from ionbeam.services.models import IngestionRecord
 from ionbeam.storage.event_store import EventStore
 from ionbeam.storage.timeseries import TimeSeriesDatabase
 
@@ -34,7 +35,7 @@ class MockEventStore(EventStore):
     async def get_event(self, key: str) -> Optional[str]:
         return self.events.get(key)
     
-    async def store_event(self, key: str, event_json: str) -> None:
+    async def store_event(self, key: str, event_json: str, ttl: Optional[int] = None) -> None:
         self.events[key] = event_json
     
     async def get_events(self, pattern: str) -> List[str]:
@@ -780,3 +781,51 @@ class TestDatasetAggregatorService:
                 all_datasets.append(dataset_event)
 
         assert len(all_datasets) == 1, f"Expected 1 dataset, got {len(all_datasets)}"
+
+    @pytest.mark.asyncio
+    async def test_only_process_spanned_windows_processes_only_current_event_windows(
+        self,
+        mock_event_store: MockEventStore,
+        mock_timeseries_db: MockTimeSeriesDatabase,
+        temp_data_path: Path,
+    ) -> None:
+        # Create metadata with hourly aggregation and 1-hour STC window
+        metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
+
+        # Pre-populate earlier events that fully cover an unrelated window (08:00-09:00)
+        base_early = datetime(2024, 1, 1, 8, 0, 0, tzinfo=timezone.utc)
+        rec1 = IngestionRecord(id=uuid4(), metadata=metadata, start_time=base_early, end_time=base_early + timedelta(minutes=30))
+        rec2 = IngestionRecord(id=uuid4(), metadata=metadata, start_time=base_early + timedelta(minutes=30), end_time=base_early + timedelta(hours=1))
+        await mock_event_store.store_event(f"ingestion_events:{metadata.dataset.name}:{rec1.id}", rec1.model_dump_json())
+        await mock_event_store.store_event(f"ingestion_events:{metadata.dataset.name}:{rec2.id}", rec2.model_dump_json())
+
+        # Create aggregation service with only_process_spanned_windows enabled
+        config = DatasetAggregatorConfig(
+            delete_after_export=False,
+            data_path=temp_data_path,
+            page_size=500,
+            only_process_spanned_windows=True,
+        )
+        aggregation_service = DatasetAggregatorService(config, mock_event_store, mock_timeseries_db)
+
+        # Incoming event for 10:00-11:00 should only process that window
+        current_event = _create_data_available_event(
+            event_id=uuid4(),
+            metadata=metadata,
+            start_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            end_time=datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc),
+        )
+
+        datasets: List[DataSetAvailableEvent] = []
+        async for dataset_event in await aggregation_service.handle(current_event):
+            datasets.append(dataset_event)
+
+        # Only the current window should be processed
+        assert len(datasets) == 1
+        ds = datasets[0]
+        assert ds.start_time == datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+        assert ds.end_time == datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
+
+        # Ensure we did not process the unrelated earlier window
+        window_events = await mock_event_store.get_events("window_events:test_dataset:")
+        assert len(window_events) == 1

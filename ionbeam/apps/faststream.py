@@ -126,7 +126,7 @@ async def factory():
     async def startup():
         """Start the source scheduler when the app starts"""
         scheduler.start()
-        # await netatmo_mqtt_source.start()
+        await netatmo_mqtt_source.start()
     
     @app.on_shutdown
     async def shutdown():
@@ -135,6 +135,6 @@ async def factory():
         shutdown = container.shutdown_resources()
         if(shutdown is not None):
             await shutdown
-        # await netatmo_mqtt_source.stop()
+        await netatmo_mqtt_source.stop()
     
     return app

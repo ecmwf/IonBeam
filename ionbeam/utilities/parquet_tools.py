@@ -1,8 +1,9 @@
 
 
+import asyncio
 import logging
 import pathlib
-from typing import AsyncIterator, List, Tuple, Optional
+from typing import AsyncIterator, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -34,6 +35,7 @@ async def stream_dataframes_to_parquet(
 
     try:
         async for data in dataframe_stream:
+            await asyncio.sleep(0) # Keep background tasks (connection to broker etc..) ticking over
             if data is None or data.empty:
                 continue
 
