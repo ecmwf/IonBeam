@@ -162,7 +162,7 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         
         # Always replace the entire file (handles updates)
         incoming_gdf.to_parquet(file_path, compression='snappy')
-        self.logger.info(f"Created/updated geoparquet file with {len(incoming_gdf)} rows: {file_path}")
+        self.logger.info("GeoParquet written", rows=len(incoming_gdf), path=str(file_path))
         
         return file_path
 
@@ -173,7 +173,7 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         """
         dataset_path = pathlib.Path(event.dataset_location)
         if not dataset_path.exists():
-            self.logger.error(f"Dataset file not found: {dataset_path}")
+            self.logger.error("Dataset file not found", path=str(dataset_path))
             return
 
         # Read and persist the data as a time-partitioned file
@@ -199,4 +199,4 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         
         dataset_dir = self.config.output_path / 'pygeoapi' / event.metadata.name
         file_count = len(list(dataset_dir.glob("*.parquet"))) if dataset_dir.exists() else 0
-        self.logger.info(f"Updated PyGeoAPI config for {event.metadata.name} with directory containing {file_count} file(s)")
+        self.logger.info("Updated PyGeoAPI config", dataset=event.metadata.name, file_count=file_count)

@@ -120,8 +120,6 @@ class NetAtmoArchiveSource(BaseHandler[StartSourceCommand, Optional[IngestDataCo
                 self.logger.exception("Failed reading archive %s", archive_path)
 
     async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
-        self.logger.info("Processing Netatmo archive for %s to %s", event.start_time, event.end_time)
-
         try:
             self.config.data_path.mkdir(parents=True, exist_ok=True)
             output_path = self.config.data_path / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
@@ -186,7 +184,7 @@ class NetAtmoArchiveSource(BaseHandler[StartSourceCommand, Optional[IngestDataCo
                 self.logger.warning("No data written from archive based on provided filters/window")
                 return None
 
-            self.logger.info("Saved %s rows to %s", total_rows, output_path)
+            self.logger.info("Wrote parquet file", rows=total_rows, path=str(output_path))
 
             return IngestDataCommand(
                 id=uuid4(),

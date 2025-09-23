@@ -1,15 +1,15 @@
 import logging
-from logging.handlers import TimedRotatingFileHandler
+import logging.handlers
 from pathlib import Path
-import structlog
-from structlog.stdlib import ProcessorFormatter, LoggerFactory
-from structlog.processors import TimeStamper, JSONRenderer
-from structlog.contextvars import merge_contextvars
-from structlog import dev as structlog_dev
 
+import structlog
 from dependency_injector.wiring import Provide, inject
 from faststream import FastStream
 from faststream.rabbit import ExchangeType, RabbitBroker, RabbitExchange, RabbitQueue
+from structlog import dev as structlog_dev
+from structlog.contextvars import merge_contextvars
+from structlog.processors import TimeStamper
+from structlog.stdlib import LoggerFactory, ProcessorFormatter
 
 from ..core.containers import IonbeamContainer
 from ..models.models import DataAvailableEvent, DataSetAvailableEvent, IngestDataCommand, StartSourceCommand
@@ -25,64 +25,70 @@ from ..sources.metno.netatmo_archive import NetAtmoArchiveSource
 from ..sources.metno.netatmo_mqtt import NetAtmoMQTTSource
 from ..sources.sensor_community import SensorCommunitySource
 
-dataset_available_exchange = RabbitExchange("ionbeam.dataset.available", type=ExchangeType.FANOUT)
 
 def setup_logging(level: int = logging.INFO, log_dir: Path = Path("."), log_name: str = "ionbeam.log") -> None:
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
+    # Ensure log directory exists
+    log_dir.mkdir(parents=True, exist_ok=True)
 
-    # structlog + stdlib integration
-    pre_chain = [
+    # Shared processors that enrich stdlib (foreign) logs before rendering
+    timestamper = TimeStamper(fmt="iso", utc=True)
+    foreign_pre_chain = [
         merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
-        TimeStamper(fmt="iso", utc=True),
+        structlog.stdlib.ExtraAdder(),
+        timestamper,
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
     ]
 
-    # Console: pretty, human-friendly
-    console_formatter = ProcessorFormatter(
-        processor=structlog_dev.ConsoleRenderer(colors=True),
-        foreign_pre_chain=pre_chain,
+    # Handlers: pretty console + JSON file via ProcessorFormatter
+    console = logging.StreamHandler()
+    console.setLevel(level)
+    console.setFormatter(
+        ProcessorFormatter(
+            processors=[
+                ProcessorFormatter.remove_processors_meta,
+                structlog_dev.ConsoleRenderer(colors=True),
+            ],
+            foreign_pre_chain=foreign_pre_chain,
+        )
     )
 
-    # File: JSON for machine processing
-    json_formatter = ProcessorFormatter(
-        processor=JSONRenderer(),
-        foreign_pre_chain=pre_chain,
+    file_handler = logging.handlers.WatchedFileHandler(str(log_dir / log_name))
+    file_handler.setLevel(level)
+    file_handler.setFormatter(
+        ProcessorFormatter(
+            processors=[
+                ProcessorFormatter.remove_processors_meta,
+                structlog.processors.JSONRenderer(),
+            ],
+            foreign_pre_chain=foreign_pre_chain,
+        )
     )
 
-    # Console handler (stdout/stderr)
-    if not any(getattr(h, "name", None) == "console" for h in root_logger.handlers):
-        console = logging.StreamHandler()
-        console.set_name("console")
-        console.setLevel(level)
-        console.setFormatter(console_formatter)
-        root_logger.addHandler(console)
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.setLevel(level)
+    root.addHandler(console)
+    root.addHandler(file_handler)
 
-    # File handler (rotates nightly)
-    log_dir.mkdir(parents=True, exist_ok=True)
-    if not any(getattr(h, "name", None) == "file" for h in root_logger.handlers):
-        file_handler = TimedRotatingFileHandler(log_dir / log_name, when="midnight", backupCount=5, encoding="utf-8")
-        file_handler.set_name("file")
-        file_handler.setLevel(level)
-        file_handler.setFormatter(json_formatter)
-        root_logger.addHandler(file_handler)
-
-    # Configure structlog to hand off to ProcessorFormatter
+    # structlog: build event dict, hand off rendering to ProcessorFormatter
     structlog.configure(
         processors=[
             merge_contextvars,
             structlog.stdlib.add_log_level,
             structlog.stdlib.add_logger_name,
-            TimeStamper(fmt="iso", utc=True),
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            timestamper,
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
             ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
-
-    # Align third-party loggers
-    logging.getLogger("httpx").setLevel(level)
 
 @inject
 async def create_faststream_handlers(
@@ -179,13 +185,15 @@ async def factory():
     netatmo_mqtt_source: NetAtmoMQTTSource = container.netatmo_mqtt_source() # type: ignore
 
 
-    app = FastStream(broker)
+    app = FastStream(broker, logging.getLogger("faststream"))
+
+    # Logging is configured globally via structlog + logging. No per-logger overrides needed.
 
     @app.on_startup
     async def startup():
         """Start the source scheduler when the app starts"""
         scheduler.start()
-        await netatmo_mqtt_source.start()
+        # await netatmo_mqtt_source.start()
     
     @app.on_shutdown
     async def shutdown():
@@ -194,6 +202,6 @@ async def factory():
         shutdown = container.shutdown_resources()
         if(shutdown is not None):
             await shutdown
-        await netatmo_mqtt_source.stop()
+        # await netatmo_mqtt_source.stop()
     
     return app

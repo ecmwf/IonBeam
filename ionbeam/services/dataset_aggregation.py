@@ -165,7 +165,7 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, List[DataSetAvail
             ttl=int(MaximumCachePeriod.total_seconds())
         )
         
-        self.logger.info(f"Recorded events for window {window_id}: {event_ids}")
+        self.logger.info("Recorded window events", window_id=window_id, event_ids=event_ids)
 
     async def _load_and_parse_data_events(self, dataset_name: str) -> EventAggregateAnalysis:
         """Load events from event store and calculate overall data span and gaps.
@@ -275,7 +275,7 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, List[DataSetAvail
         self.config.data_path.mkdir(parents=True, exist_ok=True)
         dataset_filename = f"{dataset_name}_{window_start.strftime('%Y%m%dT%H%M%S')}_{duration_isoformat(aggregation)}.parquet"
         dataset_path = self.config.data_path / dataset_filename
-        self.logger.info(f"Creating dataset: {dataset_path}")
+        self.logger.info("Creating dataset file", path=str(dataset_path))
         
         # Build schema from ingestion_map
         schema_fields: List[Tuple[str, pa.DataType]] = [
@@ -343,7 +343,7 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, List[DataSetAvail
             # TODO this could overwrite already created dataset files with empty parquets...
             return None
 
-        self.logger.info(f"Exported {total_rows} rows to filesystem: {dataset_path}")
+        self.logger.info("Wrote parquet file", rows=total_rows, path=str(dataset_path))
 
         return DataSetAvailableEvent(
             id=uuid.uuid4(),
@@ -375,7 +375,6 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, List[DataSetAvail
             - This will check all dataset windows based on the events stored in redis, regardless of if the current event is relevant to that window or not"""
         metadata = event.metadata
         dataset_name = metadata.dataset.name
-        self.logger.info(f"Aggregating dataset: {dataset_name}")
         dataset_available_events = []
 
         # Save current ingestion event to event store for aggregation tracking
@@ -405,7 +404,7 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, List[DataSetAvail
         else:
             start_time = self._align_to_aggregation(parsed_events.overall_start, aggregation_span)
             iteration_end = parsed_events.overall_end
-        self.logger.info(f"Aligned start time for aggregation: {start_time}")
+        self.logger.info("Aligned start time for aggregation", start=start_time.isoformat())
 
         # Process each aggregation window
         window_start = start_time
@@ -439,5 +438,4 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, List[DataSetAvail
                 dataset_available_events.append(dataset_event)
 
             window_start = window_end
-        self.logger.info(f"Created {len(dataset_available_events)} datasets")
         return dataset_available_events

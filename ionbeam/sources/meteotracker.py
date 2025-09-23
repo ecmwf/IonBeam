@@ -413,8 +413,6 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
         return df
 
     async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
-        self.logger.info(f"Handling TimeSpanEvent: {event.start_time} to {event.end_time}")
-
         try:
             sessions_metadata = await self._fetch_session_metadata(event.start_time, event.end_time)
             self.logger.debug(sessions_metadata)

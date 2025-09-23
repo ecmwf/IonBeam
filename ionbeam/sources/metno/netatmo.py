@@ -197,7 +197,7 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
         return df
 
     async def crawl_netatmo_by_area(self, start_time: datetime, end_time: datetime, cache_only) -> AsyncIterator[pd.DataFrame]:
-        self.logger.info(cache_only)
+        self.logger.debug("Crawling Netatmo by area", cache_only=cache_only)
         assert (end_time - start_time).total_seconds() <= 86400, "NetAtmo only supports 24h windows"
         datetime_range = f"{start_time.strftime('%Y-%m-%dT%H:%MZ')}/{end_time.strftime('%Y-%m-%dT%H:%MZ')}"
         
@@ -251,11 +251,8 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
                     # @cached(cache_key, cache_only)
                     async def fetch_station_data_by_area():
                         response = await client.get(url, params=params, headers=headers)
-                        # response.raise_for_status()
-                        logger.info("-----------")
-                        logger.info(response.status_code)
-                        if(response.status_code != 200):
-                            return dict()
+                        if response.status_code != 200:
+                            return {}
                         return response.json()
                     
                     station_coverage = await fetch_station_data_by_area()
@@ -264,7 +261,7 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
                         result = coerce_types(result, self.metadata.ingestion_map)
                         yield result
                     else:
-                        self.logger.warning("Not data found for %s", cache_key)
+                        self.logger.warning("No data found", cache_key=cache_key)
 
     async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
         self._config.data_path.mkdir(parents=True, exist_ok=True)
@@ -297,7 +294,7 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
             self.logger.warning("No data collected")
             return None
 
-        self.logger.info(f"Saved {total_rows} rows to {path}")
+        self.logger.info("Wrote parquet file", rows=total_rows, path=str(path))
         
         # TODO - we need to gzip our cache directory and store it somewhere else
 

@@ -1,10 +1,11 @@
 import logging
+import structlog
 import time
 from typing import AsyncIterator, List, Optional
 
 import pandas as pd
 
-_logger = logging.getLogger(__name__)
+_logger = structlog.get_logger(__name__)
 
 
 def process_netatmo_geojson_messages_to_df(buffer: List[dict], logger: Optional[logging.Logger] = None) -> pd.DataFrame:
@@ -172,6 +173,6 @@ async def netatmo_dataframe_stream(
         if df is not None and not df.empty:
             yield df
     stream_elapsed = time.perf_counter() - stream_start
-    log.info("netatmo_dataframe_stream complete: batches=%d total_input_msgs=%d elapsed=%.2fs", total_batches, total_msgs, stream_elapsed)
+    log.info("Netatmo dataframe stream complete", batches=total_batches, total_input_msgs=total_msgs, elapsed=stream_elapsed)
 
 

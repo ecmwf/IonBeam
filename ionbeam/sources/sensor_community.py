@@ -224,8 +224,6 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
                                 i += 1
 
     async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
-        self.logger.info("@handlinga")
-        self.logger.info(f"Starting sensor_community source: {event}")
         try:
             self._config.data_path.mkdir(parents=True, exist_ok=True)
             path = (

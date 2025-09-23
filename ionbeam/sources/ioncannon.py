@@ -25,8 +25,8 @@ class IonCannonConfig(BaseModel):
     data_path: pathlib.Path
     
     # Core parameters
-    num_stations: int = 1000
-    measurement_frequency: timedelta = timedelta(minutes=10)
+    num_stations: int = 100000
+    measurement_frequency: timedelta = timedelta(minutes=5)
     
     # Geographic bounds for station placement (Central Europe)
     geographic_bounds: dict = {
@@ -94,8 +94,6 @@ class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand
                 yield pd.DataFrame(rows)
 
     async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
-        self.logger.info(f"Starting IonCannon load test: {event}")
-        
         try:
             self._config.data_path.mkdir(parents=True, exist_ok=True)
             path = (

@@ -23,8 +23,7 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
         self.timeseries_db = timeseries_db
 
     async def _handle(self, event: IngestDataCommand) -> DataAvailableEvent:
-        self.logger.info("Starting ingestion for dataset: %s", event.metadata.dataset.name)
-        self.logger.info("Chunk size: %d", self.config.parquet_chunk_size)
+        self.logger.debug("Ingestion config", parquet_chunk_size=self.config.parquet_chunk_size)
 
         ingestion_map = event.metadata.ingestion_map
         time_col = ingestion_map.datetime.from_col or ObservationTimestampColumn
@@ -78,10 +77,10 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
 
                 n_points = len(df_chunk)
                 if n_points == 0:
-                    self.logger.info("Batch %d skipped: nothing to write", batch_num + 1)
+                    self.logger.info("No points to write in batch; skipping", batch=batch_num + 1)
                     continue
 
-                self.logger.info("Writing batch %d with %d points", batch_num + 1, n_points)
+                self.logger.info("Writing batch", batch=batch_num + 1, points=n_points)
                 await self.timeseries_db.write_dataframe(
                     record=df_chunk,
                     measurement_name=event.metadata.dataset.name,
@@ -90,7 +89,6 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
                 )
                 total_written += n_points
 
-        self.logger.info("Finished ingestion. Total points written: %d", total_written)
         return DataAvailableEvent(id=event.id, metadata=event.metadata,
                                 start_time=event.start_time, end_time=event.end_time)
 

@@ -1,8 +1,10 @@
-import structlog
-from structlog.contextvars import bind_contextvars, clear_contextvars
+import time
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from typing import Generic, Optional, TypeVar
+
+import structlog
+from structlog.contextvars import bind_contextvars, clear_contextvars
 
 TInput = TypeVar('TInput')
 TOutput = TypeVar('TOutput')
@@ -10,7 +12,7 @@ TOutput = TypeVar('TOutput')
 class BaseHandler(ABC, Generic[TInput, TOutput]):
     def __init__(self, name: Optional[str] = None):
         self.name = name or self.__class__.__name__
-        self.logger = structlog.get_logger(self.name)
+        self.logger: structlog.BoundLogger = structlog.get_logger(self.name)
     
     @abstractmethod
     async def _handle(self, event: TInput) -> TOutput:
@@ -29,14 +31,15 @@ class BaseHandler(ABC, Generic[TInput, TOutput]):
             handler=self.name,
             input_type=type(event).__name__,
         )
-        self.logger.info(f"Starting {self.name}")
-        
-        # TODO: Start OTEL span, emit start metrics
+        self.logger.info("Handler started")
+        t0 = time.perf_counter()
         try:
             yield
-            self.logger.info(f"Completed {self.name}")
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            self.logger.info("Handler completed", elapsed_ms=elapsed_ms)
         except Exception as e:
-            self.logger.exception(f"Failed {self.name}: {e}")
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            self.logger.exception("Handler failed", error=str(e), elapsed_ms=elapsed_ms)
             raise
         finally:
             clear_contextvars()

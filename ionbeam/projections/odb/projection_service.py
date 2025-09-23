@@ -1,4 +1,3 @@
-import logging
 import pathlib
 from collections import defaultdict
 from datetime import timedelta
@@ -15,7 +14,6 @@ from ionbeam.core.handler import BaseHandler
 
 from ...models.models import CanonicalStandard, CanonicalVariable, DataSetAvailableEvent, DatasetMetadata
 
-logger = logging.getLogger(__name__)
 
 class VarNoMapping(BaseModel):
     varno: int
@@ -127,7 +125,7 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
                 col_var = CanonicalVariable.from_canonical_name(col)
             except ValueError: # TODO don't like exceptions for business logic - check col is valid shape instead
                 # most likely a metadata col - we can safety ignore
-                logger.warning('skipping %s - not a CanonicalVariable', col)
+                self.logger.warning("Skipping non-canonical column", column=col)
                 continue
 
             varnos = self.variable_lookup.get(CanonicalStandard.from_canonical_name(col), [])
@@ -135,7 +133,7 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
             for varno in varnos:
                 varno_unit = varno_units.get(varno)
                 if varno_unit is None:
-                    logger.error("No map found for col %s", col)
+                    self.logger.error("Missing varno unit mapping", column=col)
                     continue
 
                 # Ensure numeric values; keep NaN where not parseable
@@ -150,7 +148,7 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
                     to_cf_unit = cf_units.Unit(varno_unit)
                     converted = from_cf_unit.convert(values[mask].to_numpy(), to_cf_unit)  # returns numpy.ndarray
                 except Exception as e:
-                    logger.error("Unit conversion failed for column %s from %s to %s: %s", col, col_var.cf_unit, varno_unit, e)
+                    self.logger.error("Unit conversion failed", column=col, from_unit=col_var.cf_unit, to_unit=varno_unit, error=str(e))
                     continue  # Skip this column but continue to process others
 
                 # Build this column's ODB slice (keep per-row headers for the masked rows)
@@ -166,14 +164,13 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         return pd.concat(odb_frames, ignore_index=True)
 
     async def _handle(self, event: DataSetAvailableEvent):
-        logger.info("Processing dataset available event %s into ODB", event)
         dataset_path = pathlib.Path(event.dataset_location)
         if dataset_path.exists():
             df = pd.read_parquet(dataset_path) # TODO - implement Parquet streaming
 
             odb_df = self._map_canonical_df_to_odb(event.metadata, df)
             if(odb_df is None):
-                logger.error("Unable to create valid ODB")
+                self.logger.error("Unable to create valid ODB dataframe")
                 return
             output_filename = dataset_path.stem + ".odb"
             
@@ -183,9 +180,9 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
 
             odb_df.to_parquet(str(odb_path / output_filename).replace(".odb", ".parquet")) # easy debugging
             odc.encode_odb(odb_df, str(odb_path / output_filename))
-            logger.info("Written odb file to %s", odb_path)
+            self.logger.info("Wrote ODB file", path=str(odb_path / output_filename))
         else:
-            logger.error("Dataset file not found: %s", dataset_path)
+            self.logger.error("Dataset file not found", path=str(dataset_path))
 
 if __name__ == "__main__":
     

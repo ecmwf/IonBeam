@@ -1,7 +1,8 @@
 import asyncio
 import json
-import logging
+import structlog
 import ssl
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
@@ -30,6 +31,7 @@ class NetAtmoMQTTConfig(BaseModel):
     data_path: Path
     url: str
     routing_key: str = "ionbeam.ingestion.ingestV1"
+    flush_interval_seconds: int = 60
 
 
 class NetAtmoMQTTSource:
@@ -40,9 +42,9 @@ class NetAtmoMQTTSource:
         self._stop = asyncio.Event()
         self._mqtt_task: asyncio.Task | None = None
         self._agg_task: asyncio.Task | None = None
-        self.logger = logging.getLogger(__name__)
+        self.logger = structlog.get_logger(__name__)
         self.metadata = netatmo_metadata
-        self.logger.info("In init")
+        self._last_flush = time.monotonic()
         
     async def start(self):
         self._mqtt_task = asyncio.create_task(self._listen())
@@ -61,7 +63,6 @@ class NetAtmoMQTTSource:
             await self._agg_task
         
     async def __aenter__(self):
-        self.logger.info("In __aenter__")
         await self.start()
         return self
 
@@ -69,7 +70,6 @@ class NetAtmoMQTTSource:
         await self.stop()
 
     async def _listen(self):
-        self.logger.info("In listener")
         tls_context = ssl.create_default_context() if self.config.use_tls else None
         while not self._stop.is_set():
             try:
@@ -83,14 +83,14 @@ class NetAtmoMQTTSource:
                     tls_context=tls_context,
                 ) as client:
                     await client.subscribe("raw-obs/+/netatmo/#")
-                    self.logger.info("Subscribed to netatmo")
+                    self.logger.info("Subscribed to Netatmo MQTT")
                     async for msg in client.messages:
                         if self._stop.is_set():
                             break
                         # self.logger.info("Handling %s", msg)
                         await self._handle_message(msg)
             except Exception as e:
-                self.logger.info(f"MQTT error: {e}, retrying in 5s")
+                self.logger.warning("MQTT connection error", error=str(e), retry_in=5)
                 await asyncio.sleep(5)
 
     async def _handle_message(self, msg):
@@ -103,15 +103,19 @@ class NetAtmoMQTTSource:
 
     async def _aggregate_and_publish(self):
         while not self._stop.is_set():
-            self.logger.info("Aggregate and publish worker started")
-            if(len(self._buffer) < 50000): # TODO - add time check to always purge buffer
-                await asyncio.sleep(5)  # every 5 seconds
+            flush_due_to_size = len(self._buffer) >= 50000
+            flush_due_to_time = (len(self._buffer) > 0) and ((time.monotonic() - self._last_flush) >= self.config.flush_interval_seconds)
+
+            if not flush_due_to_size and not flush_due_to_time:
+                await asyncio.sleep(5)  # idle wait
                 continue
+
             async with self._lock:
-                self.logger.info("Draining...")
                 drained = self._buffer
                 self._buffer = []
+
             if not drained:
+                await asyncio.sleep(1)
                 continue
 
             # Determine time bounds from drained buffer without materializing full DataFrame
@@ -121,7 +125,7 @@ class NetAtmoMQTTSource:
                 errors="coerce",
             ).dropna()
             if times.empty:
-                self.logger.warning("No valid datetimes in drained buffer; skipping write")
+                self.logger.warning("No valid datetimes in drained buffer")
                 continue
             start_time = times.min()
             end_time = times.max()
@@ -136,9 +140,10 @@ class NetAtmoMQTTSource:
 
             try:
                 df_stream = netatmo_dataframe_stream(drained_stream(), batch_size=50000, logger=self.logger)
-                await stream_dataframes_to_parquet(df_stream, path, schema_fields=None)
+                rows = await stream_dataframes_to_parquet(df_stream, path, schema_fields=None)
+                self.logger.info("Wrote parquet file", rows=rows, path=str(path), start=start_time.isoformat(), end=end_time.isoformat())
             except Exception as e:
-                self.logger.info(f"Failed to write parquet: {e}")
+                self.logger.error("Failed to write parquet file", error=str(e), path=str(path))
                 continue
 
             ingestion_command = IngestDataCommand(
@@ -159,7 +164,9 @@ class NetAtmoMQTTSource:
                         routing_key=self.config.routing_key,
                     )
             except Exception as e:
-                self.logger.info(f"AMQP send error: {e}")
+                self.logger.error("AMQP publish error", error=str(e))
+            finally:
+                self._last_flush = time.monotonic()
 
     def process_message_buffer_to_df(self, buffer: List[dict]):
         # Delegates to shared processing utility for reuse across tools.

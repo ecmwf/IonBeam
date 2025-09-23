@@ -1,5 +1,5 @@
 import asyncio
-import logging
+import structlog
 import math
 import re
 from datetime import datetime, timedelta, timezone
@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..models.models import StartSourceCommand
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 def _sanitize_segment(seg: str) -> str:
     clean = re.compile(r"[^A-Za-z0-9._-]+").sub("_", seg.strip())
@@ -88,18 +88,16 @@ class SourceScheduler:
             await publisher.publish(command)
 
             logger.info(
-                "triggered.source",
-                extra={
-                    "source": source_name,
-                    "start": start_time.isoformat(),
-                    "end": end_time.isoformat(),
-                },
+                "Triggered source",
+                source=source_name,
+                start=start_time.isoformat(),
+                end=end_time.isoformat(),
             )
             return command
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Failed to trigger source %s", source_name)
+            logger.exception("Failed to trigger source", source=source_name)
             return None
 
     async def _startSource(self, window: SourceSchedule) -> Optional[StartSourceCommand]:
@@ -114,20 +112,18 @@ class SourceScheduler:
             result = await self.trigger_source(window.source_name, window_start, window_end)
             if result:
                 logger.info(
-                    "scheduled.start_source",
-                    extra={
-                        "window_id": str(window.id),
-                        "event_time": now.isoformat(),
-                    },
+                    "Published start command",
+                    window_id=str(window.id),
+                    event_time=now.isoformat(),
                 )
             return result
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception(
-                "Failed to start scheduled source %s (%s)",
-                window.source_name,
-                window.id,
+                "Failed to publish start command for window",
+                source=window.source_name,
+                window_id=str(window.id),
             )
             return None
 
@@ -143,7 +139,7 @@ class SourceScheduler:
 
     def start(self) -> None:
         for window in self.source_schedules:
-            logger.info("Starting schedule window %s (%s)", window.source_name, window.id)
+            logger.info("Starting schedule for window", source=window.source_name, window_id=str(window.id))
             self._add_window(window)
 
     async def stop(self) -> None:
@@ -174,11 +170,11 @@ class SourceScheduler:
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    logger.exception("Error in window %s (%s)", window.source_name, window.id)
+                    logger.exception("Error while scheduling window", source=window.source_name, window_id=str(window.id))
                     # Small backoff then resume aligned to next boundary
                     await asyncio.sleep(1)
         except asyncio.CancelledError:
-            logger.info("Cancelled schedule for %s (%s)", window.source_name, window.id)
+            logger.info("Window schedule cancelled", source=window.source_name, window_id=str(window.id))
 
     def _next_aligned_time(self, current: datetime, interval: timedelta) -> datetime:
         """

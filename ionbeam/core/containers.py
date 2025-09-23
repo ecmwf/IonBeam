@@ -6,7 +6,6 @@ from faststream.rabbit import RabbitBroker
 from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
 
 from ionbeam.sources.metno.netatmo_mqtt import NetAtmoMQTTConfig, NetAtmoMQTTSource
-from ..sources.metno.netatmo_archive import NetAtmoArchiveConfig, NetAtmoArchiveSource
 
 from ..projections.odb.projection_service import ODBProjectionService, ODBProjectionServiceConfig
 from ..projections.pygeoapi.projection_service import (
@@ -19,6 +18,7 @@ from ..services.ingestion import IngestionConfig, IngestionService
 from ..sources.ioncannon import IonCannonConfig, IonCannonSource
 from ..sources.meteotracker import MeteoTrackerConfig, MeteoTrackerSource
 from ..sources.metno.netatmo import NetAtmoConfig, NetAtmoSource
+from ..sources.metno.netatmo_archive import NetAtmoArchiveConfig, NetAtmoArchiveSource
 from ..sources.sensor_community import SensorCommunityConfig, SensorCommunitySource
 from ..storage.event_store import RedisEventStore
 from ..storage.timeseries import InfluxDBTimeSeriesDatabase
@@ -29,7 +29,7 @@ config_path = os.getenv("IONBEAM_CONFIG_PATH", "config.yaml")
 class IonbeamContainer(containers.DeclarativeContainer):
     config = providers.Configuration(yaml_files=[config_path])
 
-    broker = providers.Resource(RabbitBroker, url=config.broker.url)
+    broker = providers.Resource(RabbitBroker, url=config.broker.url, max_consumers=3)
 
     # shared redis client resource
     redis_client = providers.Resource(
