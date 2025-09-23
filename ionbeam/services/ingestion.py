@@ -33,8 +33,7 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
 
         parquet_file = pq.ParquetFile(event.payload_location)
         total_written = 0
-
-        for batch_num, batch in enumerate(parquet_file.iter_batches()):
+        for batch_num, batch in enumerate(parquet_file.iter_batches(batch_size=5000)): # Optmium for influxdb https://docs.influxdata.com/influxdb/v2/write-data/best-practices/optimize-writes/#batch-writes
                 await asyncio.sleep(0)  # keep event loop responsive - not sure if needed, this seems to stop rabbitmq from kicking client if they don't respond to keep-alive type reqs
                 df_chunk = batch.to_pandas(types_mapper={pa.string(): pd.StringDtype(storage="python")}.get)
                 df_chunk = coerce_types(df_chunk, ingestion_map)

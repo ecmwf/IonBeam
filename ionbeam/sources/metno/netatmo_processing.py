@@ -10,8 +10,7 @@ _logger = logging.getLogger(__name__)
 def process_netatmo_geojson_messages_to_df(buffer: List[dict], logger: Optional[logging.Logger] = None) -> pd.DataFrame:
     """
     Transform a list of Netatmo-like GeoJSON Feature dicts into a wide DataFrame:
-    - Deduplicate by (station_id, datetime, lat, lon, parameter) keeping latest by pubtime, then by arrival order.
-    - Pivot parameters to columns.
+    - Deduplicate by (station_id, datetime, lat, lon, parameter) keeping latest by pubtime, then by arrival order
     """
     log = logger or _logger
     t0 = time.perf_counter()
@@ -81,7 +80,7 @@ def process_netatmo_geojson_messages_to_df(buffer: List[dict], logger: Optional[
     df["pubtime"] = pd.to_datetime(df["pubtime"], utc=True, errors="coerce")
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
 
-    # Drop rows with invalid essential fields. Keep NaN values in 'value' like before.
+    # Drop rows with invalid essential fields. Keep NaN values in 'value'.
     before = len(df)
     df = df.dropna(subset=["station_id", "datetime", "lat", "lon"])
     dropped = before - len(df)

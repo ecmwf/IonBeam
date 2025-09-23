@@ -1,7 +1,7 @@
 
 
 import asyncio
-import logging
+import structlog
 import pathlib
 from typing import AsyncIterator, List, Optional, Tuple
 
@@ -10,7 +10,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # TODO implement parquet stream reader
 
@@ -67,10 +67,10 @@ async def stream_dataframes_to_parquet(
                 chunk_count += 1
 
                 if chunk_count % 100 == 0:
-                    logger.info(f"Processed {chunk_count} chunks, {total_rows} rows so far")
+                    logger.info("Parquet write progress", chunks=chunk_count, rows=total_rows)
 
             except Exception as e:
-                logger.error(f"Failed to write batch: {e}")
+                logger.exception("Failed to write batch", error=str(e))
                 raise
     finally:
         if writer is not None:

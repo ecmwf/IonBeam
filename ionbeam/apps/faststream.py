@@ -1,4 +1,11 @@
 import logging
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
+import structlog
+from structlog.stdlib import ProcessorFormatter, LoggerFactory
+from structlog.processors import TimeStamper, JSONRenderer
+from structlog.contextvars import merge_contextvars
+from structlog import dev as structlog_dev
 
 from dependency_injector.wiring import Provide, inject
 from faststream import FastStream
@@ -19,6 +26,63 @@ from ..sources.metno.netatmo_mqtt import NetAtmoMQTTSource
 from ..sources.sensor_community import SensorCommunitySource
 
 dataset_available_exchange = RabbitExchange("ionbeam.dataset.available", type=ExchangeType.FANOUT)
+
+def setup_logging(level: int = logging.INFO, log_dir: Path = Path("."), log_name: str = "ionbeam.log") -> None:
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    # structlog + stdlib integration
+    pre_chain = [
+        merge_contextvars,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        TimeStamper(fmt="iso", utc=True),
+    ]
+
+    # Console: pretty, human-friendly
+    console_formatter = ProcessorFormatter(
+        processor=structlog_dev.ConsoleRenderer(colors=True),
+        foreign_pre_chain=pre_chain,
+    )
+
+    # File: JSON for machine processing
+    json_formatter = ProcessorFormatter(
+        processor=JSONRenderer(),
+        foreign_pre_chain=pre_chain,
+    )
+
+    # Console handler (stdout/stderr)
+    if not any(getattr(h, "name", None) == "console" for h in root_logger.handlers):
+        console = logging.StreamHandler()
+        console.set_name("console")
+        console.setLevel(level)
+        console.setFormatter(console_formatter)
+        root_logger.addHandler(console)
+
+    # File handler (rotates nightly)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    if not any(getattr(h, "name", None) == "file" for h in root_logger.handlers):
+        file_handler = TimedRotatingFileHandler(log_dir / log_name, when="midnight", backupCount=5, encoding="utf-8")
+        file_handler.set_name("file")
+        file_handler.setLevel(level)
+        file_handler.setFormatter(json_formatter)
+        root_logger.addHandler(file_handler)
+
+    # Configure structlog to hand off to ProcessorFormatter
+    structlog.configure(
+        processors=[
+            merge_contextvars,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.add_logger_name,
+            TimeStamper(fmt="iso", utc=True),
+            ProcessorFormatter.wrap_for_formatter,
+        ],
+        logger_factory=LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    # Align third-party loggers
+    logging.getLogger("httpx").setLevel(level)
 
 @inject
 async def create_faststream_handlers(
@@ -88,7 +152,7 @@ async def create_faststream_handlers(
 
     @broker.subscriber(aggregation_q, ingestion_fanout)
     async def handle_dataset_aggregation(event: DataAvailableEvent):
-        async for dataset_event in await dataset_aggregation_service.handle(event):
+        for dataset_event in await dataset_aggregation_service.handle(event):
             await broker.publish(dataset_event, exchange=dataset_fanout)
 
     @broker.subscriber(pygeoapi_q, dataset_fanout)
@@ -100,12 +164,7 @@ async def create_faststream_handlers(
         await odb_projection_service.handle(event)
 
 async def factory():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
-    httpx_logger = logging.getLogger("httpx")
-    httpx_logger.setLevel(logging.INFO)
+    setup_logging()
     
     container = IonbeamContainer()
     container.wire(modules=["ionbeam.apps.faststream"])

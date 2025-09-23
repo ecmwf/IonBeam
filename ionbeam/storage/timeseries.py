@@ -1,4 +1,4 @@
-import logging
+import structlog
 import warnings
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
@@ -10,7 +10,7 @@ from influxdb_client.client.warnings import MissingPivotFunction
 
 warnings.simplefilter("ignore", MissingPivotFunction) # We pivot locally to offload computation away from influxdb - TODO look into this, is it really any quicker?
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class TimeSeriesDatabase(ABC):
@@ -75,12 +75,14 @@ class InfluxDBTimeSeriesDatabase(TimeSeriesDatabase):
                 from(bucket: "{self.bucket}")
                 |> range(start: {start.isoformat()}, stop: {stop.isoformat()})
                 |> filter(fn: (r) => r._measurement == "{measurement}")
-                |> sort(columns: ["_time"], desc: false)
             """
             
             logger.info(
-                f"Querying InfluxDB for {measurement}: start={start.isoformat()} "
-                f"stop={stop.isoformat()} slice={slice_duration}"
+                "Querying InfluxDB",
+                measurement=measurement,
+                start=start.isoformat(),
+                stop=stop.isoformat(),
+                slice=str(slice_duration),
             )
             
             # Query returns DataFrame or List[DataFrame]

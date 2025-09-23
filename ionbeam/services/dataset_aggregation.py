@@ -49,7 +49,7 @@ import pathlib
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterator, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -84,7 +84,7 @@ class DatasetAggregatorConfig(BaseModel):
     only_process_spanned_windows: bool = True 
 
 
-class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[DataSetAvailableEvent]]):
+class DatasetAggregatorService(BaseHandler[DataAvailableEvent, List[DataSetAvailableEvent]]):
     def __init__(self, config: DatasetAggregatorConfig, event_store: EventStore, timeseries_db: TimeSeriesDatabase):
         super().__init__("DatasetAggregatorService")
         self.config = config
@@ -301,10 +301,6 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
                 if df.empty:
                     return df
 
-                # Ensure datetime dtype
-                if ObservationTimestampColumn in df.columns and not pd.api.types.is_datetime64_any_dtype(df[ObservationTimestampColumn]):
-                    df[ObservationTimestampColumn] = pd.to_datetime(df[ObservationTimestampColumn], utc=True, errors="coerce")
-
                 # Derive tag columns automatically: non-underscore, not helper columns
                 helper = {ObservationTimestampColumn, "source", "_field", "_value"}
                 tag_cols = [c for c in df.columns if not c.startswith("_") and c not in helper]
@@ -319,11 +315,7 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
                     )
                     .reset_index()
                 )
-                # Flatten any MultiIndex columns from pivot_table
-                if isinstance(df_wide.columns, pd.MultiIndex):
-                    df_wide.columns = [c if not isinstance(c, tuple) else c[-1] for c in df_wide.columns]
-                else:
-                    df_wide.columns = [c if not isinstance(c, tuple) else c[-1] for c in df_wide.columns]
+                df_wide.columns = [c if not isinstance(c, tuple) else c[-1] for c in df_wide.columns]
 
                 # Type coercion (your existing cleaning)
                 df_wide = coerce_types(df_wide, metadata.ingestion_map, True)
@@ -333,7 +325,7 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
                 measurement=dataset_name,
                 start_time=window_start,
                 end_time=window_end,
-                slice_duration=timedelta(minutes=10)
+                slice_duration=timedelta(minutes=15)
             ):
                 df_wide = _to_df(df_long)
                 if df_wide is not None and not df_wide.empty:
@@ -378,12 +370,13 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
         # Events will be cleaned up by a separate maintenance process
         return events
 
-    async def _handle(self, event: DataAvailableEvent) -> AsyncIterator[DataSetAvailableEvent]: # type: ignore
+    async def _handle(self, event: DataAvailableEvent) -> List[DataSetAvailableEvent]:
         """Main aggregation logic
             - This will check all dataset windows based on the events stored in redis, regardless of if the current event is relevant to that window or not"""
         metadata = event.metadata
         dataset_name = metadata.dataset.name
         self.logger.info(f"Aggregating dataset: {dataset_name}")
+        dataset_available_events = []
 
         # Save current ingestion event to event store for aggregation tracking
         event_key = f"ingestion_events:{metadata.dataset.name}:{event.id}"
@@ -397,7 +390,7 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
         # Load all events and analyze data span/gaps
         parsed_events = await self._load_and_parse_data_events(dataset_name)
         if not parsed_events.events or parsed_events.overall_start is None or parsed_events.overall_end is None:
-            return
+            return []
 
         # Setup aggregation parameters
         now = datetime.now(timezone.utc)
@@ -443,6 +436,8 @@ class DatasetAggregatorService(BaseHandler[DataAvailableEvent, AsyncIterator[Dat
                 parsed_events.events = await self._cleanup_processed_data(
                     dataset_name, window_start, window_end, parsed_events.events
                 )
-                yield dataset_event
+                dataset_available_events.append(dataset_event)
 
             window_start = window_end
+        self.logger.info(f"Created {len(dataset_available_events)} datasets")
+        return dataset_available_events
