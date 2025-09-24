@@ -102,7 +102,7 @@ class IonbeamContainer(containers.DeclarativeContainer):
 
     # dataset builder service
     # dataset_builder_config = providers.Factory(lambda cfg: DatasetBuilderConfig(**cfg), config.dataset_builder)
-    dataset_builder_service = providers.Factory(DatasetBuilder, config=DatasetBuilderConfig(), event_store=event_store, timeseries_db=timeseries_db)
+    dataset_builder_service = providers.Factory(DatasetBuilder, config=DatasetBuilderConfig(), event_store=event_store, timeseries_db=timeseries_db, broker=broker)
 
     # PyGeoAPI projection service
     pygeoapi_projection_service_config = providers.Factory(lambda cfg: PyGeoApiConfig(**cfg), config.projections.pygeoapi_service)

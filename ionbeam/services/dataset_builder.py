@@ -36,6 +36,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import structlog
+from faststream.rabbit import RabbitBroker
 from isodate import duration_isoformat
 from pydantic import BaseModel
 
@@ -68,10 +69,12 @@ class DatasetBuilder:
         config: DatasetBuilderConfig,
         event_store: EventStore,
         timeseries_db: TimeSeriesDatabase,
+        broker: Optional[RabbitBroker] = None,
     ) -> None:
         self.config = config
         self.event_store = event_store
         self.timeseries_db = timeseries_db
+        self.broker = broker
         self._stop = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
         self._inflight: set[asyncio.Task] = set()
@@ -168,6 +171,22 @@ class DatasetBuilder:
             start_time=window_start,
             end_time=window_end,
         )
+
+    async def _publish_dataset_event(self, event: DataSetAvailableEvent) -> None:
+        """Publish DataSetAvailableEvent to the dataset fanout exchange if broker configured."""
+        if not self.broker:
+            self.logger.warning("RabbitBroker not configured; dataset event not published")
+            return
+        try:
+            await self.broker.publish(event, exchange="ionbeam.dataset.available")
+            self.logger.info(
+                "Published dataset available event",
+                dataset=str(event.metadata.name),
+                start_time=event.start_time.isoformat(),
+                end_time=event.end_time.isoformat(),
+            )
+        except Exception:
+            self.logger.exception("Failed to publish dataset available event")
 
     # Lifecycle ---------------------------------------------------------------
 
@@ -404,6 +423,16 @@ class DatasetBuilder:
 
             # Write observed state so coordinator sees window as satisfied
             await self._set_observed_hash(parsed.dataset, parsed.window_id, desired_hash)
+
+            # Publish dataset available event for downstream consumers
+            try:
+                if dataset_event:
+                    await self._publish_dataset_event(dataset_event)
+                else:
+                    self.logger.debug("No dataset_event to publish")
+            except Exception:
+                self.logger.exception("Error while publishing dataset available event", dataset_key=dataset_key)
+
             self.logger.info(
                 "Built window and updated observed state",
                 dataset=parsed.dataset,
