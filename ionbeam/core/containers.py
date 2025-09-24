@@ -13,7 +13,8 @@ from ..projections.pygeoapi.projection_service import (
     PyGeoApiProjectionService,
 )
 from ..scheduler.source_scheduler import SchedulerConfig, SourceScheduler
-from ..services.dataset_aggregation import DatasetAggregatorConfig, DatasetAggregatorService
+from ..services.dataset_builder import DatasetBuilder, DatasetBuilderConfig
+from ..services.dataset_coordinator import DatasetCoordinatorConfig, DatasetCoordinatorService
 from ..services.ingestion import IngestionConfig, IngestionService
 from ..sources.ioncannon import IonCannonConfig, IonCannonSource
 from ..sources.meteotracker import MeteoTrackerConfig, MeteoTrackerSource
@@ -29,7 +30,7 @@ config_path = os.getenv("IONBEAM_CONFIG_PATH", "config.yaml")
 class IonbeamContainer(containers.DeclarativeContainer):
     config = providers.Configuration(yaml_files=[config_path])
 
-    broker = providers.Resource(RabbitBroker, url=config.broker.url, max_consumers=3)
+    broker = providers.Resource(RabbitBroker, url=config.broker.url, max_consumers=1)
 
     # shared redis client resource
     redis_client = providers.Resource(
@@ -91,9 +92,17 @@ class IonbeamContainer(containers.DeclarativeContainer):
     # ingestion service
     ingestion_service = providers.Factory(IngestionService, config=IngestionConfig(), timeseries_db=timeseries_db)
 
-    # dataset aggregator service
-    dataset_aggregator_config = providers.Factory(lambda cfg: DatasetAggregatorConfig(**cfg), config.dataset_aggregator)
-    dataset_aggregator_service = providers.Factory(DatasetAggregatorService, config=dataset_aggregator_config, event_store=event_store, timeseries_db=timeseries_db)
+    # dataset aggregator service (deprecated - replaced by coordinator/builder)
+    # dataset_aggregator_config = providers.Factory(lambda cfg: DatasetAggregatorConfig(**cfg), config.dataset_aggregator)
+    # dataset_aggregator_service = providers.Factory(DatasetAggregatorService, config=dataset_aggregator_config, event_store=event_store, timeseries_db=timeseries_db)
+
+    # dataset coordinator service
+    # dataset_coordinator_config = providers.Factory(lambda cfg: DatasetCoordinatorConfig(), config.dataset_coordinator)
+    dataset_coordinator_service = providers.Factory(DatasetCoordinatorService, config=DatasetCoordinatorConfig(), event_store=event_store)
+
+    # dataset builder service
+    # dataset_builder_config = providers.Factory(lambda cfg: DatasetBuilderConfig(**cfg), config.dataset_builder)
+    dataset_builder_service = providers.Factory(DatasetBuilder, config=DatasetBuilderConfig(), event_store=event_store, timeseries_db=timeseries_db)
 
     # PyGeoAPI projection service
     pygeoapi_projection_service_config = providers.Factory(lambda cfg: PyGeoApiConfig(**cfg), config.projections.pygeoapi_service)

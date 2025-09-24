@@ -16,7 +16,8 @@ from ..models.models import DataAvailableEvent, DataSetAvailableEvent, IngestDat
 from ..projections.odb.projection_service import ODBProjectionService
 from ..projections.pygeoapi.projection_service import PyGeoApiProjectionService
 from ..scheduler.source_scheduler import SourceScheduler
-from ..services.dataset_aggregation import DatasetAggregatorService
+from ..services.dataset_builder import DatasetBuilder
+from ..services.dataset_coordinator import DatasetCoordinatorService
 from ..services.ingestion import IngestionService
 from ..sources.ioncannon import IonCannonSource
 from ..sources.meteotracker import MeteoTrackerSource
@@ -99,7 +100,7 @@ async def create_faststream_handlers(
     meteotracker_source: MeteoTrackerSource = Provide[IonbeamContainer.meteotracker_source],
     netatmo_archive_source: NetAtmoArchiveSource = Provide[IonbeamContainer.netatmo_archive_source],
     ingestion_service: IngestionService = Provide[IonbeamContainer.ingestion_service],
-    dataset_aggregation_service: DatasetAggregatorService = Provide[IonbeamContainer.dataset_aggregator_service],
+    dataset_coordinator_service: DatasetCoordinatorService = Provide[IonbeamContainer.dataset_coordinator_service],
     pygeoapi_projection_service: PyGeoApiProjectionService = Provide[IonbeamContainer.pygeoapi_projection_service],
     odb_projection_service: ODBProjectionService = Provide[IonbeamContainer.odb_projection_service],
 ):
@@ -157,9 +158,8 @@ async def create_faststream_handlers(
         await broker.publish(event, exchange=ingestion_fanout)
 
     @broker.subscriber(aggregation_q, ingestion_fanout)
-    async def handle_dataset_aggregation(event: DataAvailableEvent):
-        for dataset_event in await dataset_aggregation_service.handle(event):
-            await broker.publish(dataset_event, exchange=dataset_fanout)
+    async def handle_dataset_coordination(event: DataAvailableEvent):
+        await dataset_coordinator_service.handle(event)
 
     @broker.subscriber(pygeoapi_q, dataset_fanout)
     async def handle_pygeoapi_projection(event: DataSetAvailableEvent):
@@ -183,6 +183,7 @@ async def factory():
     broker: RabbitBroker = await container.broker() # type: ignore
     scheduler: SourceScheduler = await container.source_scheduler() # type: ignore
     netatmo_mqtt_source: NetAtmoMQTTSource = container.netatmo_mqtt_source() # type: ignore
+    dataset_builder: DatasetBuilder = await container.dataset_builder_service() # type: ignore
 
 
     app = FastStream(broker, logging.getLogger("faststream"))
@@ -193,11 +194,13 @@ async def factory():
     async def startup():
         """Start the source scheduler when the app starts"""
         scheduler.start()
+        await dataset_builder.start()
         # await netatmo_mqtt_source.start()
     
     @app.on_shutdown
     async def shutdown():
         """Stop the source scheduler when the app shuts down"""
+        await dataset_builder.stop()
         await scheduler.stop()
         shutdown = container.shutdown_resources()
         if(shutdown is not None):
