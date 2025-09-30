@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from ...core.handler import BaseHandler
 from ...models.models import IngestDataCommand, StartSourceCommand
+from ...observability.metrics import IonbeamMetricsProtocol
 from ...utilities.parquet_tools import stream_dataframes_to_parquet
 from .netatmo import netatmo_metadata
 from .netatmo_processing import netatmo_dataframe_stream
@@ -30,8 +31,8 @@ class NetAtmoArchiveConfig(BaseModel):
 class NetAtmoArchiveSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]):
     """Read Netatmo JSONL tar archives from a directory and emit an IngestDataCommand like a normal source."""
 
-    def __init__(self, config: NetAtmoArchiveConfig):
-        super().__init__("NetAtmoArchiveSource")
+    def __init__(self, config: NetAtmoArchiveConfig, metrics: IonbeamMetricsProtocol):
+        super().__init__("NetAtmoArchiveSource", metrics)
         self.config = config
         self.metadata = netatmo_metadata
 
@@ -120,6 +121,9 @@ class NetAtmoArchiveSource(BaseHandler[StartSourceCommand, Optional[IngestDataCo
                 self.logger.exception("Failed reading archive %s", archive_path)
 
     async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
+        source_name = self.metadata.dataset.name
+        fetch_started = time.perf_counter()
+        
         try:
             self.config.data_path.mkdir(parents=True, exist_ok=True)
             output_path = self.config.data_path / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
@@ -182,9 +186,23 @@ class NetAtmoArchiveSource(BaseHandler[StartSourceCommand, Optional[IngestDataCo
 
             if total_rows == 0:
                 self.logger.warning("No data written from archive based on provided filters/window")
+                self.metrics.sources.record_ingestion_request(source_name, "no_data")
+                fetch_duration = time.perf_counter() - fetch_started
+                self.metrics.sources.observe_fetch_duration(source_name, fetch_duration)
                 return None
 
             self.logger.info("Wrote parquet file", rows=total_rows, path=str(output_path))
+
+            # Record metrics
+            self.metrics.sources.record_ingestion_request(source_name, "success")
+            self.metrics.sources.observe_request_rows(source_name, total_rows)
+            
+            fetch_duration = time.perf_counter() - fetch_started
+            self.metrics.sources.observe_fetch_duration(source_name, fetch_duration)
+            
+            # Calculate data lag (time from start of requested window to now)
+            data_lag = (datetime.now(timezone.utc) - event.start_time).total_seconds()
+            self.metrics.sources.observe_data_lag(source_name, data_lag)
 
             return IngestDataCommand(
                 id=uuid4(),
@@ -195,4 +213,7 @@ class NetAtmoArchiveSource(BaseHandler[StartSourceCommand, Optional[IngestDataCo
             )
         except Exception:
             self.logger.exception("Failed processing Netatmo archive")
+            self.metrics.sources.record_ingestion_request(source_name, "error")
+            fetch_duration = time.perf_counter() - fetch_started
+            self.metrics.sources.observe_fetch_duration(source_name, fetch_duration)
             return None

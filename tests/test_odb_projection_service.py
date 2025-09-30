@@ -14,6 +14,7 @@ from ionbeam.models.models import (
     DataSetAvailableEvent,
     DatasetMetadata,
 )
+from ionbeam.observability.metrics import IonbeamMetricsProtocol
 from ionbeam.projections.odb.projection_service import ODBProjectionService, ODBProjectionServiceConfig, VarNoMapping
 
 
@@ -24,7 +25,7 @@ def temp_data_path() -> Generator[Path, None, None]:
 
 
 @pytest.fixture
-def odb_service(temp_data_path: Path) -> ODBProjectionService:
+def odb_service(temp_data_path: Path, mock_metrics: IonbeamMetricsProtocol) -> ODBProjectionService:
     config = ODBProjectionServiceConfig(
         input_path=temp_data_path / "input",
         output_path=temp_data_path / "output",
@@ -58,7 +59,7 @@ def odb_service(temp_data_path: Path) -> ODBProjectionService:
             )
         ]
     )
-    return ODBProjectionService(config)
+    return ODBProjectionService(config, mock_metrics)
 
 
 @pytest.fixture

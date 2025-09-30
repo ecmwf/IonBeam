@@ -92,6 +92,7 @@ def setup_logging(level: int = logging.INFO, log_dir: Path = Path("."), log_name
         cache_logger_on_first_use=True,
     )
 
+
 @inject
 async def create_faststream_handlers(
     broker: RabbitBroker = Provide[IonbeamContainer.broker],
@@ -170,37 +171,32 @@ async def create_faststream_handlers(
     async def handle_odb_projection(event: DataSetAvailableEvent):
         await odb_projection_service.handle(event)
 
+
 async def factory():
     setup_logging()
-    
+
     container = IonbeamContainer()
     container.wire(modules=["ionbeam.apps.faststream"])
-    
     init = container.init_resources()
-    if(init is not None):
+    if init is not None:
         await init
     await create_faststream_handlers()
-    
-    registry: CollectorRegistry = container.registry() # type: ignore
-    broker: RabbitBroker = await container.broker() # type: ignore
-    scheduler: SourceScheduler = await container.source_scheduler() # type: ignore
-    netatmo_mqtt_source: NetAtmoMQTTSource = container.netatmo_mqtt_source() # type: ignore
-    dataset_builder: DatasetBuilder = await container.dataset_builder_service() # type: ignore
 
-
-    # app = FastStream(broker, logging.getLogger("faststream")).as_asgi(
-    #     asyncapi_path="/docs/asyncapi",
-    # )
+    broker: RabbitBroker = await container.broker()  # type: ignore
+    scheduler: SourceScheduler = await container.source_scheduler()  # type: ignore
+    netatmo_mqtt_source: NetAtmoMQTTSource = container.netatmo_mqtt_source()  # type: ignore
+    dataset_builder: DatasetBuilder = await container.dataset_builder_service()  # type: ignore
+    registry: CollectorRegistry = container.registry()
 
     app = AsgiFastStream(
         broker,
         title="Ionbeam",
-        version="0.1.0", # TODO
+        version="0.1.0",  # TODO
         description="An event-driven platform for stream based processing of IoT observations",
         asyncapi_path="/docs",
         asgi_routes=[
             ("/metrics", make_asgi_app(registry)),
-        ]
+        ],
     )
     # Logging is configured globally via structlog + logging. No per-logger overrides needed.
 
@@ -210,15 +206,15 @@ async def factory():
         scheduler.start()
         await dataset_builder.start()
         # await netatmo_mqtt_source.start()
-    
+
     @app.on_shutdown
     async def shutdown():
         """Stop the source scheduler when the app shuts down"""
         await dataset_builder.stop()
         await scheduler.stop()
-        shutdown = container.shutdown_resources()
-        if(shutdown is not None):
-            await shutdown
         # await netatmo_mqtt_source.stop()
-    
+        shutdown_resources = container.shutdown_resources()
+        if shutdown_resources is not None:
+            await shutdown_resources
+
     return app

@@ -19,6 +19,7 @@ from ionbeam.models.models import (
     MetadataVariable,
     TimeAxis,
 )
+from ionbeam.observability.metrics import IonbeamMetricsProtocol
 from ionbeam.services.ingestion import IngestionConfig, IngestionService
 from ionbeam.storage.timeseries import TimeSeriesDatabase
 
@@ -48,9 +49,9 @@ def mock_timeseries_db():
 
 
 @pytest.fixture
-def ingestion_service(mock_timeseries_db):
+def ingestion_service(mock_timeseries_db, mock_metrics: IonbeamMetricsProtocol):
     config = IngestionConfig(parquet_chunk_size=1000)
-    return IngestionService(config, mock_timeseries_db)
+    return IngestionService(config, mock_timeseries_db, mock_metrics)
 
 
 @pytest.fixture

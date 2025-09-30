@@ -6,6 +6,7 @@ import pathlib
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from time import perf_counter
 from typing import AsyncIterator, Iterable, List, Optional, Tuple
 from uuid import UUID, uuid4
 
@@ -17,6 +18,8 @@ from aiostream import stream
 from bs4 import BeautifulSoup
 from httpx_retries import Retry, RetryTransport
 from pydantic import BaseModel
+
+from ionbeam.observability.metrics import IonbeamMetricsProtocol
 
 from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ..core.handler import BaseHandler
@@ -68,9 +71,11 @@ class SensorDataChunk:
 
 
 retry_transport = RetryTransport(retry=Retry(total=5, backoff_factor=0.5))
+
+
 class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]):
-    def __init__(self, config: SensorCommunityConfig):
-        super().__init__("SensorCommunitySource")
+    def __init__(self, config: SensorCommunityConfig, metrics: IonbeamMetricsProtocol):
+        super().__init__("SensorCommunitySource", metrics)
         self._config = config
         self.metadata: IngestionMetadata = IngestionMetadata(
             dataset=DatasetMetadata(
@@ -95,16 +100,15 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
                     CanonicalVariable(column="P2", standard_name="mass_concentration_of_pm2p5_ambient_aerosol_in_air", cf_unit="ug m-3"),
                 ],
                 metadata_variables=[
-                    MetadataVariable(column="sensor_id", dtype='int32'),
-                    MetadataVariable(column="sensor_type")],
+                    MetadataVariable(column="sensor_id", dtype="int32"),
+                    MetadataVariable(column="sensor_type"),
+                ],
             ),
         )
-
 
     async def load_raw_to_df(self, url: str, client: httpx.AsyncClient):
         # @cached(f'raw_sensor_data_{url}', timeout=timedelta(days=365), use_cache=self._config.use_cache)
         async def _fetch():
-            # self.logger.info("Fetching csv %s", url)
             response = await client.get(url)
             if response.status_code != 200:
                 self.logger.error("Fetching CSV %s failed", url)
@@ -114,13 +118,15 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
         try:
             # Only some datasets have compression(?)
             raw_data = await _fetch()
+            if raw_data is None:
+                return None
             if url.endswith(".csv.gz"):
                 with gzip.GzipFile(fileobj=raw_data, mode="rb") as gz:
                     raw_data = io.BytesIO(gz.read())
 
             df = pd.read_csv(raw_data, delimiter=";")
             df = df.replace("unknown", np.nan).replace("", np.nan).replace("unavailable", np.nan)
-            df = coerce_types(df, self.metadata.ingestion_map) # Ensures types align to ingestion map
+            df = coerce_types(df, self.metadata.ingestion_map)
             return df
         except Exception as e:
             self.logger.exception(e)
@@ -148,13 +154,13 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
             return response.text
 
         result = await _fetch()
-        if(result):
+        if result:
             soup = BeautifulSoup(result, features="lxml")
 
-            sensor_file_rows = soup.find_all("tr")[3:-1]  # skip header, footer
+            sensor_file_rows = soup.find_all("tr")[3:-1]
             for row in sensor_file_rows:
                 sensor_file = row.find("a", href=True)["href"] if row.find("a", href=True) else None
-                last_updated = row.find_all("td")[2].text.strip()  # TODO - make safe
+                last_updated = row.find_all("td")[2].text.strip()
                 if None in [sensor_file, last_updated]:
                     logging.error("Failed to parse %s", row)
                     continue
@@ -162,10 +168,10 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
                 pattern = re.compile(r"(\d{4}-\d{2}-\d{2})_(.*)_sensor_(.*).(csv.gz|csv)")
                 match = pattern.match(sensor_file)
                 if match:
-                    date = match.group(1)
+                    date_val = match.group(1)
                     sensor_type = match.group(2)
                     sensor_id = match.group(3)
-                    yield SensorMetadata(url + sensor_file, date, sensor_type, sensor_id, last_updated)
+                    yield SensorMetadata(url + sensor_file, date_val, sensor_type, sensor_id, last_updated)
 
     def _split_by_day(self, start_time: datetime, end_time: datetime) -> Iterable[date]:
         """
@@ -224,10 +230,15 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
                                 i += 1
 
     async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
+        dataset_name = self.metadata.dataset.name
+        request_start = perf_counter()
+        total_rows = 0
+
         try:
             self._config.data_path.mkdir(parents=True, exist_ok=True)
             path = (
-                self._config.data_path / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
+                self._config.data_path
+                / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
             )
 
             # Create async generator that yields just the dataframes
@@ -238,7 +249,7 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
             
             # Build schema from ingestion_map
             schema_fields: List[Tuple[str, pa.DataType]] = [
-                (self.metadata.ingestion_map.datetime.from_col or ObservationTimestampColumn, pa.timestamp('ns', tz='UTC')),
+                (self.metadata.ingestion_map.datetime.from_col or ObservationTimestampColumn, pa.timestamp("ns", tz="UTC")),
                 (self.metadata.ingestion_map.lat.from_col or LatitudeColumn, pa.float64()),
                 (self.metadata.ingestion_map.lon.from_col or LongitudeColumn, pa.float64()),
             ]
@@ -252,12 +263,19 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
             total_rows = await stream_dataframes_to_parquet(
                 dataframe_stream(),
                 path,
-                schema_fields
+                schema_fields,
             )
 
+            request_duration = perf_counter() - request_start
+            self.metrics.sources.observe_fetch_duration(dataset_name, request_duration)
+            self.metrics.sources.observe_request_rows(dataset_name, int(total_rows))
+
             if total_rows == 0:
+                self.metrics.sources.record_ingestion_request(dataset_name, "empty")
                 self.logger.warning("No data collected")
                 return None
+
+            self.metrics.sources.record_ingestion_request(dataset_name, "success")
 
             self.logger.info(f"Saved {total_rows} rows to {path}")
 
@@ -270,5 +288,9 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
             )
 
         except Exception as e:
+            request_duration = perf_counter() - request_start
+            self.metrics.sources.observe_fetch_duration(dataset_name, request_duration)
+            self.metrics.sources.observe_request_rows(dataset_name, int(total_rows))
+            self.metrics.sources.record_ingestion_request(dataset_name, "error")
             self.logger.exception(e)
             return None

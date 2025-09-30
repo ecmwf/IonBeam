@@ -9,6 +9,7 @@ from shapely.geometry import Point
 
 from ionbeam.core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ionbeam.core.handler import BaseHandler
+from ionbeam.observability.metrics import IonbeamMetricsProtocol
 
 from ...models.models import DataSetAvailableEvent, DatasetMetadata
 from .models import (
@@ -33,8 +34,8 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
     also creates a pygeoapi config in line with the available data, tempo/spatial extents etc..
     """
 
-    def __init__(self, config: PyGeoApiConfig):
-        super().__init__("PyGeoApiProjectionService")
+    def __init__(self, config: PyGeoApiConfig, metrics: IonbeamMetricsProtocol):
+        super().__init__("PyGeoApiProjectionService", metrics)
         self.config = config
 
     def _create_resource_config(self, metadata: DatasetMetadata, event: DataSetAvailableEvent):

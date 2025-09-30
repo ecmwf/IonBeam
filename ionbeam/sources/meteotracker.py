@@ -3,12 +3,15 @@ import pathlib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 from typing import Any, Dict, List, NewType, Optional
 from uuid import uuid4
 
 import httpx
 import pandas as pd
 from pydantic import BaseModel
+
+from ionbeam.observability.metrics import IonbeamMetricsProtocol
 
 from ..core.constants import LatitudeColumn, LongitudeColumn
 from ..core.handler import BaseHandler
@@ -81,8 +84,8 @@ class MT_Session:
 
 
 class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]):
-    def __init__(self, config: MeteoTrackerConfig):
-        super().__init__("MeteoTrackerSource")
+    def __init__(self, config: MeteoTrackerConfig, metrics: IonbeamMetricsProtocol):
+        super().__init__("MeteoTrackerSource", metrics)
         self.config = config
         self._access_token: Optional[str] = None
         self._refresh_token: Optional[str] = None
@@ -99,7 +102,7 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
                 datetime=TimeAxis(from_col="time"),
                 lat=LatitudeAxis(standard_name="latitude", cf_unit="degrees_north"),
                 lon=LongitudeAxis(standard_name="longitude", cf_unit="degrees_east"),
-                canonical_variables = [
+                canonical_variables=[
                     CanonicalVariable(column="a", standard_name="altitude", cf_unit="m"),
                     CanonicalVariable(column="P", standard_name="air_pressure", cf_unit="mbar"),
                     CanonicalVariable(column="T0", standard_name="air_temperature", cf_unit="degC"),
@@ -136,11 +139,11 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
             ),
         )
 
-        # Compile regex patterns for living lab matching
         self.author_regex_to_living_lab = {
-            re.compile(pattern): living_lab for living_lab, patterns in self.config.author_patterns.items() for pattern in patterns
+            re.compile(pattern): living_lab
+            for living_lab, patterns in self.config.author_patterns.items()
+            for pattern in patterns
         }
-
 
     async def _authenticate(self) -> bool:
         """
@@ -172,9 +175,9 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
                 if self._access_token:
                     self.logger.debug("Authentication successful")
                     return True
-                else:
-                    self.logger.error("No access token in authentication response")
-                    return False
+
+                self.logger.error("No access token in authentication response")
+                return False
 
             except httpx.HTTPStatusError as e:
                 self.logger.error(f"Authentication failed: HTTP {e.response.status_code}")
@@ -185,12 +188,6 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
                 return False
 
     async def _refresh_access_token(self) -> bool:
-        """
-        Refresh the access token using the refresh token
-
-        Returns:
-            True if refresh successful, False otherwise
-        """
         if not self._refresh_token:
             self.logger.error("No refresh token available")
             return False
@@ -213,9 +210,9 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
                 if self._access_token:
                     self.logger.debug("Token refresh successful")
                     return True
-                else:
-                    self.logger.error("No access token in refresh response")
-                    return False
+
+                self.logger.error("No access token in refresh response")
+                return False
 
             except httpx.HTTPStatusError as e:
                 self.logger.error(f"Token refresh failed: HTTP {e.response.status_code}")
@@ -233,22 +230,6 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
         json_data: Optional[Dict[str, Any]] = None,
         require_auth: bool = True,
     ) -> Optional[httpx.Response]:
-        """
-        Make HTTP request with retry logic - pure function with no state mutation
-
-        Args:
-            config: Configuration object
-            endpoint: API endpoint (relative to base_url)
-            method: HTTP method
-            params: Query parameters
-            json_data: JSON payload for POST requests
-            require_auth: Whether this request requires authentication
-
-        Returns:
-            httpx.Response or None if failed
-        """
-
-        # Authenticate if required and not already authenticated
         if require_auth and not self._access_token:
             if not await self._authenticate():
                 self.logger.error("Authentication failed, cannot make authenticated request")
@@ -278,7 +259,6 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
                     response.raise_for_status()
                     self.logger.debug(f"Successfully fetched {url} - Status: {response.status_code}")
                     self.logger.debug(f"Response headers: {dict(response.headers)}")
-
                     return response
 
                 except httpx.HTTPStatusError as e:
@@ -293,12 +273,12 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
                             request_headers["Authorization"] = f"Bearer {self._access_token}"
                             client.headers.update(request_headers)
                             continue
-                        else:
-                            self.logger.error("Token refresh failed, re-authenticating")
-                            if await self._authenticate():
-                                request_headers["Authorization"] = f"Bearer {self._access_token}"
-                                client.headers.update(request_headers)
-                                continue
+
+                        self.logger.error("Token refresh failed, re-authenticating")
+                        if await self._authenticate():
+                            request_headers["Authorization"] = f"Bearer {self._access_token}"
+                            client.headers.update(request_headers)
+                            continue
 
                     if attempt == self.config.max_retries:
                         self.logger.error(f"Failed to fetch {url} after {self.config.max_retries + 1} attempts")
@@ -336,11 +316,11 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
         sessions_metadata = []
         consecutive_failures = 0
         max_consecutive_failures = 3
-        
+
         for i in range(self.config.max_queries):
             params["page"] = i
             response = await _fetch(params)
-            
+
             if response is None:
                 consecutive_failures += 1
                 self.logger.warning("Failed to fetch page %s (consecutive failures: %s)", i, consecutive_failures)
@@ -349,12 +329,11 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
                 if consecutive_failures >= max_consecutive_failures:
                     self.logger.error("Multiple consecutive request failures detected. Failing fast.")
                     raise Exception(f"Unable to connect to MeteoTracker after {consecutive_failures} consecutive failures")
-                
+
                 continue
-            
-            # Reset counter on successful response
+
             consecutive_failures = 0
-            
+
             payload = response.json()
             sessions_metadata.append(payload)
             if len(response.json()) < params["items"]:
@@ -381,11 +360,11 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
         payload = response.json()
 
         df = pd.DataFrame.from_records(payload)
-        if(df.empty):
-            self.logger.warning('No data found for session %s', session.id)
+        if df.empty:
+            self.logger.warning("No data found for session %s", session.id)
             return None
 
-        df['time'] = pd.to_datetime(df['time'], utc=True)
+        df["time"] = pd.to_datetime(df["time"], utc=True)
         df["station_id"] = session.id
 
         if "lo" in df:
@@ -395,8 +374,9 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
             )
             del df["lo"]
 
-        # Add living lab determination
-        living_labs = set(living_lab for pattern, living_lab in self.author_regex_to_living_lab.items() if pattern.match(session.author))
+        living_labs = {
+            living_lab for pattern, living_lab in self.author_regex_to_living_lab.items() if pattern.match(session.author)
+        }
         if len(living_labs) == 0:
             living_lab = "unknown"
         elif len(living_labs) == 1:
@@ -407,17 +387,17 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
         df["living_lab"] = living_lab
         df["author"] = session.author
 
-        # self.logger.info("living lab %s", living_lab)
-        # self.logger.info("author %s", session.author)
-
         return df
 
     async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
+        dataset_name = self.metadata.dataset.name
+        request_start = perf_counter()
+        total_rows = 0
+
         try:
             sessions_metadata = await self._fetch_session_metadata(event.start_time, event.end_time)
             self.logger.debug(sessions_metadata)
 
-            # TODO - implement streaming to file?
             all_chunks = []
             for session_metadata in sessions_metadata:
                 data = await self._fetch_session_data(session_metadata)
@@ -425,16 +405,26 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
                     all_chunks.append(data)
 
             if not all_chunks:
+                request_duration = perf_counter() - request_start
+                self.metrics.sources.observe_fetch_duration(dataset_name, request_duration)
+                self.metrics.sources.observe_request_rows(dataset_name, 0)
+                self.metrics.sources.record_ingestion_request(dataset_name, "empty")
                 self.logger.warning("No data collected")
                 return None
 
             complete_df = pd.concat(all_chunks, ignore_index=True)
+            total_rows = int(len(complete_df))
 
-            # Save to parquet
             path = (
-                self.config.data_path / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
+                self.config.data_path
+                / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
             )
             complete_df.to_parquet(path, engine="pyarrow")
+
+            request_duration = perf_counter() - request_start
+            self.metrics.sources.observe_fetch_duration(dataset_name, request_duration)
+            self.metrics.sources.observe_request_rows(dataset_name, total_rows)
+            self.metrics.sources.record_ingestion_request(dataset_name, "success")
 
             self.logger.info(f"Saved {len(complete_df)} rows to {path}")
 
@@ -447,5 +437,9 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
             )
 
         except Exception as e:
+            request_duration = perf_counter() - request_start
+            self.metrics.sources.observe_fetch_duration(dataset_name, request_duration)
+            self.metrics.sources.observe_request_rows(dataset_name, int(total_rows))
+            self.metrics.sources.record_ingestion_request(dataset_name, "error")
             self.logger.exception(e)
             return None

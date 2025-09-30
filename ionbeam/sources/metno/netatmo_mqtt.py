@@ -14,6 +14,7 @@ import structlog
 from pydantic import BaseModel
 
 from ionbeam.models.models import IngestDataCommand
+from ionbeam.observability.metrics import IonbeamMetricsProtocol
 from ionbeam.utilities.parquet_tools import stream_dataframes_to_parquet
 
 from .netatmo import netatmo_metadata
@@ -37,7 +38,7 @@ class NetAtmoMQTTConfig(BaseModel):
 
 
 class NetAtmoMQTTSource:
-    def __init__(self, config: NetAtmoMQTTConfig):
+    def __init__(self, config: NetAtmoMQTTConfig, metrics: IonbeamMetricsProtocol):
         self.config = config
         self._buffer: List[dict] = []
         self._lock = asyncio.Lock()
@@ -46,26 +47,25 @@ class NetAtmoMQTTSource:
         self._agg_task: asyncio.Task | None = None
         self.logger = structlog.get_logger(__name__)
         self.metadata = netatmo_metadata
+        self.metrics = metrics
+        self._source_name = self.metadata.dataset.name
         self._last_flush = time.monotonic()
-        # Use configured client identifier; this deployment runs a single instance.
+
         self._identifier = self.config.client_id
 
     async def start(self):
-        # Prevent duplicate starts: if tasks are running, no-op
         if self._mqtt_task and not self._mqtt_task.done():
-            self.logger.warning("NetAtmoMQTTSource.start() called while already running; ignoring.")
+            self.logger.warning("MQTT task called while already running; ignoring.")
             return
         if self._agg_task and not self._agg_task.done():
-            self.logger.warning("NetAtmoMQTTSource.start() called while already running; ignoring.")
+            self.logger.warning("sink task called while already running; ignoring.")
             return
 
-        # If previously stopped, create a fresh stop event
         if self._stop.is_set():
             self._stop = asyncio.Event()
 
-        # Spawn background tasks
-        self._mqtt_task = asyncio.create_task(self._listen(), name="NetAtmoMQTTSource._listen")
-        self._agg_task = asyncio.create_task(self._aggregate_and_publish(), name="NetAtmoMQTTSource._aggregate_and_publish")
+        self._mqtt_task = asyncio.create_task(self._listen())
+        self._agg_task = asyncio.create_task(self._aggregate_and_publish())
 
     async def stop(self):
         self._stop.set()
@@ -109,7 +109,6 @@ class NetAtmoMQTTSource:
                     async for msg in client.messages:
                         if self._stop.is_set():
                             break
-                        # self.logger.info("Handling %s", msg)
                         await self._handle_message(msg)
             except Exception as e:
                 self.logger.warning("MQTT connection error", error=str(e), retry_in=5)
@@ -142,6 +141,7 @@ class NetAtmoMQTTSource:
             connection = await aio_pika.connect_robust(self.config.url)
             async with connection:
                 channel = await connection.channel()
+                source = self._source_name
 
                 while not self._stop.is_set():
                     size_threshold = self.config.flush_max_records
@@ -150,7 +150,6 @@ class NetAtmoMQTTSource:
                     flush_due_to_time = (len(self._buffer) > 0) and (elapsed >= self.config.flush_interval_seconds)
 
                     if not flush_due_to_size and not flush_due_to_time:
-                        # Sleep a bit or until next time-based flush is due
                         sleep_for = min(5, max(0, self.config.flush_interval_seconds - elapsed))
                         await asyncio.sleep(sleep_for)
                         continue
@@ -163,7 +162,6 @@ class NetAtmoMQTTSource:
                         await asyncio.sleep(1)
                         continue
 
-                    # Determine time bounds from drained buffer without materializing full DataFrame
                     times = pd.to_datetime(
                         [d.get("properties", {}).get("datetime") for d in drained],
                         utc=True,
@@ -175,7 +173,6 @@ class NetAtmoMQTTSource:
                     start_time = times.min().to_pydatetime()
                     end_time = times.max().to_pydatetime()
 
-                    # Save to file using streaming writer
                     self.config.data_path.mkdir(parents=True, exist_ok=True)
                     start_s = self._ts_for_path(start_time)
                     end_s = self._ts_for_path(end_time)
@@ -187,10 +184,26 @@ class NetAtmoMQTTSource:
                             yield obj
 
                     try:
-                        df_stream = netatmo_dataframe_stream(drained_stream(), batch_size=self.config.flush_max_records, logger=self.logger)
+                        df_stream = netatmo_dataframe_stream(
+                            drained_stream(),
+                            batch_size=self.config.flush_max_records,
+                            logger=self.logger,
+                        )
                         rows = await stream_dataframes_to_parquet(df_stream, path, schema_fields=None)
-                        self.logger.info("Wrote parquet file", rows=rows, path=str(path), start=start_time.isoformat(), end=end_time.isoformat())
+                        now_utc = datetime.now(timezone.utc)
+                        lag_seconds = max(0.0, (now_utc - start_time).total_seconds())
+                        self.metrics.sources.observe_data_lag(source, lag_seconds)
+                        self.metrics.sources.observe_request_rows(source, int(rows))
+                        self.metrics.sources.record_ingestion_request(source, "success")
+                        self.logger.info(
+                            "Wrote parquet file",
+                            rows=rows,
+                            path=str(path),
+                            start=start_time.isoformat(),
+                            end=end_time.isoformat(),
+                        )
                     except Exception as e:
+                        self.metrics.sources.record_ingestion_request(source, "error")
                         self.logger.error("Failed to write parquet file", error=str(e), path=str(path))
                         continue
 
@@ -202,12 +215,14 @@ class NetAtmoMQTTSource:
                         end_time=end_time,
                     )
 
+                    published = False
                     for attempt in range(3):
                         try:
                             await channel.default_exchange.publish(
                                 aio_pika.Message(body=ingestion_command.model_dump_json().encode()),
                                 routing_key=self.config.routing_key,
                             )
+                            published = True
                             break
                         except Exception as e:
                             if attempt < 2:
@@ -215,8 +230,11 @@ class NetAtmoMQTTSource:
                                 await asyncio.sleep(1)
                             else:
                                 self.logger.error("AMQP publish error", error=str(e), path=str(path))
+                    if not published:
+                        self.logger.error("Failed to publish ingestion command after retries", path=str(path))
                     self._last_flush = time.monotonic()
         except asyncio.CancelledError:
             raise
         except Exception as e:
+            self.metrics.sources.record_ingestion_request(self._source_name, "error")
             self.logger.error("Aggregate/publish task error", error=str(e))

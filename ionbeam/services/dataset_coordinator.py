@@ -25,6 +25,8 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from isodate import duration_isoformat
 from pydantic import BaseModel
 
+from ionbeam.observability.metrics import IonbeamMetricsProtocol
+
 from ..core.constants import MaximumCachePeriod
 from ..core.handler import BaseHandler
 from ..models.models import DataAvailableEvent
@@ -42,7 +44,7 @@ class EventAggregateAnalysis:
 
 class DatasetCoordinatorConfig(BaseModel):
     # Windows are only considered for the span covered by the triggering event, not whole history
-    only_process_spanned_windows: bool = False # this allows TTC to work
+    only_process_spanned_windows: bool = True # this allows TTC to work
     # Key for the global build queue (modeled as a JSON mapping)
     queue_key: str = "dataset_queue"
 
@@ -51,9 +53,13 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
     """
     Compute window readiness and enqueue build work with priority
     """
-
-    def __init__(self, config: DatasetCoordinatorConfig, event_store: EventStore):
-        super().__init__("DatasetCoordinatorService")
+    def __init__(
+        self,
+        config: DatasetCoordinatorConfig,
+        event_store: EventStore,
+        metrics: IonbeamMetricsProtocol,
+    ):
+        super().__init__("DatasetCoordinatorService", metrics)
         self.config = config
         self.event_store = event_store
 
@@ -127,6 +133,7 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
         stc_cutoff: datetime,
         gaps: List[Tuple[datetime, datetime]],
         events: List[IngestionRecord],
+        dataset_name: str,
     ) -> bool:
         """
         True if window is before STC cutoff, has no gaps, and has full coverage by events.
@@ -138,6 +145,7 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
                 window_end=window_end.isoformat(),
                 stc_cutoff=stc_cutoff.isoformat(),
             )
+            self.metrics.coordinator.window_skipped(dataset_name, "stc_cutoff")
             return False
 
         # Any gap overlapping window -> skip
@@ -147,6 +155,7 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
                 window_start=window_start.isoformat(),
                 window_end=window_end.isoformat(),
             )
+            self.metrics.coordinator.window_skipped(dataset_name, "gap")
             return False
 
         # Events overlapping window
@@ -157,6 +166,7 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
                 window_start=window_start.isoformat(),
                 window_end=window_end.isoformat(),
             )
+            self.metrics.coordinator.window_skipped(dataset_name, "no_events")
             return False
 
         earliest_start = min(e.start_time for e in events_in_window)
@@ -169,6 +179,7 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
                 data_start=earliest_start.isoformat(),
                 data_end=latest_end.isoformat(),
             )
+            self.metrics.coordinator.window_skipped(dataset_name, "incomplete_coverage")
             return False
 
         return True
@@ -231,6 +242,9 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
             queue[dataset_key] = score
             await self.event_store.store_event(self.config.queue_key, json.dumps(queue))
 
+        dataset = dataset_key.split(":", 1)[0]
+        self.metrics.coordinator.set_queue_size(dataset, len(queue))
+
     async def _handle(self, event: DataAvailableEvent) -> None:
         metadata = event.metadata
         dataset_name = metadata.dataset.name
@@ -285,7 +299,14 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
             await self._put_window_event_ids(dataset_name, window_id, list(updated_ids))
 
             # Decide readiness based on STC, gaps and coverage
-            if not self._should_process_window(window_start, window_end, stc_cutoff, analysis.gaps, analysis.events):
+            if not self._should_process_window(
+                window_start,
+                window_end,
+                stc_cutoff,
+                analysis.gaps,
+                analysis.events,
+                dataset_name,
+            ):
                 window_start = window_end
                 continue
 
@@ -299,6 +320,7 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
                 dataset_key = f"{dataset_name}:{window_id}"
                 score = -int(window_end.timestamp())
                 await self._enqueue_window(dataset_key, score)
+                self.metrics.coordinator.window_enqueued(dataset_name)
                 self.logger.info(
                     "Enqueued window for build",
                     dataset=dataset_name,

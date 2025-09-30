@@ -2,6 +2,7 @@ import asyncio
 import logging
 import pathlib
 from datetime import datetime, time, timedelta, timezone
+from time import perf_counter
 from typing import AsyncIterator, List, Optional, Tuple
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from httpx_retries import Retry, RetryTransport
 from pydantic import BaseModel
 from shapely import Polygon
 
+from ionbeam.observability.metrics import IonbeamMetrics, IonbeamMetricsProtocol
 from ionbeam.utilities.dataframe_tools import coerce_types
 
 from ...core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
@@ -46,81 +48,89 @@ class NetAtmoConfig(BaseModel):
 retry_transport = RetryTransport(retry=Retry(total=5, backoff_factor=0.5))
 
 netatmo_metadata: IngestionMetadata = IngestionMetadata(
-            dataset=DatasetMetadata(
-                name="netatmo",
-                aggregation_span=timedelta(hours=1),
-                subject_to_change_window=timedelta(hours=0),
-                description="IoT NetAtmo data collected from Met No",
-                source_links=[],
-                keywords=["netatmo", "iot", "data"],
+    dataset=DatasetMetadata(
+        name="netatmo",
+        aggregation_span=timedelta(hours=1),
+        subject_to_change_window=timedelta(hours=0),
+        description="IoT NetAtmo data collected from Met No",
+        source_links=[],
+        keywords=["netatmo", "iot", "data"],
+    ),
+    ingestion_map=DataIngestionMap(
+        datetime=TimeAxis(),
+        lat=LatitudeAxis(standard_name="latitude", cf_unit="degrees_north"),
+        lon=LongitudeAxis(standard_name="longitude", cf_unit="degrees_east"),
+        canonical_variables=[
+            CanonicalVariable(
+                column="air_temperature:2.0:point:PT0S",
+                standard_name="air_temperature",
+                cf_unit="degC",
+                level=2.0,
+                method="point",
+                period="PT0S",
             ),
-            ingestion_map=DataIngestionMap(
-                datetime=TimeAxis(),
-                lat=LatitudeAxis(standard_name="latitude", cf_unit="degrees_north"),
-                lon=LongitudeAxis(standard_name="longitude", cf_unit="degrees_east"),
-                canonical_variables=[
-                    CanonicalVariable(
-                        column="air_temperature:2.0:point:PT0S",
-                        standard_name="air_temperature",
-                        cf_unit="degC",
-                        level=2.0,
-                        method="point",
-                        period="PT0S",
-                    ),
-                    CanonicalVariable(
-                        column="relative_humidity:2.0:point:PT0S",
-                        standard_name="relative_humidity",
-                        cf_unit="1",
-                        level=2.0,
-                        method="point",
-                        period="PT0S",
-                    ),
-                    CanonicalVariable(
-                        column="surface_air_pressure:2.0:point:PT0S",
-                        standard_name="surface_air_pressure",
-                        cf_unit="hPa",
-                        level=2.0,
-                        method="point",
-                        period="PT0S",
-                    ),
-                    CanonicalVariable(
-                        column="wind_from_direction:2.0:mean:PT5M",
-                        standard_name="wind_from_direction",
-                        cf_unit="deg",
-                        level=2.0,
-                        method="mean",
-                        period="PT5M",
-                    ),
-                    CanonicalVariable(
-                        column="wind_speed:2.0:mean:PT5M",
-                        standard_name="wind_speed",
-                        cf_unit="m s-1",
-                        level=2.0,
-                        method="mean",
-                        period="PT5M",
-                    ),
-                    CanonicalVariable(
-                        column="wind_speed_of_gust:2.0:mean:PT5M",
-                        standard_name="wind_speed_of_gust",
-                        cf_unit="m/s",
-                        level=2.0,
-                        method="mean",
-                        period="PT5M",
-                    )
-                ],
-                metadata_variables=[
-                    MetadataVariable(column="station_id"),
-                ],
+            CanonicalVariable(
+                column="relative_humidity:2.0:point:PT0S",
+                standard_name="relative_humidity",
+                cf_unit="1",
+                level=2.0,
+                method="point",
+                period="PT0S",
             ),
-            version=1,
-        )
+            CanonicalVariable(
+                column="surface_air_pressure:2.0:point:PT0S",
+                standard_name="surface_air_pressure",
+                cf_unit="hPa",
+                level=2.0,
+                method="point",
+                period="PT0S",
+            ),
+            CanonicalVariable(
+                column="wind_from_direction:2.0:mean:PT5M",
+                standard_name="wind_from_direction",
+                cf_unit="deg",
+                level=2.0,
+                method="mean",
+                period="PT5M",
+            ),
+            CanonicalVariable(
+                column="wind_speed:2.0:mean:PT5M",
+                standard_name="wind_speed",
+                cf_unit="m s-1",
+                level=2.0,
+                method="mean",
+                period="PT5M",
+            ),
+            CanonicalVariable(
+                column="wind_speed_of_gust:2.0:mean:PT5M",
+                standard_name="wind_speed_of_gust",
+                cf_unit="m/s",
+                level=2.0,
+                method="mean",
+                period="PT5M",
+            ),
+            CanonicalVariable(
+                column="precipitation_amount:2.0:sum:PT15H",
+                standard_name="precipitation_amount",
+                cf_unit="kg/m2",
+                level=2.0,
+                method="sum",
+                period="PT15H",
+            ),
+        ],
+        metadata_variables=[
+            MetadataVariable(column="station_id"),
+        ],
+    ),
+    version=1,
+)
+
 
 class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]):
-    def __init__(self, config: NetAtmoConfig):
-        super().__init__("NetAtmoSource")
+    def __init__(self, config: NetAtmoConfig, metrics: IonbeamMetricsProtocol):
+        super().__init__("NetAtmoSource", metrics)
         self._config = config
         self.metadata: IngestionMetadata = netatmo_metadata
-
 
     def split_bbox(self, bbox_dict, scale_factor=9):
         """
@@ -129,12 +139,12 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
         scale_factor: must be a perfect square (e.g., 4 -> 2x2)
         Returns: list of dicts with same keys
         """
-        minx = bbox_dict['min_lon']
-        miny = bbox_dict['min_lat']
-        maxx = bbox_dict['max_lon']
-        maxy = bbox_dict['max_lat']
+        minx = bbox_dict["min_lon"]
+        miny = bbox_dict["min_lat"]
+        maxx = bbox_dict["max_lon"]
+        maxy = bbox_dict["max_lat"]
 
-        n = int(scale_factor ** 0.5)
+        n = int(scale_factor**0.5)
         if n * n != scale_factor:
             raise ValueError("scale_factor must be a perfect square")
 
@@ -144,12 +154,14 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
         tiles = []
         for j in range(n):
             for i in range(n):
-                tiles.append({
-                    'min_lon': minx + i * dx,
-                    'min_lat': miny + j * dy,
-                    'max_lon': minx + (i + 1) * dx,
-                    'max_lat': miny + (j + 1) * dy
-                })
+                tiles.append(
+                    {
+                        "min_lon": minx + i * dx,
+                        "min_lat": miny + j * dy,
+                        "max_lon": minx + (i + 1) * dx,
+                        "max_lat": miny + (j + 1) * dy,
+                    }
+                )
         return tiles
 
     def _transform_station_data_to_df(self, station_coverage: dict) -> pd.DataFrame:
@@ -163,9 +175,8 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
         for coverage in coverages:
             domain = coverage.get("domain", {})
             ranges = coverage.get("ranges", {})
-            # parameters = coverage.get("parameters", {})
-            
-            station_id = coverage.get('metocean:wigosId', 'unknown')
+
+            station_id = coverage.get("metocean:wigosId", "unknown")
 
             # Extract axes
             axes = domain.get("axes", {})
@@ -178,14 +189,18 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
             for param_name, param_data in ranges.items():
                 values = param_data.get("values", [])
                 param_values[param_name] = values
-
             # Create rows by combining timestamp, x, y, and all parameter values
             rows = []
             for t_index, timestamp in enumerate(timestamps):
                 for y_index, y in enumerate(ys):
                     for x_index, x in enumerate(xs):
                         flat_index = (t_index * len(ys) * len(xs)) + (y_index * len(xs)) + x_index
-                        row = {ObservationTimestampColumn: timestamp, LongitudeColumn: x, LatitudeColumn: y, 'station_id': station_id}
+                        row = {
+                            ObservationTimestampColumn: timestamp,
+                            LongitudeColumn: x,
+                            LatitudeColumn: y,
+                            "station_id": station_id,
+                        }
 
                         for param_name, values in param_values.items():
                             row[param_name] = values[flat_index]
@@ -193,14 +208,13 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
             df = pd.DataFrame(rows)
             df_list.append(df)
         df = pd.concat(df_list, ignore_index=True)
-        # self.logger.info(f"After first DF {df.head()}")
         return df
 
     async def crawl_netatmo_by_area(self, start_time: datetime, end_time: datetime, cache_only) -> AsyncIterator[pd.DataFrame]:
         self.logger.debug("Crawling Netatmo by area", cache_only=cache_only)
         assert (end_time - start_time).total_seconds() <= 86400, "NetAtmo only supports 24h windows"
         datetime_range = f"{start_time.strftime('%Y-%m-%dT%H:%MZ')}/{end_time.strftime('%Y-%m-%dT%H:%MZ')}"
-        
+
         url = f"{self._config.base_url}/collections/observations/area"
         # TODO - currently /area endpoint does not expose any filtering for naming authority - so we are not guarateeed the data caputured here is actually NetAtmo data
 
@@ -226,35 +240,29 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
             for country, bbox in countries.items():
                 bboxes = self.split_bbox(bbox)
                 for i, bbox in enumerate(bboxes):
-                    # convert to WKT polygon
                     coords = [
                         (bbox["min_lon"], bbox["min_lat"]),
                         (bbox["max_lon"], bbox["min_lat"]),
                         (bbox["max_lon"], bbox["max_lat"]),
                         (bbox["min_lon"], bbox["max_lat"]),
-                        (bbox["min_lon"], bbox["min_lat"]) 
+                        (bbox["min_lon"], bbox["min_lat"]),
                     ]
-                    # out = Polygon(coords).wkt
-                    # self.logger.info(out)
                     params = {
                         "coords": Polygon(coords).wkt,
                         "datetime": datetime_range,
                         "f": "CoverageJSON",
                     }
-                    headers = {
-                        "Accept": "application/prs.coverage+json",
-                        "Accept-Encoding": "gzip, deflate, br, zstd"
-                    }
-                    
+                    headers = {"Accept": "application/prs.coverage+json", "Accept-Encoding": "gzip, deflate, br, zstd"}
+
                     cache_key = f"area_{country}_{i}_{start_time.timestamp()}_{end_time.timestamp()}"
-                    logger = self.logger
+
                     # @cached(cache_key, cache_only)
                     async def fetch_station_data_by_area():
                         response = await client.get(url, params=params, headers=headers)
                         if response.status_code != 200:
                             return {}
                         return response.json()
-                    
+
                     station_coverage = await fetch_station_data_by_area()
                     result = self._transform_station_data_to_df(station_coverage)
                     if not result.empty:
@@ -264,17 +272,20 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
                         self.logger.warning("No data found", cache_key=cache_key)
 
     async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
+        dataset_name = self.metadata.dataset.name
+        request_start = perf_counter()
+        total_rows = 0
+
         self._config.data_path.mkdir(parents=True, exist_ok=True)
         path = self._config.data_path / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
-        
-        async def dataframe_stream():
-                async for chunk in self.crawl_netatmo_by_area(event.start_time, event.end_time, event.use_cache):
-                    if chunk is not None:
-                        yield chunk
 
+        async def dataframe_stream():
+            async for chunk in self.crawl_netatmo_by_area(event.start_time, event.end_time, event.use_cache):
+                if chunk is not None:
+                    yield chunk
         # Build schema from ingestion_map
         schema_fields: List[Tuple[str, pa.DataType]] = [
-            (self.metadata.ingestion_map.datetime.from_col or ObservationTimestampColumn, pa.timestamp('ns', tz='UTC')),
+            (self.metadata.ingestion_map.datetime.from_col or ObservationTimestampColumn, pa.timestamp("ns", tz="UTC")),
             (self.metadata.ingestion_map.lat.from_col or LatitudeColumn, pa.float64()),
             (self.metadata.ingestion_map.lon.from_col or LongitudeColumn, pa.float64()),
         ]
@@ -283,37 +294,48 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
             pa_type = pa.string() if var.dtype == "string" or var.dtype == "object" else pa.from_numpy_dtype(np.dtype(var.dtype))
             schema_fields.append((var.column, pa_type))
 
-        # Stream data directly to parquet file using helper
-        total_rows = await stream_dataframes_to_parquet(
-            dataframe_stream(),
-            path,
-            schema_fields
-        )
+        try:
+            total_rows = await stream_dataframes_to_parquet(
+                dataframe_stream(),
+                path,
+                schema_fields,
+            )
 
-        if total_rows == 0:
-            self.logger.warning("No data collected")
+            request_duration = perf_counter() - request_start
+            self.metrics.sources.observe_fetch_duration(dataset_name, request_duration)
+            self.metrics.sources.observe_request_rows(dataset_name, int(total_rows))
+
+            if total_rows == 0:
+                self.metrics.sources.record_ingestion_request(dataset_name, "empty")
+                self.logger.warning("No data collected")
+                return None
+
+            self.metrics.sources.record_ingestion_request(dataset_name, "success")
+            self.logger.info("Wrote parquet file", rows=total_rows, path=str(path))
+
+            return IngestDataCommand(
+                id=uuid4(),
+                metadata=self.metadata,
+                payload_location=path,
+                start_time=event.start_time,
+                end_time=event.end_time,
+            )
+
+        except Exception as e:
+            request_duration = perf_counter() - request_start
+            self.metrics.sources.observe_fetch_duration(dataset_name, request_duration)
+            self.metrics.sources.observe_request_rows(dataset_name, int(total_rows))
+            self.metrics.sources.record_ingestion_request(dataset_name, "error")
+            self.logger.exception(e)
             return None
-
-        self.logger.info("Wrote parquet file", rows=total_rows, path=str(path))
-        
-        # TODO - we need to gzip our cache directory and store it somewhere else
-
-        return IngestDataCommand(
-            id=uuid4(),
-            metadata=self.metadata,
-            payload_location=path,
-            start_time=event.start_time,
-            end_time=event.end_time,
-        )
 
 
 async def main():
-    config = NetAtmoConfig(
-        base_url='',
-        data_path=pathlib.Path("./data-raw"),
-        username="",
-        password="")
-    source = NetAtmoSource(config)
+    from prometheus_client import CollectorRegistry
+    
+    config = NetAtmoConfig(base_url="", data_path=pathlib.Path("./data-raw"), username="", password="")
+    metrics = IonbeamMetrics(CollectorRegistry())
+    source = NetAtmoSource(config, metrics)
 
     now = datetime.now(timezone.utc)
     start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)

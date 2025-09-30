@@ -28,6 +28,7 @@ Locks (best-effort, cooperative):
 import asyncio
 import json
 import pathlib
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
@@ -41,6 +42,7 @@ from isodate import duration_isoformat
 from pydantic import BaseModel
 
 from ionbeam.models.models import DataSetAvailableEvent, IngestionMetadata
+from ionbeam.observability.metrics import IonbeamMetricsProtocol
 from ionbeam.utilities.dataframe_tools import coerce_types
 from ionbeam.utilities.parquet_tools import stream_dataframes_to_parquet
 
@@ -69,6 +71,7 @@ class DatasetBuilder:
         config: DatasetBuilderConfig,
         event_store: EventStore,
         timeseries_db: TimeSeriesDatabase,
+        metrics: IonbeamMetricsProtocol,
         broker: Optional[RabbitBroker] = None,
     ) -> None:
         self.config = config
@@ -79,6 +82,7 @@ class DatasetBuilder:
         self._task: Optional[asyncio.Task] = None
         self._inflight: set[asyncio.Task] = set()
         self.logger = structlog.get_logger(__name__)
+        self.metrics = metrics
 
     async def _process_window_data(
         self,
@@ -89,26 +93,30 @@ class DatasetBuilder:
         metadata: IngestionMetadata,
     ) -> Optional[DataSetAvailableEvent]:
         """Fetch data from time series DB using streaming, and create dataset event."""
-        
+
         # Generate dataset filename
         self.config.data_path.mkdir(parents=True, exist_ok=True)
-        dataset_filename = f"{dataset_name}_{window_start.strftime('%Y%m%dT%H%M%S')}_{duration_isoformat(aggregation)}.parquet"
+        dataset_filename = (
+            f"{dataset_name}_{window_start.strftime('%Y%m%dT%H%M%S')}_{duration_isoformat(aggregation)}.parquet"
+        )
         dataset_path = self.config.data_path / dataset_filename
         self.logger.info("Creating dataset file", path=str(dataset_path))
-        
+
         # Build schema from ingestion_map
         schema_fields: List[Tuple[str, pa.DataType]] = [
-            (ObservationTimestampColumn, pa.timestamp('ns', tz='UTC')),
+            (ObservationTimestampColumn, pa.timestamp("ns", tz="UTC")),
             (LatitudeColumn, pa.float64()),
             (LongitudeColumn, pa.float64()),
         ]
         for var in metadata.ingestion_map.canonical_variables + metadata.ingestion_map.metadata_variables:
-            pa_type = pa.string() if var.dtype == "string" or var.dtype == "object" else pa.from_numpy_dtype(np.dtype(var.dtype))
+            pa_type = (
+                pa.string() if var.dtype == "string" or var.dtype == "object" else pa.from_numpy_dtype(np.dtype(var.dtype))
+            )
             schema_fields.append((var.to_canonical_name(), pa_type))
 
         async def processed_dataframe_stream():
             """Stream and process data from time series database."""
-            
+
             def _to_df(df_long: pd.DataFrame) -> pd.DataFrame:
                 if df_long is None or df_long.empty:
                     return pd.DataFrame()
@@ -130,7 +138,7 @@ class DatasetBuilder:
                         index=index_cols,
                         columns="_field",
                         values="_value",
-                        aggfunc="last"  # de-dup within the same ts/tags/field if needed
+                        aggfunc="last",  # de-dup within the same ts/tags/field if needed
                     )
                     .reset_index()
                 )
@@ -144,7 +152,7 @@ class DatasetBuilder:
                 measurement=dataset_name,
                 start_time=window_start,
                 end_time=window_end,
-                slice_duration=timedelta(minutes=15)
+                slice_duration=timedelta(minutes=15),
             ):
                 df_wide = _to_df(df_long)
                 if df_wide is not None and not df_wide.empty:
@@ -154,8 +162,9 @@ class DatasetBuilder:
         total_rows = await stream_dataframes_to_parquet(
             processed_dataframe_stream(),
             dataset_path,
-            schema_fields
+            schema_fields,
         )
+        self.metrics.builders.observe_rows_exported(dataset_name, int(total_rows))
 
         if total_rows == 0:
             self.logger.info(f"No data found in time series DB for window: {window_start} to {window_end}")
@@ -174,18 +183,22 @@ class DatasetBuilder:
 
     async def _publish_dataset_event(self, event: DataSetAvailableEvent) -> None:
         """Publish DataSetAvailableEvent to the dataset fanout exchange if broker configured."""
+        dataset_name = str(event.metadata.name)
         if not self.broker:
+            self.metrics.builders.publish(dataset_name, "skipped")
             self.logger.warning("RabbitBroker not configured; dataset event not published")
             return
         try:
             await self.broker.publish(event, exchange="ionbeam.dataset.available")
+            self.metrics.builders.publish(dataset_name, "success")
             self.logger.info(
                 "Published dataset available event",
-                dataset=str(event.metadata.name),
+                dataset=dataset_name,
                 start_time=event.start_time.isoformat(),
                 end_time=event.end_time.isoformat(),
             )
         except Exception:
+            self.metrics.builders.publish(dataset_name, "failure")
             self.logger.exception("Failed to publish dataset available event")
 
     # Lifecycle ---------------------------------------------------------------
@@ -247,43 +260,26 @@ class DatasetBuilder:
         await self._set_queue(queue)
         return dataset_key, score
 
-    async def _requeue(self, dataset_key: str, score: int) -> None:
+    async def _requeue(self, dataset_key: str, score: int, reason: str) -> None:
         queue = await self._get_queue()
         queue[dataset_key] = score
         await self._set_queue(queue)
+        ref = WindowRef.from_dataset_key(dataset_key)
+        if ref:
+            self.metrics.builders.requeued(ref.dataset, reason)
+
+    def _track_task(self, task: asyncio.Task) -> None:
+        self._inflight.add(task)
+
+        def _on_done(_):
+            self._inflight.discard(task)
+
+        task.add_done_callback(_on_done)
 
     # Parsing and state helpers ----------------------------------------------
     def _get_window_id(self, window_start: datetime, aggregation: timedelta) -> str:
         """Generate consistent window identifier."""
         return f"{window_start.isoformat()}_{duration_isoformat(aggregation)}"
-    async def _record_window_events(
-            self, 
-            dataset_name: str, 
-            window_start: datetime, 
-            aggregation: timedelta,
-            events: List[IngestionRecord]
-        ):
-            """Record which events were used to process this window."""
-            window_id = self._get_window_id(window_start, aggregation)
-            window_end = window_start + aggregation
-            
-            # Get events that overlap with this window
-            window_events = [
-                event for event in events 
-                if event.start_time < window_end and event.end_time > window_start
-            ]
-            event_ids = [str(event.id) for event in window_events]
-            
-            # Store the event IDs used for this window
-            events_key = f"window_events:{dataset_name}:{window_id}"
-            await self.event_store.store_event(
-                events_key,
-                json.dumps(event_ids),
-                ttl=int(MaximumCachePeriod.total_seconds())
-            )
-            
-            self.logger.info("Recorded window events", window_id=window_id, event_ids=event_ids)
-
 
     async def _acquire_lock(self, dataset: str, window_id: str) -> bool:
         """
@@ -365,7 +361,7 @@ class DatasetBuilder:
 
     # Build one window ---------------------------------------------------------
 
-    async def _build_dataset(self, dataset_key: str, score: int) -> None:
+    async def build_dataset(self, dataset_key: str, score: int) -> None:
         parsed = WindowRef.from_dataset_key(dataset_key)
         if not parsed:
             return
@@ -376,20 +372,29 @@ class DatasetBuilder:
             self.logger.info("Window already locked, skipping", dataset_key=dataset_key)
             return
 
+        self.metrics.builders.build_started(parsed.dataset)
+        build_started_at = time.perf_counter()
+
         try:
             # Compare desired vs observed
             desired_event_ids = await self._get_window_event_ids_aggregate(parsed.dataset, parsed.window_id)
             desired_hash = self._hash_ids(desired_event_ids)
             observed_hash = await self._get_latest_build_state(parsed.dataset, parsed.window_id)
             if observed_hash == desired_hash:
+                duration = time.perf_counter() - build_started_at
+                self.metrics.builders.build_succeeded(parsed.dataset)
+                self.metrics.builders.observe_build_duration(parsed.dataset, duration)
                 self.logger.info("Observed state up-to-date; skipping build", dataset_key=dataset_key)
                 return
 
-            # Load metadata and events
-            metadata, all_records = await self._select_latest_metadata(parsed.dataset)
+            # Load metadata
+            metadata, _ = await self._select_latest_metadata(parsed.dataset)
             if metadata is None:
+                duration = time.perf_counter() - build_started_at
+                self.metrics.builders.build_failed(parsed.dataset)
+                self.metrics.builders.observe_build_duration(parsed.dataset, duration)
                 self.logger.warning("No metadata available; requeueing window", dataset_key=dataset_key)
-                await self._requeue(dataset_key, score)
+                await self._requeue(dataset_key, score, "missing_metadata")
                 return
 
             # Compute window end
@@ -405,33 +410,21 @@ class DatasetBuilder:
             )
 
             if not dataset_event:
-                # No data available; mark observed state to avoid repeated empty rebuilds.
-                self.logger.info("No data written for window; but marked observed state as satisfied", dataset_key=dataset_key)
-
-            # Record contributing events for compatibility with legacy keys
-            try:
-                await self._record_window_events( 
-                    parsed.dataset,
-                    parsed.window_start,
-                    parsed.aggregation,
-                    all_records,
-                )
-            except Exception:
-                # Non-fatal: proceed even if compatibility recording fails
-                self.logger.exception("Failed to record legacy window events", dataset_key=dataset_key)
+                self.metrics.builders.publish(parsed.dataset, "skipped")
+                self.logger.debug("No dataset event produced", dataset_key=dataset_key)
+            else:
+                # Publish dataset available event for downstream consumers
+                try:
+                    await self._publish_dataset_event(dataset_event)
+                except Exception:
+                    self.logger.exception("Error while publishing dataset available event", dataset_key=dataset_key)
 
             # Write observed state so coordinator sees window as satisfied
             await self._set_observed_hash(parsed.dataset, parsed.window_id, desired_hash)
 
-            # Publish dataset available event for downstream consumers
-            try:
-                if dataset_event:
-                    await self._publish_dataset_event(dataset_event)
-                else:
-                    self.logger.debug("No dataset_event to publish")
-            except Exception:
-                self.logger.exception("Error while publishing dataset available event", dataset_key=dataset_key)
-
+            duration = time.perf_counter() - build_started_at
+            self.metrics.builders.build_succeeded(parsed.dataset)
+            self.metrics.builders.observe_build_duration(parsed.dataset, duration)
             self.logger.info(
                 "Built window and updated observed state",
                 dataset=parsed.dataset,
@@ -441,9 +434,11 @@ class DatasetBuilder:
             )
 
         except Exception:
-            # On failure, requeue to try again later
+            duration = time.perf_counter() - build_started_at
+            self.metrics.builders.build_failed(parsed.dataset)
+            self.metrics.builders.observe_build_duration(parsed.dataset, duration)
             self.logger.exception("Build failed; requeueing", dataset_key=dataset_key)
-            await self._requeue(dataset_key, score)
+            await self._requeue(dataset_key, score, "exception")
         finally:
             await self._release_lock(parsed.dataset, parsed.window_id)
 
@@ -460,9 +455,8 @@ class DatasetBuilder:
                         break
                     dataset_key, score = popped
                     started_any = True
-                    task = asyncio.create_task(self._build_dataset(dataset_key, score))
-                    self._inflight.add(task)
-                    task.add_done_callback(self._inflight.discard)
+                    task = asyncio.create_task(self.build_dataset(dataset_key, score))
+                    self._track_task(task)
 
                 if not started_any and not self._inflight:
                     # Idle: nothing to do
