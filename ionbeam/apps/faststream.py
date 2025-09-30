@@ -4,8 +4,9 @@ from pathlib import Path
 
 import structlog
 from dependency_injector.wiring import Provide, inject
-from faststream import FastStream
+from faststream.asgi import AsgiFastStream
 from faststream.rabbit import ExchangeType, RabbitBroker, RabbitExchange, RabbitQueue
+from prometheus_client import CollectorRegistry, make_asgi_app
 from structlog import dev as structlog_dev
 from structlog.contextvars import merge_contextvars
 from structlog.processors import TimeStamper
@@ -180,14 +181,27 @@ async def factory():
         await init
     await create_faststream_handlers()
     
+    registry: CollectorRegistry = container.registry() # type: ignore
     broker: RabbitBroker = await container.broker() # type: ignore
     scheduler: SourceScheduler = await container.source_scheduler() # type: ignore
     netatmo_mqtt_source: NetAtmoMQTTSource = container.netatmo_mqtt_source() # type: ignore
     dataset_builder: DatasetBuilder = await container.dataset_builder_service() # type: ignore
 
 
-    app = FastStream(broker, logging.getLogger("faststream"))
+    # app = FastStream(broker, logging.getLogger("faststream")).as_asgi(
+    #     asyncapi_path="/docs/asyncapi",
+    # )
 
+    app = AsgiFastStream(
+        broker,
+        title="Ionbeam",
+        version="0.1.0", # TODO
+        description="An event-driven platform for stream based processing of IoT observations",
+        asyncapi_path="/docs",
+        asgi_routes=[
+            ("/metrics", make_asgi_app(registry)),
+        ]
+    )
     # Logging is configured globally via structlog + logging. No per-logger overrides needed.
 
     @app.on_startup

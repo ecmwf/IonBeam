@@ -14,12 +14,13 @@ dependencies = [
     "click>=8.0.0",
     "dependency-injector[yaml]>=4.48.1",
     "eccodes>=2.42.0",
-    "faststream[cli,rabbit]==0.5.48",
+    "faststream[cli,prometheus,rabbit]==0.5.48",
     "geojson>=3.2.0",
     "geopandas>=1.1.1",
     "httpx>=0.28.1",
     "httpx-retries>=0.4.0",
     "influxdb-client[async]>=1.49.0",
+    "influxdb3-python>=0.16.0",
     "isodate>=0.7.2",
     "lxml>=6.0.1",
     "numpy>=2.3.2",
@@ -31,6 +32,7 @@ dependencies = [
     "redis>=6.4.0",
     "shapely>=2.1.1",
     "structlog>=25.4.0",
+    "uvicorn>=0.37.0",
 ]
 
 [build-system]

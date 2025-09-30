@@ -3,7 +3,9 @@ import os
 import redis.asyncio as redis
 from dependency_injector import containers, providers
 from faststream.rabbit import RabbitBroker
+from faststream.rabbit.prometheus import RabbitPrometheusMiddleware
 from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
+from prometheus_client import CollectorRegistry
 
 from ionbeam.sources.metno.netatmo_mqtt import NetAtmoMQTTConfig, NetAtmoMQTTSource
 
@@ -30,7 +32,19 @@ config_path = os.getenv("IONBEAM_CONFIG_PATH", "config.yaml")
 class IonbeamContainer(containers.DeclarativeContainer):
     config = providers.Configuration(yaml_files=[config_path])
 
-    broker = providers.Resource(RabbitBroker, url=config.broker.url, max_consumers=1)
+    registry = providers.Singleton(CollectorRegistry)
+    broker = providers.Resource(
+        RabbitBroker,
+            url=config.broker.url,
+            max_consumers=1,
+            middlewares=providers.Callable(
+            tuple,
+            providers.List(
+                providers.Singleton(
+                    RabbitPrometheusMiddleware, registry=registry, app_name="ionbeam", metrics_prefix="ionbeam")
+            )
+        )
+    )
 
     # shared redis client resource
     redis_client = providers.Resource(

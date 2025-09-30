@@ -49,7 +49,7 @@ netatmo_metadata: IngestionMetadata = IngestionMetadata(
             dataset=DatasetMetadata(
                 name="netatmo",
                 aggregation_span=timedelta(hours=1),
-                subject_to_change_window=timedelta(hours=3),
+                subject_to_change_window=timedelta(hours=0),
                 description="IoT NetAtmo data collected from Met No",
                 source_links=[],
                 keywords=["netatmo", "iot", "data"],

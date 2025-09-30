@@ -405,9 +405,8 @@ class DatasetBuilder:
             )
 
             if not dataset_event:
-                # No data available; requeue may cause loops. For now, just log and return.
-                self.logger.info("No data written for window; skipping observed state", dataset_key=dataset_key)
-                return
+                # No data available; mark observed state to avoid repeated empty rebuilds.
+                self.logger.info("No data written for window; but marked observed state as satisfied", dataset_key=dataset_key)
 
             # Record contributing events for compatibility with legacy keys
             try:

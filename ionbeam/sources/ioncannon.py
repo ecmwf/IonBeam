@@ -25,7 +25,7 @@ class IonCannonConfig(BaseModel):
     data_path: pathlib.Path
     
     # Core parameters
-    num_stations: int = 100000
+    num_stations: int = 10000
     measurement_frequency: timedelta = timedelta(minutes=5)
     
     # Geographic bounds for station placement (Central Europe)

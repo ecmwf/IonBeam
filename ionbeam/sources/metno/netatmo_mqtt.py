@@ -1,6 +1,5 @@
 import asyncio
 import json
-import structlog
 import ssl
 import time
 from datetime import datetime, timezone
@@ -11,13 +10,14 @@ from uuid import uuid4
 import aio_pika
 import aiomqtt
 import pandas as pd
+import structlog
 from pydantic import BaseModel
 
 from ionbeam.models.models import IngestDataCommand
+from ionbeam.utilities.parquet_tools import stream_dataframes_to_parquet
 
 from .netatmo import netatmo_metadata
-from .netatmo_processing import process_netatmo_geojson_messages_to_df, netatmo_dataframe_stream
-from ionbeam.utilities.parquet_tools import stream_dataframes_to_parquet
+from .netatmo_processing import netatmo_dataframe_stream
 
 
 class NetAtmoMQTTConfig(BaseModel):
@@ -32,6 +32,8 @@ class NetAtmoMQTTConfig(BaseModel):
     url: str
     routing_key: str = "ionbeam.ingestion.ingestV1"
     flush_interval_seconds: int = 60
+    flush_max_records: int = 50000
+    max_buffer_size: int = 200000
 
 
 class NetAtmoMQTTSource:
@@ -45,28 +47,47 @@ class NetAtmoMQTTSource:
         self.logger = structlog.get_logger(__name__)
         self.metadata = netatmo_metadata
         self._last_flush = time.monotonic()
-        
+        # Use configured client identifier; this deployment runs a single instance.
+        self._identifier = self.config.client_id
+
     async def start(self):
-        self._mqtt_task = asyncio.create_task(self._listen())
-        self._agg_task = asyncio.create_task(self._aggregate_and_publish())
+        # Prevent duplicate starts: if tasks are running, no-op
+        if self._mqtt_task and not self._mqtt_task.done():
+            self.logger.warning("NetAtmoMQTTSource.start() called while already running; ignoring.")
+            return
+        if self._agg_task and not self._agg_task.done():
+            self.logger.warning("NetAtmoMQTTSource.start() called while already running; ignoring.")
+            return
+
+        # If previously stopped, create a fresh stop event
+        if self._stop.is_set():
+            self._stop = asyncio.Event()
+
+        # Spawn background tasks
+        self._mqtt_task = asyncio.create_task(self._listen(), name="NetAtmoMQTTSource._listen")
+        self._agg_task = asyncio.create_task(self._aggregate_and_publish(), name="NetAtmoMQTTSource._aggregate_and_publish")
 
     async def stop(self):
         self._stop.set()
-        if self._mqtt_task:
-            self._mqtt_task.cancel()
-            try:
-                await self._mqtt_task
-            except asyncio.CancelledError:
-                pass
-        if self._agg_task:
-            self._agg_task.cancel()
-            await self._agg_task
-        
+
+        tasks = [t for t in (self._mqtt_task, self._agg_task) if t]
+        for t in tasks:
+            t.cancel()
+
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for idx, res in enumerate(results):
+                if isinstance(res, Exception) and not isinstance(res, asyncio.CancelledError):
+                    self.logger.warning("Task raised during stop()", task=str(tasks[idx]), error=str(res))
+
+        self._mqtt_task = None
+        self._agg_task = None
+
     async def __aenter__(self):
         await self.start()
         return self
 
-    async def __aexit__(self):
+    async def __aexit__(self, exc_type, exc, tb):
         await self.stop()
 
     async def _listen(self):
@@ -78,12 +99,13 @@ class NetAtmoMQTTSource:
                     port=self.config.port,
                     username=self.config.username,
                     password=self.config.password,
-                    identifier=self.config.client_id,
+                    identifier=self._identifier,
                     keepalive=self.config.keepalive,
                     tls_context=tls_context,
+                    clean_session=False,
                 ) as client:
-                    await client.subscribe("raw-obs/+/netatmo/#")
-                    self.logger.info("Subscribed to Netatmo MQTT")
+                    await client.subscribe("raw-obs/+/netatmo/#", qos=1)
+                    self.logger.info("Subscribed to Netatmo MQTT", client_id=self._identifier, qos=1)
                     async for msg in client.messages:
                         if self._stop.is_set():
                             break
@@ -97,77 +119,104 @@ class NetAtmoMQTTSource:
         try:
             data = json.loads(msg.payload.decode("utf-8"))
         except Exception:
+            self.logger.error("unable to parse message", payload=msg.payload)
             return
         async with self._lock:
+            if len(self._buffer) >= self.config.max_buffer_size:
+                self.logger.warning("Buffer full; dropping message", max_size=self.config.max_buffer_size)
+                return
             self._buffer.append(data)
 
+    @staticmethod
+    def _ts_for_path(dt) -> str:
+        if isinstance(dt, pd.Timestamp):
+            dt = dt.to_pydatetime()
+        if getattr(dt, "tzinfo", None) is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return dt.strftime("%Y%m%dT%H%M%SZ")
+
     async def _aggregate_and_publish(self):
-        while not self._stop.is_set():
-            flush_due_to_size = len(self._buffer) >= 50000
-            flush_due_to_time = (len(self._buffer) > 0) and ((time.monotonic() - self._last_flush) >= self.config.flush_interval_seconds)
+        try:
+            connection = await aio_pika.connect_robust(self.config.url)
+            async with connection:
+                channel = await connection.channel()
 
-            if not flush_due_to_size and not flush_due_to_time:
-                await asyncio.sleep(5)  # idle wait
-                continue
+                while not self._stop.is_set():
+                    size_threshold = self.config.flush_max_records
+                    elapsed = time.monotonic() - self._last_flush
+                    flush_due_to_size = len(self._buffer) >= size_threshold
+                    flush_due_to_time = (len(self._buffer) > 0) and (elapsed >= self.config.flush_interval_seconds)
 
-            async with self._lock:
-                drained = self._buffer
-                self._buffer = []
+                    if not flush_due_to_size and not flush_due_to_time:
+                        # Sleep a bit or until next time-based flush is due
+                        sleep_for = min(5, max(0, self.config.flush_interval_seconds - elapsed))
+                        await asyncio.sleep(sleep_for)
+                        continue
 
-            if not drained:
-                await asyncio.sleep(1)
-                continue
+                    async with self._lock:
+                        drained = self._buffer
+                        self._buffer = []
 
-            # Determine time bounds from drained buffer without materializing full DataFrame
-            times = pd.to_datetime(
-                [d.get("properties", {}).get("datetime") for d in drained],
-                utc=True,
-                errors="coerce",
-            ).dropna()
-            if times.empty:
-                self.logger.warning("No valid datetimes in drained buffer")
-                continue
-            start_time = times.min()
-            end_time = times.max()
+                    if not drained:
+                        await asyncio.sleep(1)
+                        continue
 
-            # Save to file using streaming writer
-            self.config.data_path.mkdir(parents=True, exist_ok=True)
-            path = self.config.data_path / f"{self.metadata.dataset.name}_{start_time}-{end_time}_{datetime.now(timezone.utc)}.parquet"
+                    # Determine time bounds from drained buffer without materializing full DataFrame
+                    times = pd.to_datetime(
+                        [d.get("properties", {}).get("datetime") for d in drained],
+                        utc=True,
+                        errors="coerce",
+                    ).dropna()
+                    if times.empty:
+                        self.logger.warning("No valid datetimes in drained buffer")
+                        continue
+                    start_time = times.min().to_pydatetime()
+                    end_time = times.max().to_pydatetime()
 
-            async def drained_stream():
-                for obj in drained:
-                    yield obj
+                    # Save to file using streaming writer
+                    self.config.data_path.mkdir(parents=True, exist_ok=True)
+                    start_s = self._ts_for_path(start_time)
+                    end_s = self._ts_for_path(end_time)
+                    now_s = self._ts_for_path(datetime.now(timezone.utc))
+                    path = self.config.data_path / f"{self.metadata.dataset.name}_{start_s}-{end_s}_{now_s}.parquet"
 
-            try:
-                df_stream = netatmo_dataframe_stream(drained_stream(), batch_size=50000, logger=self.logger)
-                rows = await stream_dataframes_to_parquet(df_stream, path, schema_fields=None)
-                self.logger.info("Wrote parquet file", rows=rows, path=str(path), start=start_time.isoformat(), end=end_time.isoformat())
-            except Exception as e:
-                self.logger.error("Failed to write parquet file", error=str(e), path=str(path))
-                continue
+                    async def drained_stream():
+                        for obj in drained:
+                            yield obj
 
-            ingestion_command = IngestDataCommand(
-                id=uuid4(),
-                metadata=self.metadata,
-                payload_location=path,
-                start_time=start_time,
-                end_time=end_time,
-            )
+                    try:
+                        df_stream = netatmo_dataframe_stream(drained_stream(), batch_size=self.config.flush_max_records, logger=self.logger)
+                        rows = await stream_dataframes_to_parquet(df_stream, path, schema_fields=None)
+                        self.logger.info("Wrote parquet file", rows=rows, path=str(path), start=start_time.isoformat(), end=end_time.isoformat())
+                    except Exception as e:
+                        self.logger.error("Failed to write parquet file", error=str(e), path=str(path))
+                        continue
 
-            try:
-                connection = await aio_pika.connect_robust(self.config.url)
-                async with connection:
-                    channel = await connection.channel()
-                    exchange = channel.default_exchange
-                    await exchange.publish(
-                        aio_pika.Message(body=ingestion_command.model_dump_json().encode()),
-                        routing_key=self.config.routing_key,
+                    ingestion_command = IngestDataCommand(
+                        id=uuid4(),
+                        metadata=self.metadata,
+                        payload_location=path,
+                        start_time=start_time,
+                        end_time=end_time,
                     )
-            except Exception as e:
-                self.logger.error("AMQP publish error", error=str(e))
-            finally:
-                self._last_flush = time.monotonic()
 
-    def process_message_buffer_to_df(self, buffer: List[dict]):
-        # Delegates to shared processing utility for reuse across tools.
-        return process_netatmo_geojson_messages_to_df(buffer, self.logger)
+                    for attempt in range(3):
+                        try:
+                            await channel.default_exchange.publish(
+                                aio_pika.Message(body=ingestion_command.model_dump_json().encode()),
+                                routing_key=self.config.routing_key,
+                            )
+                            break
+                        except Exception as e:
+                            if attempt < 2:
+                                self.logger.warning("Failed to publish", error=str(e), path=str(path))
+                                await asyncio.sleep(1)
+                            else:
+                                self.logger.error("AMQP publish error", error=str(e), path=str(path))
+                    self._last_flush = time.monotonic()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.logger.error("Aggregate/publish task error", error=str(e))
