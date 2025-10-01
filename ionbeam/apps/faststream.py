@@ -150,8 +150,11 @@ async def create_faststream_handlers(
 
     @broker.subscriber("ionbeam.source.netatmo_archive.start")
     async def handle_netatmo_archive(command: StartSourceCommand):
-        if (result := await netatmo_archive_source.handle(command)):
-            await broker.publish(result, "ionbeam.ingestion.ingestV1")
+        result = await netatmo_archive_source.handle(command)
+        if not result:
+            return
+        for ingest_command in result:
+            await broker.publish(ingest_command, "ionbeam.ingestion.ingestV1")
 
     @broker.subscriber("ionbeam.ingestion.ingestV1")
     async def handle_ingestion(command: IngestDataCommand) -> None:
