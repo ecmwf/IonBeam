@@ -127,7 +127,7 @@ class TestODBProjectionService:
         await odb_service.handle(event)
         
         # Assert output directory and files were created
-        output_dir = temp_data_path / "output" / "ecmwf"
+        output_dir = temp_data_path / "output"
         assert output_dir.exists()
         
         expected_odb_file = output_dir / "test_canonical_data.odb"

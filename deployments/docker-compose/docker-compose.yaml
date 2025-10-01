@@ -36,6 +36,7 @@ services:
       - ./pygeoapi.yaml:/pygeoapi/local.config.yml
     networks:
       - ionbeam
+      - monitoring
 
   rabbitmq:
     image: rabbitmq:management-alpine
@@ -74,9 +75,56 @@ services:
       retries: 5
     networks:
       - ionbeam
+      - monitoring
     volumes:
       - redis_data:/data
     command: ["redis-server"]
+  redisinsight:
+    image: redis/redisinsight:latest
+    depends_on:
+      - redis
+    networks:
+      - monitoring
+    ports:
+      - 5540:5540
+    environment:
+      RI_REDIS_HOST: redis
+      RI_REDIS_PORT: "6379"
+      RI_REDIS_ALIAS: local-redis
+    volumes:
+      - redisinsight-data:/data
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - 9090:9090
+    networks:
+      - monitoring
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3000:3000"
+    networks:
+      - monitoring
+    restart: unless-stopped
   pygeoapi:
     build:
       context: .
@@ -96,6 +144,10 @@ volumes:
   caddy_data:
   caddy_config:
   redis_data:
+  redisinsight-data:
+  grafana_data:
+  prometheus_data:
 
 networks:
   ionbeam:
+  monitoring:

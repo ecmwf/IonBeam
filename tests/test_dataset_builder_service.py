@@ -22,7 +22,7 @@ from ionbeam.models.models import (
 )
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
 from ionbeam.services.dataset_builder import DatasetBuilder, DatasetBuilderConfig
-from ionbeam.services.models import IngestionRecord
+from ionbeam.services.models import IngestionRecord, Window
 from ionbeam.storage.timeseries import TimeSeriesDatabase
 from tests.conftest import MockEventStore
 
@@ -148,7 +148,6 @@ def builder_service(
     config = DatasetBuilderConfig(
         queue_key="dataset_queue",
         poll_interval_seconds=0.1,
-        lock_ttl_seconds=60,
         data_path=temp_data_path,
         delete_after_export=False,
         concurrency=1
@@ -198,6 +197,7 @@ async def _wait_for_condition(condition_fn, timeout: float = 5.0) -> bool:
     
     return False
 
+
 class TestDatasetBuilder:
     """Test suite for DatasetBuilder service."""
     
@@ -211,7 +211,6 @@ class TestDatasetBuilder:
         """Builder: Pops window from queue, fetches data, creates parquet file."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
         
-        # Setup: Coordinator has already created ingestion record and queued the window
         event_start = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
         event_end = datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
         event_id = uuid4()
@@ -227,25 +226,23 @@ class TestDatasetBuilder:
             record.model_dump_json()
         )
         
-        # Coordinator set desired event_ids
         window_id = f"{event_start.isoformat()}_PT1H"
         dataset_key = f"test_dataset:{window_id}"
         await mock_event_store.store_event(
-            f"test_dataset:{window_id}:event_ids",
+            f"{dataset_key}:event_ids",
             json.dumps([str(event_id)])
         )
         
-        # Call build_dataset directly
-        await builder_service.build_dataset(dataset_key, -int(event_end.timestamp()))
+        window = Window.from_dataset_key(dataset_key)
+        priority = -int(window.end.timestamp())
+        await builder_service.build_window(window, priority)
         
-        # Verify parquet file was created
         parquet_files = list(temp_data_path.glob("*.parquet"))
         assert len(parquet_files) == 1
         assert parquet_files[0].exists()
         assert parquet_files[0].suffix == '.parquet'
         
-        # Verify observed state was updated
-        state_raw = await mock_event_store.get_event(f"test_dataset:{window_id}:state")
+        state_raw = await mock_event_store.get_event(f"{dataset_key}:state")
         assert state_raw is not None
         state = json.loads(state_raw)
         assert "event_ids_hash" in state
@@ -260,7 +257,6 @@ class TestDatasetBuilder:
         """Builder: Processes multiple queued windows from coordinator, creates multiple parquet files."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
         
-        # Setup: Coordinator has queued 3 windows
         event_start = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
         event_end = datetime(2024, 1, 1, 13, 0, 0, tzinfo=timezone.utc)
         event_id = uuid4()
@@ -276,21 +272,20 @@ class TestDatasetBuilder:
             record.model_dump_json()
         )
         
-        # Build 3 hourly windows directly
         for hour in range(3):
             ws = event_start + timedelta(hours=hour)
             window_id = f"{ws.isoformat()}_PT1H"
             dataset_key = f"test_dataset:{window_id}"
-            score = -int((ws + timedelta(hours=1)).timestamp())
+            priority = -int((ws + timedelta(hours=1)).timestamp())
             
             await mock_event_store.store_event(
-                f"test_dataset:{window_id}:event_ids",
+                f"{dataset_key}:event_ids",
                 json.dumps([str(event_id)])
             )
             
-            await builder_service.build_dataset(dataset_key, score)
+            window = Window.from_dataset_key(dataset_key)
+            await builder_service.build_window(window, priority)
         
-        # Verify 3 parquet files were created
         parquet_files = list(temp_data_path.glob("*.parquet"))
         assert len(parquet_files) == 3
 
@@ -304,7 +299,6 @@ class TestDatasetBuilder:
         """Builder: Processes new window without touching existing dataset files."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
         
-        # Build first window (10:00-11:00)
         event1_start = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
         event1_end = datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
         event1_id = uuid4()
@@ -314,17 +308,17 @@ class TestDatasetBuilder:
         
         window1_id = f"{event1_start.isoformat()}_PT1H"
         dataset1_key = f"test_dataset:{window1_id}"
-        await mock_event_store.store_event(f"test_dataset:{window1_id}:event_ids", json.dumps([str(event1_id)]))
+        await mock_event_store.store_event(f"{dataset1_key}:event_ids", json.dumps([str(event1_id)]))
         
-        await builder_service.build_dataset(dataset1_key, -int(event1_end.timestamp()))
+        window1 = Window.from_dataset_key(dataset1_key)
+        priority1 = -int(window1.end.timestamp())
+        await builder_service.build_window(window1, priority1)
         
-        # Get first dataset file and modification time
         parquet_files = list(temp_data_path.glob("*.parquet"))
         assert len(parquet_files) == 1
         first_file = parquet_files[0]
         first_mtime = first_file.stat().st_mtime
         
-        # Build second window (11:00-12:00)
         event2_start = datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
         event2_end = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         event2_id = uuid4()
@@ -334,15 +328,15 @@ class TestDatasetBuilder:
         
         window2_id = f"{event2_start.isoformat()}_PT1H"
         dataset2_key = f"test_dataset:{window2_id}"
-        await mock_event_store.store_event(f"test_dataset:{window2_id}:event_ids", json.dumps([str(event2_id)]))
+        await mock_event_store.store_event(f"{dataset2_key}:event_ids", json.dumps([str(event2_id)]))
         
-        await builder_service.build_dataset(dataset2_key, -int(event2_end.timestamp()))
+        window2 = Window.from_dataset_key(dataset2_key)
+        priority2 = -int(window2.end.timestamp())
+        await builder_service.build_window(window2, priority2)
         
-        # Verify first file was NOT modified
         assert first_file.exists()
         assert first_file.stat().st_mtime == first_mtime
         
-        # Verify we have 2 different dataset files
         parquet_files = list(temp_data_path.glob("*.parquet"))
         assert len(parquet_files) == 2
 
@@ -356,8 +350,7 @@ class TestDatasetBuilder:
         """Verify builder picks highest score (oldest window) first."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
         
-        # Create 3 windows with different priorities (scores)
-        windows = []
+        windows: List[tuple[Window, int]] = []
         for hour in [10, 11, 12]:
             event_start = datetime(2024, 1, 1, hour, 0, 0, tzinfo=timezone.utc)
             event_end = event_start + timedelta(hours=1)
@@ -376,82 +369,29 @@ class TestDatasetBuilder:
             
             window_id = f"{event_start.isoformat()}_PT1H"
             dataset_key = f"test_dataset:{window_id}"
-            score = -int(event_end.timestamp())  # Negative timestamp, so older = higher score
-            
             await mock_event_store.store_event(
-                f"test_dataset:{window_id}:event_ids",
+                f"{dataset_key}:event_ids",
                 json.dumps([str(event_id)])
             )
             
-            windows.append((dataset_key, score, event_start))
+            window = Window.from_dataset_key(dataset_key)
+            score = -int(window.end.timestamp())
+            windows.append((window, score))
         
-        # Queue all windows (oldest should have highest score due to negative timestamp)
-        queue = {dk: score for dk, score, _ in windows}
+        queue = {window.dataset_key: score for window, score in windows}
         await mock_event_store.store_event("dataset_queue", json.dumps(queue))
         
-        # Start builder with concurrency=1 to process one at a time
         async with builder_service:
-            # Wait for first file to be created
             async def has_one_file():
                 return len(list(temp_data_path.glob("*.parquet"))) >= 1
             
             await _wait_for_condition(has_one_file, timeout=5.0)
         
-        # Check which window was processed first by looking at created files
         parquet_files = list(temp_data_path.glob("*.parquet"))
         assert len(parquet_files) >= 1
         
-        # The first file should be for the oldest window (10:00)
         first_file = sorted(parquet_files)[0]
         assert "20240101T100000" in first_file.name
-
-    @pytest.mark.asyncio
-    async def test_builder_acquires_lock_before_building(
-        self,
-        builder_service: DatasetBuilder,
-        mock_event_store: MockEventStore,
-        temp_data_path: Path
-    ) -> None:
-        """Verify cooperative locking prevents duplicate builds."""
-        metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
-        
-        event_start = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
-        event_end = datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
-        event_id = uuid4()
-        
-        record = IngestionRecord(
-            id=event_id,
-            metadata=metadata,
-            start_time=event_start,
-            end_time=event_end
-        )
-        await mock_event_store.store_event(
-            f"ingestion_events:test_dataset:{event_id}",
-            record.model_dump_json()
-        )
-        
-        window_id = f"{event_start.isoformat()}_PT1H"
-        dataset_key = f"test_dataset:{window_id}"
-        
-        await mock_event_store.store_event(
-            f"test_dataset:{window_id}:event_ids",
-            json.dumps([str(event_id)])
-        )
-        
-        # Manually acquire lock before calling build (simulating another worker)
-        lock_key = f"lock:test_dataset:{window_id}"
-        await mock_event_store.store_event(
-            lock_key,
-            json.dumps({"locked_at": datetime.now(timezone.utc).isoformat()}),
-            ttl=60
-        )
-        
-        # Try to build - should skip due to lock
-        await builder_service.build_dataset(dataset_key, -int(event_end.timestamp()))
-        
-        # Verify no parquet file was created (build was skipped due to lock)
-        parquet_files = list(temp_data_path.glob("*.parquet"))
-        assert len(parquet_files) == 0
 
     @pytest.mark.asyncio
     async def test_builder_updates_observed_state_after_build(
@@ -482,15 +422,15 @@ class TestDatasetBuilder:
         dataset_key = f"test_dataset:{window_id}"
         
         await mock_event_store.store_event(
-            f"test_dataset:{window_id}:event_ids",
+            f"{dataset_key}:event_ids",
             json.dumps([str(event_id)])
         )
         
-        # Build directly
-        await builder_service.build_dataset(dataset_key, -int(event_end.timestamp()))
+        window = Window.from_dataset_key(dataset_key)
+        priority = -int(window.end.timestamp())
+        await builder_service.build_window(window, priority)
         
-        # Verify state was updated
-        state_raw = await mock_event_store.get_event(f"test_dataset:{window_id}:state")
+        state_raw = await mock_event_store.get_event(f"{dataset_key}:state")
         assert state_raw is not None
         state = json.loads(state_raw)
         assert "event_ids_hash" in state
@@ -525,25 +465,23 @@ class TestDatasetBuilder:
         window_id = f"{event_start.isoformat()}_PT1H"
         dataset_key = f"test_dataset:{window_id}"
         
-        # Set desired event_ids
         desired_ids = [str(event_id)]
         await mock_event_store.store_event(
-            f"test_dataset:{window_id}:event_ids",
+            f"{dataset_key}:event_ids",
             json.dumps(desired_ids)
         )
         
-        # Pre-set observed state to match desired
         import hashlib
         desired_hash = hashlib.sha256(",".join(sorted(desired_ids)).encode("utf-8")).hexdigest()
         await mock_event_store.store_event(
-            f"test_dataset:{window_id}:state",
+            f"{dataset_key}:state",
             json.dumps({"event_ids_hash": desired_hash, "timestamp": event_start.isoformat()})
         )
         
-        # Try to build - should skip
-        await builder_service.build_dataset(dataset_key, -int(event_end.timestamp()))
+        window = Window.from_dataset_key(dataset_key)
+        priority = -int(window.end.timestamp())
+        await builder_service.build_window(window, priority)
         
-        # Verify no parquet file was created (build was skipped)
         parquet_files = list(temp_data_path.glob("*.parquet"))
         assert len(parquet_files) == 0
 
@@ -575,32 +513,28 @@ class TestDatasetBuilder:
         
         window_id = f"{event_start.isoformat()}_PT1H"
         dataset_key = f"test_dataset:{window_id}"
-        score = -int(event_end.timestamp())
-        
         await mock_event_store.store_event(
-            f"test_dataset:{window_id}:event_ids",
+            f"{dataset_key}:event_ids",
             json.dumps([str(event_id)])
         )
         
-        # Create builder with failing database
         config = DatasetBuilderConfig(
             queue_key="dataset_queue",
             poll_interval_seconds=0.1,
-            lock_ttl_seconds=60,
             data_path=temp_data_path,
             concurrency=1
         )
         builder = DatasetBuilder(config, mock_event_store, failing_timeseries_db, mock_metrics, broker=None)
         
-        # Try to build - should fail and requeue
-        await builder.build_dataset(dataset_key, score)
+        window = Window.from_dataset_key(dataset_key)
+        score = -int(window.end.timestamp())
+        await builder.build_window(window, score)
         
-        # Verify window was requeued
         queue_raw = await mock_event_store.get_event("dataset_queue")
         assert queue_raw is not None
         requeued = json.loads(queue_raw)
-        assert dataset_key in requeued
-        assert requeued[dataset_key] == score
+        assert window.dataset_key in requeued
+        assert requeued[window.dataset_key] == score
 
     @pytest.mark.asyncio
     async def test_builder_publishes_dataset_available_event(
@@ -634,33 +568,29 @@ class TestDatasetBuilder:
         dataset_key = f"test_dataset:{window_id}"
         
         await mock_event_store.store_event(
-            f"test_dataset:{window_id}:event_ids",
+            f"{dataset_key}:event_ids",
             json.dumps([str(event_id)])
         )
         
-        # Create mock broker
         mock_broker = MagicMock()
         mock_broker.publish = AsyncMock()
         
-        # Create builder with mock broker
         config = DatasetBuilderConfig(
             queue_key="dataset_queue",
             poll_interval_seconds=0.1,
-            lock_ttl_seconds=60,
             data_path=temp_data_path,
             concurrency=1
         )
         builder = DatasetBuilder(config, mock_event_store, mock_timeseries_db, mock_metrics, broker=mock_broker)
         
-        # Build directly
-        await builder.build_dataset(dataset_key, -int(event_end.timestamp()))
+        window = Window.from_dataset_key(dataset_key)
+        priority = -int(window.end.timestamp())
+        await builder.build_window(window, priority)
         
-        # Verify publish was called
         assert mock_broker.publish.called
         call_args = mock_broker.publish.call_args
         assert call_args is not None
-        # Check that a DataSetAvailableEvent was published to the correct exchange
-        assert call_args[1]["exchange"] == "ionbeam.dataset.available"
+        assert call_args.kwargs["exchange"] == "ionbeam.dataset.available"
 
     @pytest.mark.asyncio
     async def test_builder_respects_concurrency_limit(
@@ -673,7 +603,6 @@ class TestDatasetBuilder:
         """Verify max concurrent builds honored."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
         
-        # Create 5 windows
         queue = {}
         for hour in range(10, 15):
             event_start = datetime(2024, 1, 1, hour, 0, 0, tzinfo=timezone.utc)
@@ -693,116 +622,37 @@ class TestDatasetBuilder:
             
             window_id = f"{event_start.isoformat()}_PT1H"
             dataset_key = f"test_dataset:{window_id}"
-            score = -int(event_end.timestamp())
-            queue[dataset_key] = score
-            
             await mock_event_store.store_event(
-                f"test_dataset:{window_id}:event_ids",
+                f"{dataset_key}:event_ids",
                 json.dumps([str(event_id)])
             )
+            
+            window = Window.from_dataset_key(dataset_key)
+            score = -int(window.end.timestamp())
+            queue[window.dataset_key] = score
         
         await mock_event_store.store_event("dataset_queue", json.dumps(queue))
         
-        # Create builder with concurrency=2
         config = DatasetBuilderConfig(
             queue_key="dataset_queue",
             poll_interval_seconds=0.1,
-            lock_ttl_seconds=60,
             data_path=temp_data_path,
             concurrency=2
         )
         builder = DatasetBuilder(config, mock_event_store, mock_timeseries_db, mock_metrics, broker=None)
         
         async with builder:
-            # Wait for some builds to start
             async def has_inflight():
                 return len(builder._inflight) > 0
             
             await _wait_for_condition(has_inflight, timeout=2.0)
             
-            # At most 2 should be in-flight at any time
             assert len(builder._inflight) <= 2
             
-            # Wait for all to complete
             async def all_complete():
                 return len(list(temp_data_path.glob("*.parquet"))) >= 5
             
             await _wait_for_condition(all_complete, timeout=10.0)
         
-        # Verify all 5 files were created
         parquet_files = list(temp_data_path.glob("*.parquet"))
         assert len(parquet_files) == 5
-
-    @pytest.mark.asyncio
-    async def test_builder_skips_locked_windows(
-        self,
-        mock_event_store: MockEventStore,
-        mock_timeseries_db: MockTimeSeriesDatabase,
-        temp_data_path: Path,
-        mock_metrics: IonbeamMetricsProtocol
-    ) -> None:
-        """Verify builder skips windows already locked by another worker."""
-        metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
-        
-        # Create 2 windows
-        windows = []
-        for hour in [10, 11]:
-            event_start = datetime(2024, 1, 1, hour, 0, 0, tzinfo=timezone.utc)
-            event_end = event_start + timedelta(hours=1)
-            event_id = uuid4()
-            
-            record = IngestionRecord(
-                id=event_id,
-                metadata=metadata,
-                start_time=event_start,
-                end_time=event_end
-            )
-            await mock_event_store.store_event(
-                f"ingestion_events:test_dataset:{event_id}",
-                record.model_dump_json()
-            )
-            
-            window_id = f"{event_start.isoformat()}_PT1H"
-            dataset_key = f"test_dataset:{window_id}"
-            
-            await mock_event_store.store_event(
-                f"test_dataset:{window_id}:event_ids",
-                json.dumps([str(event_id)])
-            )
-            
-            windows.append((dataset_key, window_id, -int(event_end.timestamp())))
-        
-        # Lock the first window
-        lock_key = f"lock:test_dataset:{windows[0][1]}"
-        await mock_event_store.store_event(
-            lock_key,
-            json.dumps({"locked_at": datetime.now(timezone.utc).isoformat()}),
-            ttl=60
-        )
-        
-        # Queue both windows
-        queue = {dk: score for dk, _, score in windows}
-        await mock_event_store.store_event("dataset_queue", json.dumps(queue))
-        
-        # Create builder
-        config = DatasetBuilderConfig(
-            queue_key="dataset_queue",
-            poll_interval_seconds=0.1,
-            lock_ttl_seconds=60,
-            data_path=temp_data_path,
-            concurrency=1
-        )
-        builder = DatasetBuilder(config, mock_event_store, mock_timeseries_db, mock_metrics, broker=None)
-        
-        async with builder:
-            # Wait for second window to be processed
-            async def has_one_file():
-                return len(list(temp_data_path.glob("*.parquet"))) >= 1
-            
-            await _wait_for_condition(has_one_file, timeout=5.0)
-        
-        # Verify only 1 file was created (second window, first was locked)
-        parquet_files = list(temp_data_path.glob("*.parquet"))
-        assert len(parquet_files) == 1
-        # Verify it's the second window (11:00)
-        assert "20240101T110000" in parquet_files[0].name

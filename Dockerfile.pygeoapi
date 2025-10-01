@@ -1,7 +1,5 @@
 # Use the existing image as the base
 FROM geopython/pygeoapi:latest
 
-RUN apt-get remove -y python3-numpy
-
-# Install geopandas and its dependencies
-RUN pip install --no-cache-dir numpy==2.0.1 geopandas pyarrow
+RUN python3 -m venv --system-site-packages /venv \
+    && /venv/bin/python3 -m pip install --no-cache-dir geopandas pyarrow \

@@ -198,6 +198,6 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         with open(self.config.config_path, "w") as f:
             yaml.dump(config, f, sort_keys=False)
         
-        dataset_dir = self.config.output_path / 'pygeoapi' / event.metadata.name
+        dataset_dir = self.config.output_path / event.metadata.name
         file_count = len(list(dataset_dir.glob("*.parquet"))) if dataset_dir.exists() else 0
         self.logger.info("Updated PyGeoAPI config", dataset=event.metadata.name, file_count=file_count)

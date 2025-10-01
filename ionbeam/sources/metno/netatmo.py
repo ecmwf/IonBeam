@@ -88,7 +88,7 @@ netatmo_metadata: IngestionMetadata = IngestionMetadata(
             CanonicalVariable(
                 column="wind_from_direction:2.0:mean:PT5M",
                 standard_name="wind_from_direction",
-                cf_unit="deg",
+                cf_unit="degree",
                 level=2.0,
                 method="mean",
                 period="PT5M",
@@ -104,7 +104,7 @@ netatmo_metadata: IngestionMetadata = IngestionMetadata(
             CanonicalVariable(
                 column="wind_speed_of_gust:2.0:mean:PT5M",
                 standard_name="wind_speed_of_gust",
-                cf_unit="m/s",
+                cf_unit="m s-1",
                 level=2.0,
                 method="mean",
                 period="PT5M",

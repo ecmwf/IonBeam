@@ -30,4 +30,4 @@ FROM python-install AS ionbeam
 
 WORKDIR /app
 
-CMD ["/app/.venv/bin/python3","-m", "ionbeam"]
+CMD ["/app/.venv/bin/python3","-m", "ionbeam",  "faststream"]

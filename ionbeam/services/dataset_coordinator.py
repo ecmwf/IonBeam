@@ -3,56 +3,159 @@ Dataset Coordinator
 
 Listens to DataAvailableEvent, maintains per-window desired state (event sets),
 detects drift vs. observed state (last built), and enqueues windows that need
-building into a prioritized queue. Builders will consume from this queue.
-
-Key semantics (stored via EventStore):
-- ingestion_events:{dataset}:{event_id}  -> IngestionRecord (JSON)
-- {dataset}:{window_id}:event_ids        -> JSON list of contributing event IDs (desired state)
-- {dataset}:{window_id}:state            -> JSON object of observed state written by builders
-                                           e.g. {"event_ids_hash": "...", "version": 1, "timestamp": "..."}
-- dataset_queue                          -> JSON object mapping "{dataset}:{window_id}" -> score
-                                           (score is chosen so that older windows have higher priority with ZPOPMAX)
-
-This module does not perform any data building; it only coordinates priority.
+building into a prioritized queue.
 """
 
-import hashlib
 import json
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from isodate import duration_isoformat
+import structlog
 from pydantic import BaseModel
-
-from ionbeam.observability.metrics import IonbeamMetricsProtocol
 
 from ..core.constants import MaximumCachePeriod
 from ..core.handler import BaseHandler
 from ..models.models import DataAvailableEvent
-from ..services.models import IngestionRecord, WindowBuildState
+from ..observability.metrics import IonbeamMetricsProtocol
 from ..storage.event_store import EventStore
+from .models import CoverageAnalysis, EventSet, IngestionRecord, Window, WindowBuildState
 
 
-@dataclass
-class EventAggregateAnalysis:
-    events: List[IngestionRecord]
-    overall_start: Optional[datetime]
-    overall_end: Optional[datetime]
-    gaps: List[Tuple[datetime, datetime]]
+def align_to_aggregation(ts: datetime, aggregation: timedelta) -> datetime:
+    """Align timestamp to aggregation boundary (UTC)."""
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    delta = ts - epoch
+    aligned_seconds = (delta.total_seconds() // aggregation.total_seconds()) * aggregation.total_seconds()
+    return epoch + timedelta(seconds=aligned_seconds)
+
+
+class WindowStateManager:
+    """Manages window state, event associations, and build queue via EventStore."""
+    
+    def __init__(self, event_store: EventStore, queue_key: str = "dataset_queue"):
+        self.store = event_store
+        self.queue_key = queue_key
+        self.logger = structlog.get_logger(__name__)
+    
+    async def save_ingestion_record(self, record: IngestionRecord) -> None:
+        key = f"ingestion_events:{record.metadata.dataset.name}:{record.id}"
+        await self.store.store_event(
+            key,
+            record.model_dump_json(),
+            ttl=int(MaximumCachePeriod.total_seconds())
+        )
+    
+    async def get_ingestion_records(self, dataset: str) -> List[IngestionRecord]:
+        pattern = f"ingestion_events:{dataset}:*"
+        values = await self.store.get_events(pattern)
+        return [IngestionRecord.model_validate_json(v) for v in values]
+    
+    def analyze_coverage(self, events: List[IngestionRecord]) -> CoverageAnalysis:
+        """Analyze event coverage and find gaps."""
+        if not events:
+            return CoverageAnalysis([], None, None, [])
+        
+        sorted_events = sorted(events, key=lambda e: (e.start_time, e.end_time))
+        overall_start = sorted_events[0].start_time
+        overall_end = max(e.end_time for e in sorted_events)
+        
+        gaps = []
+        coverage_end = sorted_events[0].end_time
+        min_gap = timedelta(seconds=1)
+        
+        for event in sorted_events[1:]:
+            if event.start_time > coverage_end:
+                gap_duration = event.start_time - coverage_end
+                if gap_duration > min_gap:
+                    gaps.append((coverage_end, event.start_time))
+                    self.logger.warning(
+                        "Data gap detected",
+                        gap_start=coverage_end.isoformat(),
+                        gap_end=event.start_time.isoformat(),
+                        duration=str(gap_duration)
+                    )
+            coverage_end = max(coverage_end, event.end_time)
+        
+        return CoverageAnalysis(sorted_events, overall_start, overall_end, gaps)
+    
+    async def get_desired_events(self, window: Window) -> EventSet:
+        key = f"{window.dataset_key}:event_ids"
+        data = await self.store.get_event(key)
+        if not data:
+            return EventSet.from_list([])
+        return EventSet.from_list(json.loads(data))
+    
+    async def set_desired_events(self, window: Window, events: EventSet) -> None:
+        key = f"{window.dataset_key}:event_ids"
+        await self.store.store_event(
+            key,
+            json.dumps(sorted(events.ids)),
+            ttl=int(MaximumCachePeriod.total_seconds())
+        )
+    
+    async def get_observed_hash(self, window: Window) -> Optional[str]:
+        key = f"{window.dataset_key}:state"
+        data = await self.store.get_event(key)
+        if not data:
+            return None
+        state = WindowBuildState.model_validate_json(data)
+        return state.event_ids_hash
+    
+    async def set_observed_hash(self, window: Window, event_hash: str) -> None:
+        key = f"{window.dataset_key}:state"
+        state = WindowBuildState(
+            event_ids_hash=event_hash,
+            timestamp=datetime.now(timezone.utc)
+        )
+        await self.store.store_event(
+            key,
+            state.model_dump_json(),
+            ttl=int(MaximumCachePeriod.total_seconds())
+        )
+    
+    async def enqueue_window(self, window: Window, priority: int) -> None:
+        queue = await self._get_queue()
+        queue[window.dataset_key] = priority
+        await self._set_queue(queue)
+    
+    async def dequeue_highest_priority(self) -> Optional[Tuple[Window, int]]:
+        queue = await self._get_queue()
+        if not queue:
+            return None
+        dataset_key = max(queue, key=lambda k: queue[k])
+        priority = queue.pop(dataset_key)
+        await self._set_queue(queue)
+        return Window.from_dataset_key(dataset_key), priority
+    
+    async def requeue_window(self, window: Window, priority: int) -> None:
+        await self.enqueue_window(window, priority)
+    
+    async def get_queue_size(self) -> int:
+        queue = await self._get_queue()
+        return len(queue)
+    
+    async def _get_queue(self) -> Dict[str, int]:
+        data = await self.store.get_event(self.queue_key)
+        if not data:
+            return {}
+        try:
+            return json.loads(data)
+        except Exception:
+            self.logger.exception("Failed to parse queue, resetting")
+            return {}
+    
+    async def _set_queue(self, queue: Dict[str, int]) -> None:
+        await self.store.store_event(self.queue_key, json.dumps(queue))
 
 
 class DatasetCoordinatorConfig(BaseModel):
-    # Windows are only considered for the span covered by the triggering event, not whole history
-    only_process_spanned_windows: bool = True # this allows TTC to work
-    # Key for the global build queue (modeled as a JSON mapping)
+    only_process_spanned_windows: bool = True
     queue_key: str = "dataset_queue"
 
 
 class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
-    """
-    Compute window readiness and enqueue build work with priority
-    """
+    """Coordinates window readiness detection and build enqueueing."""
+    
     def __init__(
         self,
         config: DatasetCoordinatorConfig,
@@ -61,277 +164,111 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
     ):
         super().__init__("DatasetCoordinatorService", metrics)
         self.config = config
-        self.event_store = event_store
-
-    def _align_to_aggregation(self, ts: datetime, aggregation: timedelta) -> datetime:
-        """Align timestamp to aggregation boundary (UTC)."""
-        epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
-        delta = ts - epoch
-        aligned_seconds = (delta.total_seconds() // aggregation.total_seconds()) * aggregation.total_seconds()
-        return epoch + timedelta(seconds=aligned_seconds)
-
-    def _get_window_id(self, window_start: datetime, aggregation: timedelta) -> str:
-        """Generate consistent window identifier."""
-        return f"{window_start.isoformat()}_{duration_isoformat(aggregation)}"
-
-    async def _load_and_parse_data_events(self, dataset_name: str) -> EventAggregateAnalysis:
-        """
-        Load events from the event store and calculate overall span and gaps.
-        Events may arrive out of order and can backfill older periods.
-        """
-        event_data_list = await self.event_store.get_events(f"ingestion_events:{dataset_name}:*")
-
-        if not event_data_list:
-            self.logger.info("No previous events found", dataset=dataset_name)
-            return EventAggregateAnalysis(events=[], overall_start=None, overall_end=None, gaps=[])
-
-        events: List[IngestionRecord] = [
-            IngestionRecord.model_validate_json(event_data) for event_data in event_data_list
-        ]
-        if not events:
-            self.logger.info("No valid events found", dataset=dataset_name)
-            return EventAggregateAnalysis(events=[], overall_start=None, overall_end=None, gaps=[])
-
-        # Sort for stable coverage computation
-        events.sort(key=lambda e: (e.start_time, e.end_time))
-
-        overall_start = events[0].start_time
-        overall_end = max(e.end_time for e in events)
-
-        gaps: List[Tuple[datetime, datetime]] = []
-        min_gap_threshold = timedelta(seconds=1)  # ignore sub-second timing noise
-        coverage_end = events[0].end_time
-
-        for e in events[1:]:
-            if e.start_time > coverage_end:
-                gap_duration = e.start_time - coverage_end
-                if gap_duration > min_gap_threshold:
-                    gaps.append((coverage_end, e.start_time))
-                    self.logger.warning(
-                        "Data gap detected",
-                        dataset=dataset_name,
-                        gap_start=coverage_end.isoformat(),
-                        gap_end=e.start_time.isoformat(),
-                        duration=str(gap_duration),
-                    )
-                coverage_end = e.end_time
-            else:
-                if e.end_time > coverage_end:
-                    coverage_end = e.end_time
-
-        return EventAggregateAnalysis(
-            events=events,
-            overall_start=overall_start,
-            overall_end=overall_end,
-            gaps=gaps,
-        )
-
-    def _should_process_window(
-        self,
-        window_start: datetime,
-        window_end: datetime,
-        stc_cutoff: datetime,
-        gaps: List[Tuple[datetime, datetime]],
-        events: List[IngestionRecord],
-        dataset_name: str,
-    ) -> bool:
-        """
-        True if window is before STC cutoff, has no gaps, and has full coverage by events.
-        """
-        if window_end >= stc_cutoff:
-            self.logger.info(
-                "Skipping window due to subject-to-change cutoff",
-                window_start=window_start.isoformat(),
-                window_end=window_end.isoformat(),
-                stc_cutoff=stc_cutoff.isoformat(),
-            )
-            self.metrics.coordinator.window_skipped(dataset_name, "stc_cutoff")
-            return False
-
-        # Any gap overlapping window -> skip
-        if any(gap_start < window_end and gap_end > window_start for gap_start, gap_end in gaps):
-            self.logger.warning(
-                "Skipping window due to gaps",
-                window_start=window_start.isoformat(),
-                window_end=window_end.isoformat(),
-            )
-            self.metrics.coordinator.window_skipped(dataset_name, "gap")
-            return False
-
-        # Events overlapping window
-        events_in_window = [e for e in events if e.start_time < window_end and e.end_time > window_start]
-        if not events_in_window:
-            self.logger.info(
-                "Skipping window - no overlapping events",
-                window_start=window_start.isoformat(),
-                window_end=window_end.isoformat(),
-            )
-            self.metrics.coordinator.window_skipped(dataset_name, "no_events")
-            return False
-
-        earliest_start = min(e.start_time for e in events_in_window)
-        latest_end = max(e.end_time for e in events_in_window)
-        if earliest_start > window_start or latest_end < window_end:
-            self.logger.info(
-                "Skipping window - incomplete coverage",
-                window_start=window_start.isoformat(),
-                window_end=window_end.isoformat(),
-                data_start=earliest_start.isoformat(),
-                data_end=latest_end.isoformat(),
-            )
-            self.metrics.coordinator.window_skipped(dataset_name, "incomplete_coverage")
-            return False
-
-        return True
-
-    def _compute_event_set_hash(self, event_ids: Iterable[str]) -> str:
-        """Deterministic hash of a set of event IDs (sorted)."""
-        joined = ",".join(sorted(event_ids))
-        return hashlib.sha256(joined.encode("utf-8")).hexdigest()
-
-    async def _get_window_event_ids(self, dataset_name: str, window_id: str) -> List[str]:
-        key = f"{dataset_name}:{window_id}:event_ids"
-        data = await self.event_store.get_event(key)
-        if not data:
-            return []
-        try:
-            ids = json.loads(data)
-            return [str(i) for i in ids]
-        except Exception:
-            self.logger.exception("Failed to parse window event_ids", key=key)
-            return []
-
-    async def _put_window_event_ids(self, dataset_name: str, window_id: str, event_ids: List[str]) -> None:
-        key = f"{dataset_name}:{window_id}:event_ids"
-        # De-dup and sort for stable storage
-        unique_sorted = sorted(set(event_ids))
-        await self.event_store.store_event(
-            key,
-            json.dumps(unique_sorted),
-            ttl=int(MaximumCachePeriod.total_seconds()),
-        )
-
-    async def _get_window_state_hash(self, dataset_name: str, window_id: str) -> Optional[str]:
-        """Read observed state that builders set after a successful build."""
-        key = f"{dataset_name}:{window_id}:state"
-        data = await self.event_store.get_event(key)
-        if not data:
-            return None
-        try:
-            state = WindowBuildState.model_validate_json(data)
-            return state.event_ids_hash
-        except Exception:
-            self.logger.exception("Failed to parse window state", key=key)
-            return None
-
-    async def _enqueue_window(self, dataset_key: str, score: int) -> None:
-        """
-        Insert/update a queue dataset key with a score.
-        TODO uise Redis ZSET.
-        """
-        data = await self.event_store.get_event(self.config.queue_key)
-        try:
-            queue: Dict[str, int] = json.loads(data) if data else {}
-        except Exception:
-            self.logger.exception("Failed to parse queue mapping, recreating", key=self.config.queue_key)
-            queue = {}
-
-        # Idempotent upsert
-        existing = queue.get(dataset_key)
-        if existing is None or existing != score:
-            queue[dataset_key] = score
-            await self.event_store.store_event(self.config.queue_key, json.dumps(queue))
-
-        dataset = dataset_key.split(":", 1)[0]
-        self.metrics.coordinator.set_queue_size(dataset, len(queue))
-
+        self.state = WindowStateManager(event_store, config.queue_key)
+    
     async def _handle(self, event: DataAvailableEvent) -> None:
-        metadata = event.metadata
-        dataset_name = metadata.dataset.name
-
-        # Persist the ingestion event for tracking/coverage analysis
-        ingest_key = f"ingestion_events:{dataset_name}:{event.id}"
-        ingestion_record = IngestionRecord(
+        dataset = event.metadata.dataset.name
+        
+        record = IngestionRecord(
             id=event.id,
-            metadata=metadata,
+            metadata=event.metadata,
             start_time=event.start_time,
             end_time=event.end_time,
         )
-        await self.event_store.store_event(
-            ingest_key,
-            ingestion_record.model_dump_json(),
-            ttl=int(MaximumCachePeriod.total_seconds()),
-        )
-
-        # Load all events and analyze coverage/gaps
-        analysis = await self._load_and_parse_data_events(dataset_name)
-        if not analysis.events or analysis.overall_start is None or analysis.overall_end is None:
-            return None
-
-        # Subject-to-change cutoff
+        await self.state.save_ingestion_record(record)
+        
+        all_records = await self.state.get_ingestion_records(dataset)
+        coverage = self.state.analyze_coverage(all_records)
+        
+        if not coverage.overall_start:
+            return
+        
+        windows = self._generate_windows(event, coverage)
+        
         now = datetime.now(timezone.utc)
-        stc_cutoff = now - metadata.dataset.subject_to_change_window
-        aggregation_span = metadata.dataset.aggregation_span
-
-        # Determine iteration bounds
-        if self.config.only_process_spanned_windows:
-            start_time = self._align_to_aggregation(event.start_time, aggregation_span)
-            iter_end = self._align_to_aggregation(event.end_time, aggregation_span)
-            if iter_end < event.end_time:
-                iter_end = iter_end + aggregation_span
-            iteration_end = iter_end
-        else:
-            start_time = self._align_to_aggregation(analysis.overall_start, aggregation_span)
-            iteration_end = analysis.overall_end
-
-        window_start = start_time
-        while window_start < iteration_end:
-            window_end = window_start + aggregation_span
-            window_id = self._get_window_id(window_start, aggregation_span)
-
-            # Maintain desired state: ensure window's event_ids reflects all overlapping events
-            overlapping_events = [
-                e for e in analysis.events if e.start_time < window_end and e.end_time > window_start
-            ]
-            existing_ids = await self._get_window_event_ids(dataset_name, window_id)
-            updated_ids = set(existing_ids)
-            updated_ids.update(str(e.id) for e in overlapping_events)
-            await self._put_window_event_ids(dataset_name, window_id, list(updated_ids))
-
-            # Decide readiness based on STC, gaps and coverage
-            if not self._should_process_window(
-                window_start,
-                window_end,
-                stc_cutoff,
-                analysis.gaps,
-                analysis.events,
-                dataset_name,
-            ):
-                window_start = window_end
-                continue
-
-            # Compute desired spec hash and compare with observed state
-            desired_ids = await self._get_window_event_ids(dataset_name, window_id)
-            desired_hash = self._compute_event_set_hash(desired_ids)
-            observed_hash = await self._get_window_state_hash(dataset_name, window_id)
-
-            if observed_hash != desired_hash:
-                # Enqueue with priority: older windows first using negative epoch seconds and ZPOPMAX
-                dataset_key = f"{dataset_name}:{window_id}"
-                score = -int(window_end.timestamp())
-                await self._enqueue_window(dataset_key, score)
-                self.metrics.coordinator.window_enqueued(dataset_name)
-                self.logger.info(
-                    "Enqueued window for build",
-                    dataset=dataset_name,
-                    window_id=window_id,
-                    window_start=window_start.isoformat(),
-                    window_end=window_end.isoformat(),
-                    desired_hash=desired_hash,
-                    observed_hash=observed_hash,
-                    score=score,
-                )
-
-            window_start = window_end
-
+        stc_cutoff = now - event.metadata.dataset.subject_to_change_window
+        
+        for window in windows:
+            await self._process_window(window, coverage, stc_cutoff)
+    
+    async def _process_window(
+        self,
+        window: Window,
+        coverage: CoverageAnalysis,
+        stc_cutoff: datetime
+    ) -> None:
+        overlapping = coverage.events_in_window(window)
+        new_events = EventSet.from_records(overlapping)
+        existing = await self.state.get_desired_events(window)
+        desired = existing.union(new_events)
+        await self.state.set_desired_events(window, desired)
+        
+        skip_reason = self._check_readiness(window, coverage, stc_cutoff)
+        if skip_reason:
+            self.metrics.coordinator.window_skipped(window.dataset, skip_reason)
+            return
+        
+        observed_hash = await self.state.get_observed_hash(window)
+        if observed_hash == desired.hash:
+            return
+        
+        priority = -int(window.end.timestamp()) # TODO - implement proper utility function; at the moment this processes oldest first
+        
+        await self.state.enqueue_window(window, priority)
+        self.metrics.coordinator.window_enqueued(window.dataset)
+        
+        self.logger.info(
+            "Enqueued window for build",
+            dataset=window.dataset,
+            window_start=window.start.isoformat(),
+            window_end=window.end.isoformat(),
+            desired_hash=desired.hash[:8],
+            observed_hash=(observed_hash[:8] if observed_hash else None),
+        )
+    
+    def _check_readiness(
+        self,
+        window: Window,
+        coverage: CoverageAnalysis,
+        stc_cutoff: datetime
+    ) -> Optional[str]:
+        """Returns skip reason if not ready, None if ready."""
+        if window.end >= stc_cutoff:
+            return "stc_cutoff"
+        
+        if coverage.has_gap_in_window(window):
+            return "gap"
+        
+        if not coverage.events_in_window(window):
+            return "no_events"
+        
+        if not coverage.fully_covers(window):
+            return "incomplete_coverage"
+        
         return None
+    
+    def _generate_windows(
+        self,
+        event: DataAvailableEvent,
+        coverage: CoverageAnalysis
+    ) -> List[Window]:
+        """Generate windows to check based on configuration."""
+        aggregation = event.metadata.dataset.aggregation_span
+        dataset = event.metadata.dataset.name
+        
+        if self.config.only_process_spanned_windows:
+            start = align_to_aggregation(event.start_time, aggregation)
+            end = align_to_aggregation(event.end_time, aggregation)
+            if end < event.end_time:
+                end += aggregation
+        else:
+            start = align_to_aggregation(coverage.overall_start, aggregation)
+            end = coverage.overall_end
+        
+        windows = []
+        current = start
+        while current < end:
+            windows.append(Window(dataset, current, aggregation))
+            current += aggregation
+        
+        return windows

@@ -415,6 +415,7 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
             complete_df = pd.concat(all_chunks, ignore_index=True)
             total_rows = int(len(complete_df))
 
+            self.config.data_path.mkdir(parents=True, exist_ok=True)
             path = (
                 self.config.data_path
                 / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"

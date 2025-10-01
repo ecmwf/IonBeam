@@ -36,7 +36,7 @@ varno_units = {
     62: "m",
     111: "degree",
     112: "m s-1",
-    261: "m s-1m",
+    261: "m s-1",
     # 110: 'Pa',
 }
 
@@ -180,7 +180,7 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
             output_filename = dataset_path.stem + ".odb"
 
             # Ensure output directory exists
-            odb_path = self.config.output_path / "ecmwf"
+            odb_path = self.config.output_path
             odb_path.mkdir(parents=True, exist_ok=True)
 
             odb_df.to_parquet(str(odb_path / output_filename).replace(".odb", ".parquet"))  # easy debugging

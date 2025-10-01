@@ -1,7 +1,6 @@
 import asyncio
 
 import click
-import uvicorn
 
 from ionbeam.apps.faststream import factory
 from ionbeam.cli.cli import cli as ionbeam_cli
@@ -15,20 +14,11 @@ def main():
 @main.command("faststream")
 def faststream_cmd():
     """Run ionbeam using faststream framework for AMQP orchestration."""
-    app = None
     async def _run():
         app = await factory()
-        
-        await app.run()
+        await app.run(run_extra_options=dict(host="0.0.0.0"))
 
-    try:
-        asyncio.run(_run())
-        try:
-            uvicorn.run(app, host="0.0.0.0", port=8000) # TODO - fix
-        except:
-            pass
-    except asyncio.CancelledError:
-        pass
+    asyncio.run(_run())
 
 
 @main.command(
