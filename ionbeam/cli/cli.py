@@ -13,7 +13,7 @@ from ..models.models import DataAvailableEvent, IngestDataCommand, StartSourceCo
 from ..scheduler.source_scheduler import SourceScheduler
 from ..sources.ioncannon import IonCannonSource
 from ..sources.meteotracker import MeteoTrackerSource
-from ..sources.metno.netatmo import NetAtMoSource as NetAtmoSource
+from ..sources.metno.netatmo import NetAtmoSource
 from ..sources.sensor_community import SensorCommunitySource
 
 
