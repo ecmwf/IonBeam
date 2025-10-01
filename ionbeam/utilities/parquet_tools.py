@@ -1,7 +1,6 @@
 
 
 import asyncio
-import structlog
 import pathlib
 from typing import AsyncIterator, List, Optional, Tuple
 
@@ -9,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -32,6 +32,7 @@ async def stream_dataframes_to_parquet(
     total_rows = 0
     chunk_count = 0
     writer: Optional[pq.ParquetWriter] = None
+    tmp_path = output_path.with_suffix(output_path.suffix + '.tmp')
 
     try:
         async for data in dataframe_stream:
@@ -45,7 +46,7 @@ async def stream_dataframes_to_parquet(
                     # Infer schema from the first batch
                     table = pa.Table.from_pandas(data, preserve_index=False)
                     schema = table.schema
-                writer = pq.ParquetWriter(output_path, schema=schema)
+                writer = pq.ParquetWriter(tmp_path, schema=schema)
 
             # Ensure all schema columns exist, fill missing ones with defaults
             for col_name, col_type in zip(schema.names, schema.types):
@@ -75,6 +76,8 @@ async def stream_dataframes_to_parquet(
     finally:
         if writer is not None:
             writer.close()
+
+        tmp_path.replace(output_path)
 
     return total_rows
 
