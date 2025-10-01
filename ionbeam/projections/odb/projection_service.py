@@ -105,12 +105,12 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         
         """
         base["andate@desc"] = date_hdr  # TODO if a dataset spans multiple days - fdb won't like it
-        base["antime@desc"] = "0"
+        base["antime@desc"] = 0
         base["reportype@hdr"] = reportype
         base["obstype@hdr"] = obstype
         base["codetype@hdr"] = codetype
         base["groupid@hdr"] = group_id
-        base["statid@hdr"] = statid_series
+        base["wigosid@hdr"] = statid_series
         base["lat@hdr"] = pd.to_numeric(df[LatitudeColumn], errors="coerce")
         base["lon@hdr"] = pd.to_numeric(df[LongitudeColumn], errors="coerce")
         base["date@hdr"] = date_hdr
