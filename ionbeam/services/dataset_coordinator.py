@@ -6,19 +6,18 @@ detects drift vs. observed state (last built), and enqueues windows that need
 building into a prioritized queue.
 """
 
-import json
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 
 import structlog
 from pydantic import BaseModel
 
-from ..core.constants import MaximumCachePeriod
 from ..core.handler import BaseHandler
 from ..models.models import DataAvailableEvent
 from ..observability.metrics import IonbeamMetricsProtocol
-from ..storage.event_store import EventStore
-from .models import CoverageAnalysis, EventSet, IngestionRecord, Window, WindowBuildState
+from ..storage.ingestion_record_store import IngestionRecordStore
+from ..storage.ordered_queue import OrderedQueue
+from .models import CoverageAnalysis, EventSet, IngestionRecord, Window
 
 
 def align_to_aggregation(ts: datetime, aggregation: timedelta) -> datetime:
@@ -30,25 +29,18 @@ def align_to_aggregation(ts: datetime, aggregation: timedelta) -> datetime:
 
 
 class WindowStateManager:
-    """Manages window state, event associations, and build queue via EventStore."""
+    """Manages window state and event associations."""
     
-    def __init__(self, event_store: EventStore, queue_key: str = "dataset_queue"):
-        self.store = event_store
-        self.queue_key = queue_key
+    def __init__(self, record_store: IngestionRecordStore, queue: OrderedQueue):
+        self.record_store = record_store
+        self.queue = queue
         self.logger = structlog.get_logger(__name__)
     
     async def save_ingestion_record(self, record: IngestionRecord) -> None:
-        key = f"ingestion_events:{record.metadata.dataset.name}:{record.id}"
-        await self.store.store_event(
-            key,
-            record.model_dump_json(),
-            ttl=int(MaximumCachePeriod.total_seconds())
-        )
+        await self.record_store.save_ingestion_record(record)
     
     async def get_ingestion_records(self, dataset: str) -> List[IngestionRecord]:
-        pattern = f"ingestion_events:{dataset}:*"
-        values = await self.store.get_events(pattern)
-        return [IngestionRecord.model_validate_json(v) for v in values]
+        return await self.record_store.get_ingestion_records(dataset)
     
     def analyze_coverage(self, events: List[IngestionRecord]) -> CoverageAnalysis:
         """Analyze event coverage and find gaps."""
@@ -79,73 +71,29 @@ class WindowStateManager:
         return CoverageAnalysis(sorted_events, overall_start, overall_end, gaps)
     
     async def get_desired_events(self, window: Window) -> EventSet:
-        key = f"{window.dataset_key}:event_ids"
-        data = await self.store.get_event(key)
-        if not data:
-            return EventSet.from_list([])
-        return EventSet.from_list(json.loads(data))
+        event_ids = await self.record_store.get_desired_event_ids(window)
+        return EventSet.from_list(event_ids)
     
     async def set_desired_events(self, window: Window, events: EventSet) -> None:
-        key = f"{window.dataset_key}:event_ids"
-        await self.store.store_event(
-            key,
-            json.dumps(sorted(events.ids)),
-            ttl=int(MaximumCachePeriod.total_seconds())
-        )
+        await self.record_store.set_desired_event_ids(window, sorted(events.ids))
     
     async def get_observed_hash(self, window: Window) -> Optional[str]:
-        key = f"{window.dataset_key}:state"
-        data = await self.store.get_event(key)
-        if not data:
-            return None
-        state = WindowBuildState.model_validate_json(data)
-        return state.event_ids_hash
+        state = await self.record_store.get_window_state(window)
+        return state.event_ids_hash if state else None
     
     async def set_observed_hash(self, window: Window, event_hash: str) -> None:
-        key = f"{window.dataset_key}:state"
+        from ..services.models import WindowBuildState
         state = WindowBuildState(
             event_ids_hash=event_hash,
             timestamp=datetime.now(timezone.utc)
         )
-        await self.store.store_event(
-            key,
-            state.model_dump_json(),
-            ttl=int(MaximumCachePeriod.total_seconds())
-        )
+        await self.record_store.set_window_state(window, state)
     
     async def enqueue_window(self, window: Window, priority: int) -> None:
-        queue = await self._get_queue()
-        queue[window.dataset_key] = priority
-        await self._set_queue(queue)
-    
-    async def dequeue_highest_priority(self) -> Optional[Tuple[Window, int]]:
-        queue = await self._get_queue()
-        if not queue:
-            return None
-        dataset_key = max(queue, key=lambda k: queue[k])
-        priority = queue.pop(dataset_key)
-        await self._set_queue(queue)
-        return Window.from_dataset_key(dataset_key), priority
-    
-    async def requeue_window(self, window: Window, priority: int) -> None:
-        await self.enqueue_window(window, priority)
+        await self.queue.enqueue(window, priority)
     
     async def get_queue_size(self) -> int:
-        queue = await self._get_queue()
-        return len(queue)
-    
-    async def _get_queue(self) -> Dict[str, int]:
-        data = await self.store.get_event(self.queue_key)
-        if not data:
-            return {}
-        try:
-            return json.loads(data)
-        except Exception:
-            self.logger.exception("Failed to parse queue, resetting")
-            return {}
-    
-    async def _set_queue(self, queue: Dict[str, int]) -> None:
-        await self.store.store_event(self.queue_key, json.dumps(queue))
+        return await self.queue.get_size()
 
 
 class DatasetCoordinatorConfig(BaseModel):
@@ -159,12 +107,13 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
     def __init__(
         self,
         config: DatasetCoordinatorConfig,
-        event_store: EventStore,
+        record_store: IngestionRecordStore,
+        queue: OrderedQueue,
         metrics: IonbeamMetricsProtocol,
     ):
         super().__init__("DatasetCoordinatorService", metrics)
         self.config = config
-        self.state = WindowStateManager(event_store, config.queue_key)
+        self.state = WindowStateManager(record_store, queue)
     
     async def _handle(self, event: DataAvailableEvent) -> None:
         dataset = event.metadata.dataset.name

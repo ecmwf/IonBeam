@@ -22,9 +22,9 @@ from ionbeam.models.models import (
 )
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
 from ionbeam.services.dataset_builder import DatasetBuilder, DatasetBuilderConfig
-from ionbeam.services.models import IngestionRecord, Window
+from ionbeam.services.models import IngestionRecord, Window, WindowBuildState
 from ionbeam.storage.timeseries import TimeSeriesDatabase
-from tests.conftest import MockEventStore
+from tests.conftest import MockIngestionRecordStore, MockOrderedQueue
 
 
 class MockTimeSeriesDatabase(TimeSeriesDatabase):
@@ -140,7 +140,8 @@ def temp_data_path() -> Generator[Path, None, None]:
 
 @pytest.fixture
 def builder_service(
-    mock_event_store: MockEventStore, 
+    mock_ingestion_record_store: MockIngestionRecordStore,
+    mock_ordered_queue: MockOrderedQueue,
     mock_timeseries_db: MockTimeSeriesDatabase, 
     temp_data_path: Path,
     mock_metrics: IonbeamMetricsProtocol
@@ -152,7 +153,7 @@ def builder_service(
         delete_after_export=False,
         concurrency=1
     )
-    return DatasetBuilder(config, mock_event_store, mock_timeseries_db, mock_metrics, broker=None)
+    return DatasetBuilder(config, mock_ingestion_record_store, mock_ordered_queue, mock_timeseries_db, mock_metrics, broker=None)
 
 
 def _create_metadata(aggregation_span: timedelta, stc_window: timedelta) -> IngestionMetadata:
@@ -204,8 +205,8 @@ class TestDatasetBuilder:
     @pytest.mark.asyncio
     async def test_builder_processes_queued_window_and_creates_parquet(
         self, 
-        builder_service: DatasetBuilder, 
-        mock_event_store: MockEventStore, 
+        builder_service: DatasetBuilder,
+        mock_ingestion_record_store: MockIngestionRecordStore,
         temp_data_path: Path
     ) -> None:
         """Builder: Pops window from queue, fetches data, creates parquet file."""
@@ -221,19 +222,13 @@ class TestDatasetBuilder:
             start_time=event_start,
             end_time=event_end
         )
-        await mock_event_store.store_event(
-            f"ingestion_events:test_dataset:{event_id}",
-            record.model_dump_json()
-        )
+        await mock_ingestion_record_store.save_ingestion_record(record)
         
         window_id = f"{event_start.isoformat()}_PT1H"
         dataset_key = f"test_dataset:{window_id}"
-        await mock_event_store.store_event(
-            f"{dataset_key}:event_ids",
-            json.dumps([str(event_id)])
-        )
-        
         window = Window.from_dataset_key(dataset_key)
+        await mock_ingestion_record_store.set_desired_event_ids(window, [str(event_id)])
+        
         priority = -int(window.end.timestamp())
         await builder_service.build_window(window, priority)
         
@@ -242,16 +237,15 @@ class TestDatasetBuilder:
         assert parquet_files[0].exists()
         assert parquet_files[0].suffix == '.parquet'
         
-        state_raw = await mock_event_store.get_event(f"{dataset_key}:state")
-        assert state_raw is not None
-        state = json.loads(state_raw)
-        assert "event_ids_hash" in state
+        state = await mock_ingestion_record_store.get_window_state(window)
+        assert state is not None
+        assert state.event_ids_hash is not None
 
     @pytest.mark.asyncio
     async def test_builder_processes_multiple_queued_windows(
         self,
         builder_service: DatasetBuilder,
-        mock_event_store: MockEventStore,
+        mock_ingestion_record_store: MockIngestionRecordStore,
         temp_data_path: Path
     ) -> None:
         """Builder: Processes multiple queued windows from coordinator, creates multiple parquet files."""
@@ -267,10 +261,7 @@ class TestDatasetBuilder:
             start_time=event_start,
             end_time=event_end
         )
-        await mock_event_store.store_event(
-            f"ingestion_events:test_dataset:{event_id}",
-            record.model_dump_json()
-        )
+        await mock_ingestion_record_store.save_ingestion_record(record)
         
         for hour in range(3):
             ws = event_start + timedelta(hours=hour)
@@ -278,12 +269,9 @@ class TestDatasetBuilder:
             dataset_key = f"test_dataset:{window_id}"
             priority = -int((ws + timedelta(hours=1)).timestamp())
             
-            await mock_event_store.store_event(
-                f"{dataset_key}:event_ids",
-                json.dumps([str(event_id)])
-            )
-            
             window = Window.from_dataset_key(dataset_key)
+            await mock_ingestion_record_store.set_desired_event_ids(window, [str(event_id)])
+            
             await builder_service.build_window(window, priority)
         
         parquet_files = list(temp_data_path.glob("*.parquet"))
@@ -293,7 +281,7 @@ class TestDatasetBuilder:
     async def test_builder_does_not_modify_existing_datasets(
         self,
         builder_service: DatasetBuilder,
-        mock_event_store: MockEventStore,
+        mock_ingestion_record_store: MockIngestionRecordStore,
         temp_data_path: Path
     ) -> None:
         """Builder: Processes new window without touching existing dataset files."""
@@ -304,13 +292,13 @@ class TestDatasetBuilder:
         event1_id = uuid4()
         
         record1 = IngestionRecord(id=event1_id, metadata=metadata, start_time=event1_start, end_time=event1_end)
-        await mock_event_store.store_event(f"ingestion_events:test_dataset:{event1_id}", record1.model_dump_json())
+        await mock_ingestion_record_store.save_ingestion_record(record1)
         
         window1_id = f"{event1_start.isoformat()}_PT1H"
         dataset1_key = f"test_dataset:{window1_id}"
-        await mock_event_store.store_event(f"{dataset1_key}:event_ids", json.dumps([str(event1_id)]))
-        
         window1 = Window.from_dataset_key(dataset1_key)
+        await mock_ingestion_record_store.set_desired_event_ids(window1, [str(event1_id)])
+        
         priority1 = -int(window1.end.timestamp())
         await builder_service.build_window(window1, priority1)
         
@@ -324,13 +312,13 @@ class TestDatasetBuilder:
         event2_id = uuid4()
         
         record2 = IngestionRecord(id=event2_id, metadata=metadata, start_time=event2_start, end_time=event2_end)
-        await mock_event_store.store_event(f"ingestion_events:test_dataset:{event2_id}", record2.model_dump_json())
+        await mock_ingestion_record_store.save_ingestion_record(record2)
         
         window2_id = f"{event2_start.isoformat()}_PT1H"
         dataset2_key = f"test_dataset:{window2_id}"
-        await mock_event_store.store_event(f"{dataset2_key}:event_ids", json.dumps([str(event2_id)]))
-        
         window2 = Window.from_dataset_key(dataset2_key)
+        await mock_ingestion_record_store.set_desired_event_ids(window2, [str(event2_id)])
+        
         priority2 = -int(window2.end.timestamp())
         await builder_service.build_window(window2, priority2)
         
@@ -344,13 +332,13 @@ class TestDatasetBuilder:
     async def test_builder_pops_highest_priority_from_queue(
         self,
         builder_service: DatasetBuilder,
-        mock_event_store: MockEventStore,
+        mock_ingestion_record_store: MockIngestionRecordStore,
+        mock_ordered_queue: MockOrderedQueue,
         temp_data_path: Path
     ) -> None:
         """Verify builder picks highest score (oldest window) first."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
         
-        windows: List[tuple[Window, int]] = []
         for hour in [10, 11, 12]:
             event_start = datetime(2024, 1, 1, hour, 0, 0, tzinfo=timezone.utc)
             event_end = event_start + timedelta(hours=1)
@@ -362,24 +350,15 @@ class TestDatasetBuilder:
                 start_time=event_start,
                 end_time=event_end
             )
-            await mock_event_store.store_event(
-                f"ingestion_events:test_dataset:{event_id}",
-                record.model_dump_json()
-            )
+            await mock_ingestion_record_store.save_ingestion_record(record)
             
             window_id = f"{event_start.isoformat()}_PT1H"
             dataset_key = f"test_dataset:{window_id}"
-            await mock_event_store.store_event(
-                f"{dataset_key}:event_ids",
-                json.dumps([str(event_id)])
-            )
-            
             window = Window.from_dataset_key(dataset_key)
+            await mock_ingestion_record_store.set_desired_event_ids(window, [str(event_id)])
+            
             score = -int(window.end.timestamp())
-            windows.append((window, score))
-        
-        queue = {window.dataset_key: score for window, score in windows}
-        await mock_event_store.store_event("dataset_queue", json.dumps(queue))
+            await mock_ordered_queue.enqueue(window, score)
         
         async with builder_service:
             async def has_one_file():
@@ -397,7 +376,7 @@ class TestDatasetBuilder:
     async def test_builder_updates_observed_state_after_build(
         self,
         builder_service: DatasetBuilder,
-        mock_event_store: MockEventStore,
+        mock_ingestion_record_store: MockIngestionRecordStore,
         temp_data_path: Path
     ) -> None:
         """Verify state hash written after successful build."""
@@ -413,35 +392,27 @@ class TestDatasetBuilder:
             start_time=event_start,
             end_time=event_end
         )
-        await mock_event_store.store_event(
-            f"ingestion_events:test_dataset:{event_id}",
-            record.model_dump_json()
-        )
+        await mock_ingestion_record_store.save_ingestion_record(record)
         
         window_id = f"{event_start.isoformat()}_PT1H"
         dataset_key = f"test_dataset:{window_id}"
-        
-        await mock_event_store.store_event(
-            f"{dataset_key}:event_ids",
-            json.dumps([str(event_id)])
-        )
-        
         window = Window.from_dataset_key(dataset_key)
+        
+        await mock_ingestion_record_store.set_desired_event_ids(window, [str(event_id)])
+        
         priority = -int(window.end.timestamp())
         await builder_service.build_window(window, priority)
         
-        state_raw = await mock_event_store.get_event(f"{dataset_key}:state")
-        assert state_raw is not None
-        state = json.loads(state_raw)
-        assert "event_ids_hash" in state
-        assert "timestamp" in state
-        assert state["event_ids_hash"] != ""
+        state = await mock_ingestion_record_store.get_window_state(window)
+        assert state is not None
+        assert state.event_ids_hash is not None
+        assert state.event_ids_hash != ""
 
     @pytest.mark.asyncio
     async def test_builder_skips_build_when_observed_matches_desired(
         self,
         builder_service: DatasetBuilder,
-        mock_event_store: MockEventStore,
+        mock_ingestion_record_store: MockIngestionRecordStore,
         temp_data_path: Path
     ) -> None:
         """Builder: Skips build when observed state hash already matches desired state."""
@@ -457,28 +428,20 @@ class TestDatasetBuilder:
             start_time=event_start,
             end_time=event_end
         )
-        await mock_event_store.store_event(
-            f"ingestion_events:test_dataset:{event_id}",
-            record.model_dump_json()
-        )
+        await mock_ingestion_record_store.save_ingestion_record(record)
         
         window_id = f"{event_start.isoformat()}_PT1H"
         dataset_key = f"test_dataset:{window_id}"
+        window = Window.from_dataset_key(dataset_key)
         
         desired_ids = [str(event_id)]
-        await mock_event_store.store_event(
-            f"{dataset_key}:event_ids",
-            json.dumps(desired_ids)
-        )
+        await mock_ingestion_record_store.set_desired_event_ids(window, desired_ids)
         
         import hashlib
         desired_hash = hashlib.sha256(",".join(sorted(desired_ids)).encode("utf-8")).hexdigest()
-        await mock_event_store.store_event(
-            f"{dataset_key}:state",
-            json.dumps({"event_ids_hash": desired_hash, "timestamp": event_start.isoformat()})
-        )
+        state = WindowBuildState(event_ids_hash=desired_hash, timestamp=event_start)
+        await mock_ingestion_record_store.set_window_state(window, state)
         
-        window = Window.from_dataset_key(dataset_key)
         priority = -int(window.end.timestamp())
         await builder_service.build_window(window, priority)
         
@@ -488,7 +451,8 @@ class TestDatasetBuilder:
     @pytest.mark.asyncio
     async def test_builder_requeues_on_failure(
         self,
-        mock_event_store: MockEventStore,
+        mock_ingestion_record_store: MockIngestionRecordStore,
+        mock_ordered_queue: MockOrderedQueue,
         failing_timeseries_db: FailingTimeSeriesDatabase,
         temp_data_path: Path,
         mock_metrics: IonbeamMetricsProtocol
@@ -506,17 +470,12 @@ class TestDatasetBuilder:
             start_time=event_start,
             end_time=event_end
         )
-        await mock_event_store.store_event(
-            f"ingestion_events:test_dataset:{event_id}",
-            record.model_dump_json()
-        )
+        await mock_ingestion_record_store.save_ingestion_record(record)
         
         window_id = f"{event_start.isoformat()}_PT1H"
         dataset_key = f"test_dataset:{window_id}"
-        await mock_event_store.store_event(
-            f"{dataset_key}:event_ids",
-            json.dumps([str(event_id)])
-        )
+        window = Window.from_dataset_key(dataset_key)
+        await mock_ingestion_record_store.set_desired_event_ids(window, [str(event_id)])
         
         config = DatasetBuilderConfig(
             queue_key="dataset_queue",
@@ -524,22 +483,21 @@ class TestDatasetBuilder:
             data_path=temp_data_path,
             concurrency=1
         )
-        builder = DatasetBuilder(config, mock_event_store, failing_timeseries_db, mock_metrics, broker=None)
+        builder = DatasetBuilder(config, mock_ingestion_record_store, mock_ordered_queue, failing_timeseries_db, mock_metrics, broker=None)
         
-        window = Window.from_dataset_key(dataset_key)
         score = -int(window.end.timestamp())
         await builder.build_window(window, score)
         
-        queue_raw = await mock_event_store.get_event("dataset_queue")
-        assert queue_raw is not None
-        requeued = json.loads(queue_raw)
-        assert window.dataset_key in requeued
-        assert requeued[window.dataset_key] == score
+        # Verify window was requeued
+        queue_dict = mock_ordered_queue.get_queue_dict()
+        assert window.dataset_key in queue_dict
+        assert queue_dict[window.dataset_key] == score
 
     @pytest.mark.asyncio
     async def test_builder_publishes_dataset_available_event(
         self,
-        mock_event_store: MockEventStore,
+        mock_ingestion_record_store: MockIngestionRecordStore,
+        mock_ordered_queue: MockOrderedQueue,
         mock_timeseries_db: MockTimeSeriesDatabase,
         temp_data_path: Path,
         mock_metrics: IonbeamMetricsProtocol
@@ -559,18 +517,13 @@ class TestDatasetBuilder:
             start_time=event_start,
             end_time=event_end
         )
-        await mock_event_store.store_event(
-            f"ingestion_events:test_dataset:{event_id}",
-            record.model_dump_json()
-        )
+        await mock_ingestion_record_store.save_ingestion_record(record)
         
         window_id = f"{event_start.isoformat()}_PT1H"
         dataset_key = f"test_dataset:{window_id}"
+        window = Window.from_dataset_key(dataset_key)
         
-        await mock_event_store.store_event(
-            f"{dataset_key}:event_ids",
-            json.dumps([str(event_id)])
-        )
+        await mock_ingestion_record_store.set_desired_event_ids(window, [str(event_id)])
         
         mock_broker = MagicMock()
         mock_broker.publish = AsyncMock()
@@ -581,9 +534,8 @@ class TestDatasetBuilder:
             data_path=temp_data_path,
             concurrency=1
         )
-        builder = DatasetBuilder(config, mock_event_store, mock_timeseries_db, mock_metrics, broker=mock_broker)
+        builder = DatasetBuilder(config, mock_ingestion_record_store, mock_ordered_queue, mock_timeseries_db, mock_metrics, broker=mock_broker)
         
-        window = Window.from_dataset_key(dataset_key)
         priority = -int(window.end.timestamp())
         await builder.build_window(window, priority)
         
@@ -595,7 +547,8 @@ class TestDatasetBuilder:
     @pytest.mark.asyncio
     async def test_builder_respects_concurrency_limit(
         self,
-        mock_event_store: MockEventStore,
+        mock_ingestion_record_store: MockIngestionRecordStore,
+        mock_ordered_queue: MockOrderedQueue,
         mock_timeseries_db: MockTimeSeriesDatabase,
         temp_data_path: Path,
         mock_metrics: IonbeamMetricsProtocol
@@ -603,7 +556,6 @@ class TestDatasetBuilder:
         """Verify max concurrent builds honored."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
         
-        queue = {}
         for hour in range(10, 15):
             event_start = datetime(2024, 1, 1, hour, 0, 0, tzinfo=timezone.utc)
             event_end = event_start + timedelta(hours=1)
@@ -615,23 +567,15 @@ class TestDatasetBuilder:
                 start_time=event_start,
                 end_time=event_end
             )
-            await mock_event_store.store_event(
-                f"ingestion_events:test_dataset:{event_id}",
-                record.model_dump_json()
-            )
+            await mock_ingestion_record_store.save_ingestion_record(record)
             
             window_id = f"{event_start.isoformat()}_PT1H"
             dataset_key = f"test_dataset:{window_id}"
-            await mock_event_store.store_event(
-                f"{dataset_key}:event_ids",
-                json.dumps([str(event_id)])
-            )
-            
             window = Window.from_dataset_key(dataset_key)
+            await mock_ingestion_record_store.set_desired_event_ids(window, [str(event_id)])
+            
             score = -int(window.end.timestamp())
-            queue[window.dataset_key] = score
-        
-        await mock_event_store.store_event("dataset_queue", json.dumps(queue))
+            await mock_ordered_queue.enqueue(window, score)
         
         config = DatasetBuilderConfig(
             queue_key="dataset_queue",
@@ -639,7 +583,7 @@ class TestDatasetBuilder:
             data_path=temp_data_path,
             concurrency=2
         )
-        builder = DatasetBuilder(config, mock_event_store, mock_timeseries_db, mock_metrics, broker=None)
+        builder = DatasetBuilder(config, mock_ingestion_record_store, mock_ordered_queue, mock_timeseries_db, mock_metrics, broker=None)
         
         async with builder:
             async def has_inflight():

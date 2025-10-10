@@ -24,7 +24,8 @@ from ..sources.meteotracker import MeteoTrackerConfig, MeteoTrackerSource
 from ..sources.metno.netatmo import NetAtmoConfig, NetAtmoSource
 from ..sources.metno.netatmo_archive import NetAtmoArchiveConfig, NetAtmoArchiveSource
 from ..sources.sensor_community import SensorCommunityConfig, SensorCommunitySource
-from ..storage.event_store import RedisEventStore
+from ..storage.ingestion_record_store import RedisIngestionRecordStore
+from ..storage.ordered_queue import RedisOrderedQueue
 from ..storage.timeseries import InfluxDBTimeSeriesDatabase
 
 config_path = os.getenv("IONBEAM_CONFIG_PATH", "config.yaml")
@@ -59,10 +60,17 @@ class IonbeamContainer(containers.DeclarativeContainer):
         config.redis.redis_url,
     )
 
-    # event store using shared client
-    event_store = providers.Factory(
-        RedisEventStore,
+    # ingestion record store using shared client
+    ingestion_record_store = providers.Factory(
+        RedisIngestionRecordStore,
         client=redis_client,
+    )
+
+    # ordered queue using shared client
+    ordered_queue = providers.Factory(
+        RedisOrderedQueue,
+        client=redis_client,
+        queue_key=config.dataset_aggregator.queue_key,
     )
 
     # shared influxdb client resource
@@ -122,7 +130,8 @@ class IonbeamContainer(containers.DeclarativeContainer):
     dataset_coordinator_service = providers.Factory(
         DatasetCoordinatorService,
         config=DatasetCoordinatorConfig(),
-        event_store=event_store,
+        record_store=ingestion_record_store,
+        queue=ordered_queue,
         metrics=metrics,
     )
 
@@ -131,7 +140,8 @@ class IonbeamContainer(containers.DeclarativeContainer):
     dataset_builder_service = providers.Factory(
         DatasetBuilder,
         config=dataset_builder_config,
-        event_store=event_store,
+        record_store=ingestion_record_store,
+        queue=ordered_queue,
         timeseries_db=timeseries_db,
         broker=broker,
         metrics=metrics,

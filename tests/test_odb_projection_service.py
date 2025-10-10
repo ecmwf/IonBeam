@@ -144,7 +144,7 @@ class TestODBProjectionService:
         expected_columns = [
             "expver@desc", "class@desc", "stream@desc", "type@desc", "creaby@desc",
             "reportype@hdr", "obstype@hdr", "codetype@hdr", "groupid@hdr", 
-            "statid@hdr", "lat@hdr", "lon@hdr", "date@hdr", "time@hdr",
+            "wigosid@hdr", "lat@hdr", "lon@hdr", "date@hdr", "time@hdr",
             "varno@body", "obsvalue@body"
         ]
         
@@ -160,7 +160,7 @@ class TestODBProjectionService:
         assert varnos == expected_varnos
         
         # Assert station IDs and coordinates are preserved
-        station_ids = set(odb_df["statid@hdr"].values)
+        station_ids = set(odb_df["wigosid@hdr"].values)
         assert station_ids == {"A", "B"}
         
         assert 50.7 in odb_df["lat@hdr"].values

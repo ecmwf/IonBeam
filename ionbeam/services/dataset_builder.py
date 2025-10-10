@@ -26,7 +26,8 @@ from ionbeam.utilities.parquet_tools import stream_dataframes_to_parquet
 
 from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ..services.models import Window
-from ..storage.event_store import EventStore
+from ..storage.ingestion_record_store import IngestionRecordStore
+from ..storage.ordered_queue import OrderedQueue
 from ..storage.timeseries import TimeSeriesDatabase
 from .dataset_coordinator import WindowStateManager
 
@@ -45,13 +46,14 @@ class DatasetBuilder:
     def __init__(
         self,
         config: DatasetBuilderConfig,
-        event_store: EventStore,
+        record_store: IngestionRecordStore,
+        queue: OrderedQueue,
         timeseries_db: TimeSeriesDatabase,
         metrics: IonbeamMetricsProtocol,
         broker: Optional[RabbitBroker] = None,
     ) -> None:
         self.config = config
-        self.state = WindowStateManager(event_store, config.queue_key)
+        self.state = WindowStateManager(record_store, queue)
         self.timeseries_db = timeseries_db
         self.broker = broker
         self.metrics = metrics
@@ -77,7 +79,7 @@ class DatasetBuilder:
             records = await self.state.get_ingestion_records(window.dataset)
             if not records:
                 self.logger.warning("No metadata available", window=window.dataset_key)
-                await self.state.requeue_window(window, priority)
+                await self.state.enqueue_window(window, priority)
                 self.metrics.builders.requeued(window.dataset, "missing_metadata")
                 return
             
@@ -101,7 +103,7 @@ class DatasetBuilder:
             
         except Exception:
             self.logger.exception("Build failed", window=window.dataset_key)
-            await self.state.requeue_window(window, priority)
+            await self.state.enqueue_window(window, priority)
             self.metrics.builders.requeued(window.dataset, "exception")
             self.metrics.builders.build_failed(window.dataset)
         finally:
@@ -249,7 +251,7 @@ class DatasetBuilder:
         try:
             while not self._stop.is_set():
                 while len(self._inflight) < max(1, self.config.concurrency):
-                    item = await self.state.dequeue_highest_priority()
+                    item = await self.state.queue.dequeue_highest_priority()
                     if not item:
                         break
                     
