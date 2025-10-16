@@ -1,15 +1,16 @@
 import pathlib
+import uuid
+from typing import AsyncIterator
 
 import geopandas as gpd
-import pandas as pd
-import pyarrow.parquet as pq
+import pyarrow as pa
 import yaml
 from pydantic import BaseModel
-from shapely.geometry import Point
 
 from ionbeam.core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ionbeam.core.handler import BaseHandler
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
+from ionbeam.storage.arrow_store import ArrowStore
 
 from ...models.models import DataSetAvailableEvent, DatasetMetadata
 from .models import (
@@ -23,9 +24,8 @@ from .models import (
 
 
 class PyGeoApiConfig(BaseModel):
-    input_path: pathlib.Path
     output_path: pathlib.Path
-    config_path: pathlib.Path # PyGeoAPI config - data sources are declared here
+    config_path: pathlib.Path  # PyGeoAPI config - data sources are declared here
 
 
 class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
@@ -34,22 +34,23 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
     also creates a pygeoapi config in line with the available data, tempo/spatial extents etc..
     """
 
-    def __init__(self, config: PyGeoApiConfig, metrics: IonbeamMetricsProtocol):
+    def __init__(self, config: PyGeoApiConfig, metrics: IonbeamMetricsProtocol, arrow_store: ArrowStore):
         super().__init__("PyGeoApiProjectionService", metrics)
         self.config = config
+        self.arrow_store = arrow_store
 
     def _create_resource_config(self, metadata: DatasetMetadata, event: DataSetAvailableEvent):
         """Create resource config with single provider pointing to dataset directory"""
         dataset_dir = self.config.output_path / metadata.name
-        
+
         # Get existing temporal extent from config if it exists
         existing_begin = None
         existing_end = None
-        
+
         if self.config.config_path.exists():
             with open(self.config.config_path, "r") as f:
                 existing_config = yaml.safe_load(f) or {}
-                
+
             if "resources" in existing_config and metadata.name in existing_config["resources"]:
                 existing_resource = existing_config["resources"][metadata.name]
                 if "extents" in existing_resource and "temporal" in existing_resource["extents"]:
@@ -58,16 +59,16 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
                         existing_begin = temporal["begin"]
                     if "end" in temporal:
                         existing_end = temporal["end"]
-        
+
         # Determine final temporal extent
         final_begin = event.start_time
         final_end = event.end_time
-        
+
         if existing_begin is not None:
             final_begin = min(existing_begin, event.start_time)
         if existing_end is not None:
             final_end = max(existing_end, event.end_time)
-        
+
         # Format timestamps properly for RFC3339 with Z suffix
         extents = Extents(
             spatial=SpatialExtent(  # TODO - calculate this from actual data
@@ -116,70 +117,89 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
 
         return resource
 
-    def _get_max_id_from_dataset(self, dataset_name: str, chunk_size: int = 10000) -> int:
-        """Get the maximum ID across all files in the dataset directory using chunked reading"""
-        dataset_dir = self.config.output_path / dataset_name
-        if not dataset_dir.exists():
-            return -1
-        
-        max_id = -1
-        for file_path in dataset_dir.glob("*.parquet"):
-            try:
-                # Read file in chunks to avoid memory issues
-                parquet_file = pq.ParquetFile(file_path)
-                
-                for batch in parquet_file.iter_batches(batch_size=chunk_size, columns=['id']):
-                    batch_df = batch.to_pandas()
-                    if not batch_df.empty:
-                        batch_max = batch_df['id'].max()
-                        max_id = max(max_id, batch_max)
-                        
-            except Exception as e:
-                self.logger.warning(f"Could not read IDs from {file_path}: {e}")
-        
-        return max_id
-
-    async def _persist_data(self, incoming_df: pd.DataFrame, event: DataSetAvailableEvent):
-        """Create time-partitioned parquet file in dataset directory"""
-        # Create dataset directory
+    async def _persist_batches(
+        self,
+        batch_stream: AsyncIterator[pa.RecordBatch],
+        event: DataSetAvailableEvent,
+    ) -> pathlib.Path:
+        """Process Arrow batches and write to geo-parquet file."""
         dataset_dir = self.config.output_path / event.metadata.name
         dataset_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Create filename with time range
+
         start_str = event.start_time.strftime("%Y%m%d_%H%M")
         end_str = event.end_time.strftime("%Y%m%d_%H%M")
         file_path = dataset_dir / f"{start_str}_{end_str}.parquet"
-        
-        geometry = [Point(xy) for xy in zip(incoming_df[LongitudeColumn], incoming_df[LatitudeColumn])]
-        incoming_gdf = gpd.GeoDataFrame(incoming_df, geometry=geometry, crs="EPSG:4326")
-        
-        # Sort by timestamp for consistent ordering within file
-        if ObservationTimestampColumn in incoming_gdf.columns:
-            incoming_gdf = incoming_gdf.sort_values(ObservationTimestampColumn).reset_index(drop=True)
-        
-        # Get next available ID range starting from max existing ID
-        start_id = self._get_max_id_from_dataset(event.metadata.name) + 1
-        incoming_gdf["id"] = range(start_id, start_id + len(incoming_gdf))
-        
-        # Always replace the entire file (handles updates)
-        incoming_gdf.to_parquet(file_path, compression='snappy')
-        self.logger.info("GeoParquet written", rows=len(incoming_gdf), path=str(file_path))
-        
-        return file_path
+        tmp_path = dataset_dir / f"{file_path.name}.tmp"
 
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+        batches: list[pa.RecordBatch] = []
+        total_rows = 0
+
+        # TODO - writing geoparquet from stream
+        async for batch in batch_stream:
+            if batch.num_rows == 0:
+                self.logger.warning(
+                    "Empty batch received during projection",
+                    dataset=event.metadata.name,
+                    event=event.id,
+                )
+                continue
+
+            batches.append(batch)
+            total_rows += batch.num_rows
+
+        if batches:
+            table = pa.Table.from_batches(batches)
+            df = table.to_pandas()
+            df = df.drop(columns=["geometry", "id"], errors="ignore")
+
+            geometry = gpd.points_from_xy(df[LongitudeColumn], df[LatitudeColumn], crs="EPSG:4326")
+
+            gdf = gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
+            gdf["id"] = [str(uuid.uuid4()) for _ in range(len(gdf))]
+        else:
+            self.logger.warning(
+                "No data available for projection; writing empty GeoParquet",
+                dataset=event.metadata.name,
+                event=event.id,
+            )
+            gdf = gpd.GeoDataFrame(
+                {"geometry": gpd.GeoSeries([], crs="EPSG:4326")},
+                geometry="geometry",
+                crs="EPSG:4326",
+            )
+            gdf["id"] = []
+
+        gdf.to_parquet(tmp_path, index=False, compression="snappy")
+        tmp_path.replace(file_path)
+
+        if total_rows > 0:
+            self.logger.info("GeoParquet written", rows=total_rows, path=str(file_path))
+        else:
+            self.logger.warning(
+                "GeoParquet written with no rows",
+                dataset=event.metadata.name,
+                event=event.id,
+                path=str(file_path),
+            )
+
+        return file_path
 
     async def _handle(self, event: DataSetAvailableEvent):
         """
         Create time-partitioned parquet file in dataset directory and update PyGeoAPI config
         """
-        dataset_path = pathlib.Path(event.dataset_location)
-        if not dataset_path.exists():
-            self.logger.error("Dataset file not found", path=str(dataset_path))
+        # Read Arrow batches from object store
+        try:
+            batch_stream = self.arrow_store.read_record_batches(event.dataset_location)
+        except Exception as e:
+            self.logger.error("Failed to read dataset from object store", key=event.dataset_location, error=str(e))
             return
 
-        # Read and persist the data as a time-partitioned file
-        df = pd.read_parquet(dataset_path)
-        _ = await self._persist_data(df, event)
+        # Persist the data as a time-partitioned file
+        _ = await self._persist_batches(batch_stream, event)
 
         # Create resource config with single provider pointing to dataset directory
         resource_section = self._create_resource_config(event.metadata, event)
@@ -197,7 +217,7 @@ class PyGeoApiProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         # Write back to the same file
         with open(self.config.config_path, "w") as f:
             yaml.dump(config, f, sort_keys=False)
-        
+
         dataset_dir = self.config.output_path / event.metadata.name
         file_count = len(list(dataset_dir.glob("*.parquet"))) if dataset_dir.exists() else 0
         self.logger.info("Updated PyGeoAPI config", dataset=event.metadata.name, file_count=file_count)

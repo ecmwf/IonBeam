@@ -1,9 +1,6 @@
 import asyncio
-import json
-import tempfile
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import AsyncIterator, Generator, List, Optional
+from typing import AsyncIterator, List, Optional
 from uuid import uuid4
 
 import pandas as pd
@@ -24,7 +21,7 @@ from ionbeam.observability.metrics import IonbeamMetricsProtocol
 from ionbeam.services.dataset_builder import DatasetBuilder, DatasetBuilderConfig
 from ionbeam.services.models import IngestionRecord, Window, WindowBuildState
 from ionbeam.storage.timeseries import TimeSeriesDatabase
-from tests.conftest import MockIngestionRecordStore, MockOrderedQueue
+from tests.conftest import MockArrowStore, MockIngestionRecordStore, MockOrderedQueue
 
 
 class MockTimeSeriesDatabase(TimeSeriesDatabase):
@@ -133,27 +130,28 @@ def failing_timeseries_db() -> FailingTimeSeriesDatabase:
 
 
 @pytest.fixture
-def temp_data_path() -> Generator[Path, None, None]:
-    with tempfile.TemporaryDirectory() as temp_dir:
-        yield Path(temp_dir)
-
-
-@pytest.fixture
 def builder_service(
     mock_ingestion_record_store: MockIngestionRecordStore,
     mock_ordered_queue: MockOrderedQueue,
-    mock_timeseries_db: MockTimeSeriesDatabase, 
-    temp_data_path: Path,
-    mock_metrics: IonbeamMetricsProtocol
+    mock_timeseries_db: MockTimeSeriesDatabase,
+    mock_metrics: IonbeamMetricsProtocol,
+    mock_arrow_store: MockArrowStore,
 ) -> DatasetBuilder:
     config = DatasetBuilderConfig(
         queue_key="dataset_queue",
         poll_interval_seconds=0.1,
-        data_path=temp_data_path,
         delete_after_export=False,
         concurrency=1
     )
-    return DatasetBuilder(config, mock_ingestion_record_store, mock_ordered_queue, mock_timeseries_db, mock_metrics, broker=None)
+    return DatasetBuilder(
+        config,
+        mock_ingestion_record_store,
+        mock_ordered_queue,
+        mock_timeseries_db,
+        mock_metrics,
+        mock_arrow_store,
+        broker=None,
+    )
 
 
 def _create_metadata(aggregation_span: timedelta, stc_window: timedelta) -> IngestionMetadata:
@@ -207,9 +205,9 @@ class TestDatasetBuilder:
         self, 
         builder_service: DatasetBuilder,
         mock_ingestion_record_store: MockIngestionRecordStore,
-        temp_data_path: Path
+        mock_arrow_store: MockArrowStore,
     ) -> None:
-        """Builder: Pops window from queue, fetches data, creates parquet file."""
+        """Builder: Pops window from queue, fetches data, creates dataset artifact."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
         
         event_start = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
@@ -232,10 +230,11 @@ class TestDatasetBuilder:
         priority = -int(window.end.timestamp())
         await builder_service.build_window(window, priority)
         
-        parquet_files = list(temp_data_path.glob("*.parquet"))
-        assert len(parquet_files) == 1
-        assert parquet_files[0].exists()
-        assert parquet_files[0].suffix == '.parquet'
+        stored_keys = mock_arrow_store.list_keys()
+        assert len(stored_keys) == 1
+        stored_dataset_key = stored_keys[0]
+        assert stored_dataset_key.startswith("test_dataset/20240101T100000")
+        assert mock_arrow_store.get_total_rows(stored_dataset_key) > 0
         
         state = await mock_ingestion_record_store.get_window_state(window)
         assert state is not None
@@ -246,9 +245,9 @@ class TestDatasetBuilder:
         self,
         builder_service: DatasetBuilder,
         mock_ingestion_record_store: MockIngestionRecordStore,
-        temp_data_path: Path
+        mock_arrow_store: MockArrowStore,
     ) -> None:
-        """Builder: Processes multiple queued windows from coordinator, creates multiple parquet files."""
+        """Builder: Processes multiple queued windows from coordinator, creates multiple dataset artifacts."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
         
         event_start = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
@@ -274,17 +273,17 @@ class TestDatasetBuilder:
             
             await builder_service.build_window(window, priority)
         
-        parquet_files = list(temp_data_path.glob("*.parquet"))
-        assert len(parquet_files) == 3
+        stored_keys = mock_arrow_store.list_keys()
+        assert len(stored_keys) == 3
 
     @pytest.mark.asyncio
     async def test_builder_does_not_modify_existing_datasets(
         self,
         builder_service: DatasetBuilder,
         mock_ingestion_record_store: MockIngestionRecordStore,
-        temp_data_path: Path
+        mock_arrow_store: MockArrowStore,
     ) -> None:
-        """Builder: Processes new window without touching existing dataset files."""
+        """Builder: Processes new window without touching existing dataset artifacts."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
         
         event1_start = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
@@ -302,10 +301,9 @@ class TestDatasetBuilder:
         priority1 = -int(window1.end.timestamp())
         await builder_service.build_window(window1, priority1)
         
-        parquet_files = list(temp_data_path.glob("*.parquet"))
-        assert len(parquet_files) == 1
-        first_file = parquet_files[0]
-        first_mtime = first_file.stat().st_mtime
+        stored_keys = mock_arrow_store.list_keys()
+        assert len(stored_keys) == 1
+        first_dataset_key = stored_keys[0]
         
         event2_start = datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
         event2_end = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -322,11 +320,9 @@ class TestDatasetBuilder:
         priority2 = -int(window2.end.timestamp())
         await builder_service.build_window(window2, priority2)
         
-        assert first_file.exists()
-        assert first_file.stat().st_mtime == first_mtime
-        
-        parquet_files = list(temp_data_path.glob("*.parquet"))
-        assert len(parquet_files) == 2
+        stored_keys = mock_arrow_store.list_keys()
+        assert len(stored_keys) == 2
+        assert first_dataset_key in stored_keys
 
     @pytest.mark.asyncio
     async def test_builder_pops_highest_priority_from_queue(
@@ -334,7 +330,7 @@ class TestDatasetBuilder:
         builder_service: DatasetBuilder,
         mock_ingestion_record_store: MockIngestionRecordStore,
         mock_ordered_queue: MockOrderedQueue,
-        temp_data_path: Path
+        mock_arrow_store: MockArrowStore,
     ) -> None:
         """Verify builder picks highest score (oldest window) first."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
@@ -361,23 +357,22 @@ class TestDatasetBuilder:
             await mock_ordered_queue.enqueue(window, score)
         
         async with builder_service:
-            async def has_one_file():
-                return len(list(temp_data_path.glob("*.parquet"))) >= 1
+            async def has_one_dataset():
+                return len(mock_arrow_store.list_keys()) >= 1
             
-            await _wait_for_condition(has_one_file, timeout=5.0)
+            await _wait_for_condition(has_one_dataset, timeout=5.0)
         
-        parquet_files = list(temp_data_path.glob("*.parquet"))
-        assert len(parquet_files) >= 1
-        
-        first_file = sorted(parquet_files)[0]
-        assert "20240101T100000" in first_file.name
+        stored_keys = mock_arrow_store.list_keys()
+        assert stored_keys
+        first_key = stored_keys[0]
+        assert "20240101T100000" in first_key
 
     @pytest.mark.asyncio
     async def test_builder_updates_observed_state_after_build(
         self,
         builder_service: DatasetBuilder,
         mock_ingestion_record_store: MockIngestionRecordStore,
-        temp_data_path: Path
+        mock_arrow_store: MockArrowStore,
     ) -> None:
         """Verify state hash written after successful build."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
@@ -407,13 +402,14 @@ class TestDatasetBuilder:
         assert state is not None
         assert state.event_ids_hash is not None
         assert state.event_ids_hash != ""
+        assert len(mock_arrow_store.list_keys()) == 1
 
     @pytest.mark.asyncio
     async def test_builder_skips_build_when_observed_matches_desired(
         self,
         builder_service: DatasetBuilder,
         mock_ingestion_record_store: MockIngestionRecordStore,
-        temp_data_path: Path
+        mock_arrow_store: MockArrowStore,
     ) -> None:
         """Builder: Skips build when observed state hash already matches desired state."""
         metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
@@ -445,8 +441,7 @@ class TestDatasetBuilder:
         priority = -int(window.end.timestamp())
         await builder_service.build_window(window, priority)
         
-        parquet_files = list(temp_data_path.glob("*.parquet"))
-        assert len(parquet_files) == 0
+        assert len(mock_arrow_store.list_keys()) == 0
 
     @pytest.mark.asyncio
     async def test_builder_requeues_on_failure(
@@ -454,7 +449,7 @@ class TestDatasetBuilder:
         mock_ingestion_record_store: MockIngestionRecordStore,
         mock_ordered_queue: MockOrderedQueue,
         failing_timeseries_db: FailingTimeSeriesDatabase,
-        temp_data_path: Path,
+        mock_arrow_store: MockArrowStore,
         mock_metrics: IonbeamMetricsProtocol
     ) -> None:
         """Verify failed builds return to queue with reason."""
@@ -480,10 +475,17 @@ class TestDatasetBuilder:
         config = DatasetBuilderConfig(
             queue_key="dataset_queue",
             poll_interval_seconds=0.1,
-            data_path=temp_data_path,
             concurrency=1
         )
-        builder = DatasetBuilder(config, mock_ingestion_record_store, mock_ordered_queue, failing_timeseries_db, mock_metrics, broker=None)
+        builder = DatasetBuilder(
+            config,
+            mock_ingestion_record_store,
+            mock_ordered_queue,
+            failing_timeseries_db,
+            mock_metrics,
+            mock_arrow_store,
+            broker=None,
+        )
         
         score = -int(window.end.timestamp())
         await builder.build_window(window, score)
@@ -492,6 +494,7 @@ class TestDatasetBuilder:
         queue_dict = mock_ordered_queue.get_queue_dict()
         assert window.dataset_key in queue_dict
         assert queue_dict[window.dataset_key] == score
+        assert len(mock_arrow_store.list_keys()) == 0
 
     @pytest.mark.asyncio
     async def test_builder_publishes_dataset_available_event(
@@ -499,7 +502,7 @@ class TestDatasetBuilder:
         mock_ingestion_record_store: MockIngestionRecordStore,
         mock_ordered_queue: MockOrderedQueue,
         mock_timeseries_db: MockTimeSeriesDatabase,
-        temp_data_path: Path,
+        mock_arrow_store: MockArrowStore,
         mock_metrics: IonbeamMetricsProtocol
     ) -> None:
         """Verify DataSetAvailableEvent published to RabbitMQ."""
@@ -531,10 +534,17 @@ class TestDatasetBuilder:
         config = DatasetBuilderConfig(
             queue_key="dataset_queue",
             poll_interval_seconds=0.1,
-            data_path=temp_data_path,
             concurrency=1
         )
-        builder = DatasetBuilder(config, mock_ingestion_record_store, mock_ordered_queue, mock_timeseries_db, mock_metrics, broker=mock_broker)
+        builder = DatasetBuilder(
+            config,
+            mock_ingestion_record_store,
+            mock_ordered_queue,
+            mock_timeseries_db,
+            mock_metrics,
+            mock_arrow_store,
+            broker=mock_broker,
+        )
         
         priority = -int(window.end.timestamp())
         await builder.build_window(window, priority)
@@ -543,6 +553,7 @@ class TestDatasetBuilder:
         call_args = mock_broker.publish.call_args
         assert call_args is not None
         assert call_args.kwargs["exchange"] == "ionbeam.dataset.available"
+        assert len(mock_arrow_store.list_keys()) == 1
 
     @pytest.mark.asyncio
     async def test_builder_respects_concurrency_limit(
@@ -550,7 +561,7 @@ class TestDatasetBuilder:
         mock_ingestion_record_store: MockIngestionRecordStore,
         mock_ordered_queue: MockOrderedQueue,
         mock_timeseries_db: MockTimeSeriesDatabase,
-        temp_data_path: Path,
+        mock_arrow_store: MockArrowStore,
         mock_metrics: IonbeamMetricsProtocol
     ) -> None:
         """Verify max concurrent builds honored."""
@@ -580,10 +591,17 @@ class TestDatasetBuilder:
         config = DatasetBuilderConfig(
             queue_key="dataset_queue",
             poll_interval_seconds=0.1,
-            data_path=temp_data_path,
             concurrency=2
         )
-        builder = DatasetBuilder(config, mock_ingestion_record_store, mock_ordered_queue, mock_timeseries_db, mock_metrics, broker=None)
+        builder = DatasetBuilder(
+            config,
+            mock_ingestion_record_store,
+            mock_ordered_queue,
+            mock_timeseries_db,
+            mock_metrics,
+            mock_arrow_store,
+            broker=None,
+        )
         
         async with builder:
             async def has_inflight():
@@ -594,9 +612,8 @@ class TestDatasetBuilder:
             assert len(builder._inflight) <= 2
             
             async def all_complete():
-                return len(list(temp_data_path.glob("*.parquet"))) >= 5
+                return len(mock_arrow_store.list_keys()) >= 5
             
             await _wait_for_condition(all_complete, timeout=10.0)
         
-        parquet_files = list(temp_data_path.glob("*.parquet"))
-        assert len(parquet_files) == 5
+        assert len(mock_arrow_store.list_keys()) == 5

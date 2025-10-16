@@ -7,6 +7,7 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 import pytest
+import pytest_asyncio
 
 from ionbeam.core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ionbeam.models.models import (
@@ -15,7 +16,11 @@ from ionbeam.models.models import (
     DatasetMetadata,
 )
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
-from ionbeam.projections.odb.projection_service import ODBProjectionService, ODBProjectionServiceConfig, VarNoMapping
+from ionbeam.projections.odb.projection_service import (
+    ODBProjectionService,
+    ODBProjectionServiceConfig,
+    VarNoMapping,
+)
 
 
 @pytest.fixture
@@ -24,11 +29,44 @@ def temp_data_path() -> Generator[Path, None, None]:
         yield Path(temp_dir)
 
 
+@pytest_asyncio.fixture
+async def sample_dataset_key(arrow_store_writer) -> str:
+    """Create a sample dataset stored in the mock Arrow store with canonical column naming."""
+    # Object-store style key (no file-system extension assumptions)
+    dataset_key = "test/test_canonical_data"
+    
+    temp_col = "air_temperature__K__1.5__mean__PT1M"                           # maps to varno 39
+    wind_col = "wind_speed__m s-1__10.0__mean__PT10M"                           # maps to varno 112
+    mslp_col = "air_pressure_at_mean_sea_level__Pa__1.0__mean__PT1M"          # maps to varno 108
+    
+    df = pd.DataFrame({
+        ObservationTimestampColumn: pd.to_datetime(
+            ["2025-01-01T00:00:00Z", "2025-01-01T01:00:00Z"],
+            utc=True,
+        ),
+        LatitudeColumn: [50.7, 51.7],
+        LongitudeColumn: [7.1, 7.2],
+        "station_id": ["A", "B"],
+        temp_col: [285.45, np.nan],   # K -> K (no conversion needed)
+        wind_col: [5.5, 3.2],         # m s-1 -> m s-1
+        mslp_col: [101240.0, np.nan], # Pa -> Pa (no conversion needed)
+    })
+    
+    await arrow_store_writer(dataset_key, df)
+    return dataset_key
+
+
 @pytest.fixture
-def odb_service(temp_data_path: Path, mock_metrics: IonbeamMetricsProtocol) -> ODBProjectionService:
+def odb_service(
+    temp_data_path: Path,
+    mock_metrics: IonbeamMetricsProtocol,
+    mock_arrow_store,
+) -> ODBProjectionService:
+    output_path = temp_data_path / "output"
+    output_path.mkdir(parents=True, exist_ok=True)
+    
     config = ODBProjectionServiceConfig(
-        input_path=temp_data_path / "input",
-        output_path=temp_data_path / "output",
+        output_path=output_path,
         variable_map=[
             VarNoMapping(
                 varno=39,
@@ -59,7 +97,7 @@ def odb_service(temp_data_path: Path, mock_metrics: IonbeamMetricsProtocol) -> O
             )
         ]
     )
-    return ODBProjectionService(config, mock_metrics)
+    return ODBProjectionService(config, mock_metrics, mock_arrow_store)
 
 
 @pytest.fixture
@@ -74,34 +112,6 @@ def sample_dataset_metadata() -> DatasetMetadata:
     )
 
 
-@pytest.fixture
-def sample_canonical_parquet_file(temp_data_path: Path) -> Path:
-    """Create a sample parquet file with canonical column naming"""
-    # Create test data matching the ODB mapping criteria
-    temp_col = "air_temperature__K__1.5__mean__PT1M"                           # maps to varno 39
-    wind_col = "wind_speed__m s-1__10.0__mean__PT10M"                           # maps to varno 112
-    mslp_col = "air_pressure_at_mean_sea_level__Pa__1.0__mean__PT1M"          # maps to varno 110
-
-    df = pd.DataFrame({
-        ObservationTimestampColumn: pd.to_datetime(["2025-01-01T00:00:00Z", "2025-01-01T01:00:00Z"], utc=True),
-        LatitudeColumn: [50.7, 51.7],
-        LongitudeColumn: [7.1, 7.2],
-        "station_id": ["A", "B"],
-        temp_col: [285.45, np.nan],   # K -> K (no conversion needed)
-        wind_col: [5.5, 3.2],         # m s-1 -> m s-1
-        mslp_col: [101240.0, np.nan], # Pa -> Pa (no conversion needed)
-    })
-    
-    # Create input directory and save parquet file
-    input_dir = temp_data_path / "input"
-    input_dir.mkdir(parents=True, exist_ok=True)
-    
-    parquet_file = input_dir / "test_canonical_data.parquet"
-    df.to_parquet(parquet_file, index=False)
-    
-    return parquet_file
-
-
 class TestODBProjectionService:
     """Test suite for ODBProjectionService."""
     
@@ -110,37 +120,36 @@ class TestODBProjectionService:
         self,
         odb_service: ODBProjectionService,
         sample_dataset_metadata: DatasetMetadata,
-        sample_canonical_parquet_file: Path,
+        sample_dataset_key: str,
         temp_data_path: Path
     ) -> None:
         """Test that projection creates ODB file with correct canonical column mapping."""
-        # Create dataset available event
         event = DataSetAvailableEvent(
             id=uuid4(),
             metadata=sample_dataset_metadata,
-            dataset_location=sample_canonical_parquet_file,
+            dataset_location=sample_dataset_key,
             start_time=datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
             end_time=datetime(2025, 1, 1, 2, 0, 0, tzinfo=timezone.utc)
         )
         
-        # Process the event
         await odb_service.handle(event)
         
-        # Assert output directory and files were created
         output_dir = temp_data_path / "output"
         assert output_dir.exists()
         
-        expected_odb_file = output_dir / "test_canonical_data.odb"
+        start_str = event.start_time.strftime("%Y%m%d_%H%M")
+        end_str = event.end_time.strftime("%Y%m%d_%H%M")
+        expected_basename = f"{event.metadata.name}_{start_str}_{end_str}"
+        
+        expected_odb_file = output_dir / f"{expected_basename}.odb"
         assert expected_odb_file.exists()
         assert expected_odb_file.stat().st_size > 0
         
-        expected_parquet_file = output_dir / "test_canonical_data.parquet"
+        expected_parquet_file = output_dir / f"{expected_basename}.parquet"
         assert expected_parquet_file.exists()
         
-        # Read the debug parquet file to verify mapping
         odb_df = pd.read_parquet(expected_parquet_file)
         
-        # Assert expected ODB columns are present
         expected_columns = [
             "expver@desc", "class@desc", "stream@desc", "type@desc", "creaby@desc",
             "reportype@hdr", "obstype@hdr", "codetype@hdr", "groupid@hdr", 
@@ -151,15 +160,12 @@ class TestODBProjectionService:
         for col in expected_columns:
             assert col in odb_df.columns, f"Expected column {col} not found in ODB output"
         
-        # Assert we have the expected number of observations (temp(A), pressure(A), wind(A), wind(B))
         assert len(odb_df) == 4
         
-        # Assert varno mappings are correct
         varnos = set(odb_df["varno@body"].values)
-        expected_varnos = {39, 108, 112}  # temp, pressure, and wind speed
+        expected_varnos = {39, 108, 112}
         assert varnos == expected_varnos
         
-        # Assert station IDs and coordinates are preserved
         station_ids = set(odb_df["wigosid@hdr"].values)
         assert station_ids == {"A", "B"}
         
@@ -168,19 +174,16 @@ class TestODBProjectionService:
         assert 7.1 in odb_df["lon@hdr"].values
         assert 7.2 in odb_df["lon@hdr"].values
         
-        # Assert unit conversions (temperature: K -> K, no conversion)
         temp_rows = odb_df[odb_df["varno@body"] == 39]
-        assert len(temp_rows) == 1  # only station A has non-NaN temperature
+        assert len(temp_rows) == 1
         temp_value = temp_rows["obsvalue@body"].iloc[0]
-        assert abs(temp_value - 285.45) < 0.01  # K -> K (no conversion)
+        assert abs(temp_value - 285.45) < 0.01
         
-        # Assert pressure values (Pa -> Pa, no conversion)
         pressure_rows = odb_df[odb_df["varno@body"] == 108]
-        assert len(pressure_rows) == 1  # only station A has non-NaN pressure
+        assert len(pressure_rows) == 1
         pressure_value = pressure_rows["obsvalue@body"].iloc[0]
-        assert abs(pressure_value - 101240.0) < 0.01  # Pa -> Pa (no conversion)
+        assert abs(pressure_value - 101240.0) < 0.01
         
-        # Assert wind speed values unchanged (m/s -> m/s)
         wind_rows = odb_df[odb_df["varno@body"] == 112]
         assert len(wind_rows) == 2
         wind_values = sorted(wind_rows["obsvalue@body"].values)

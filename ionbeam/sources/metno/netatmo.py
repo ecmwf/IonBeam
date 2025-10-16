@@ -3,18 +3,18 @@ import logging
 import pathlib
 from datetime import datetime, time, timedelta, timezone
 from time import perf_counter
-from typing import AsyncIterator, List, Optional, Tuple
+from typing import AsyncIterator, Optional
 from uuid import uuid4
 
 import httpx
-import numpy as np
 import pandas as pd
-import pyarrow as pa
 from httpx_retries import Retry, RetryTransport
 from pydantic import BaseModel
 from shapely import Polygon
 
 from ionbeam.observability.metrics import IonbeamMetrics, IonbeamMetricsProtocol
+from ionbeam.storage.arrow_store import ArrowStore
+from ionbeam.utilities.arrow_tools import dataframes_to_record_batches, schema_from_ingestion_map
 from ionbeam.utilities.dataframe_tools import coerce_types
 
 from ...core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
@@ -31,7 +31,6 @@ from ...models.models import (
     StartSourceCommand,
     TimeAxis,
 )
-from ...utilities.parquet_tools import stream_dataframes_to_parquet
 
 
 class NetAtmoConfig(BaseModel):
@@ -40,7 +39,6 @@ class NetAtmoConfig(BaseModel):
     password: str
     timeout_seconds: int = 60
     concurrency: int = 8
-    data_path: pathlib.Path
     trigger_queue: str = "ionbeam.source.netatmo.start"
     ingestion_queue: str = "ionbeam.ingestion.ingestV1"
 
@@ -127,10 +125,12 @@ netatmo_metadata: IngestionMetadata = IngestionMetadata(
 
 
 class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]):
-    def __init__(self, config: NetAtmoConfig, metrics: IonbeamMetricsProtocol):
+    def __init__(self, config: NetAtmoConfig, metrics: IonbeamMetricsProtocol, arrow_store: ArrowStore):
         super().__init__("NetAtmoSource", metrics)
         self._config = config
+        self.arrow_store = arrow_store
         self.metadata: IngestionMetadata = netatmo_metadata
+        self._arrow_schema = schema_from_ingestion_map(self.metadata.ingestion_map)
 
     def split_bbox(self, bbox_dict, scale_factor=9):
         """
@@ -210,7 +210,12 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
         df = pd.concat(df_list, ignore_index=True)
         return df
 
-    async def crawl_netatmo_by_area(self, start_time: datetime, end_time: datetime, cache_only) -> AsyncIterator[pd.DataFrame]:
+    async def crawl_netatmo_by_area(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        cache_only: bool,
+    ) -> AsyncIterator[pd.DataFrame]:
         self.logger.debug("Crawling Netatmo by area", cache_only=cache_only)
         assert (end_time - start_time).total_seconds() <= 86400, "NetAtmo only supports 24h windows"
         datetime_range = f"{start_time.strftime('%Y-%m-%dT%H:%MZ')}/{end_time.strftime('%Y-%m-%dT%H:%MZ')}"
@@ -234,7 +239,7 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
                 lu=dict(min_lon=5.74, min_lat=49.45, max_lon=6.53, max_lat=50.18),  # http://bboxfinder.com/#49.45,5.74,50.18,6.53
                 nl=dict(min_lon=3.36, min_lat=50.75, max_lon=7.22, max_lat=53.53),  # http://bboxfinder.com/#50.75,3.36,53.53,7.22
                 no=dict(min_lon=4.99, min_lat=57.98, max_lon=31.07, max_lat=71.18),  # http://bboxfinder.com/#57.98,4.99,71.18,31.07
-                se=dict(min_lon=11.03, min_lat=55.34, max_lon=23.67, max_lat=69.06)   # http://bboxfinder.com/#55.34,11.03,69.06,23.67
+                se=dict(min_lon=11.03, min_lat=55.34, max_lon=23.67, max_lat=69.06),  # http://bboxfinder.com/#55.34,11.03,69.06,23.67
             )
 
             for country, bbox in countries.items():
@@ -265,40 +270,37 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
 
                     station_coverage = await fetch_station_data_by_area()
                     result = self._transform_station_data_to_df(station_coverage)
-                    if not result.empty:
-                        result = coerce_types(result, self.metadata.ingestion_map)
-                        yield result
-                    else:
+                    if result.empty:
                         self.logger.warning("No data found", cache_key=cache_key)
+                    else:
+                        coerced = coerce_types(result, self.metadata.ingestion_map)
+                        yield coerced
+                    await asyncio.sleep(0)
 
     async def _handle(self, event: StartSourceCommand) -> Optional[IngestDataCommand]:
         dataset_name = self.metadata.dataset.name
         request_start = perf_counter()
         total_rows = 0
 
-        self._config.data_path.mkdir(parents=True, exist_ok=True)
-        path = self._config.data_path / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
+        # Generate object key
+        start_s = event.start_time.strftime("%Y%m%dT%H%M%SZ")
+        end_s = event.end_time.strftime("%Y%m%dT%H%M%SZ")
+        
+        now_s = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        object_key = f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
-        async def dataframe_stream():
-            async for chunk in self.crawl_netatmo_by_area(event.start_time, event.end_time, event.use_cache):
-                if chunk is not None:
-                    yield chunk
-        # Build schema from ingestion_map
-        schema_fields: List[Tuple[str, pa.DataType]] = [
-            (self.metadata.ingestion_map.datetime.from_col or ObservationTimestampColumn, pa.timestamp("ns", tz="UTC")),
-            (self.metadata.ingestion_map.lat.from_col or LatitudeColumn, pa.float64()),
-            (self.metadata.ingestion_map.lon.from_col or LongitudeColumn, pa.float64()),
-        ]
-
-        for var in self.metadata.ingestion_map.canonical_variables + self.metadata.ingestion_map.metadata_variables:
-            pa_type = pa.string() if var.dtype == "string" or var.dtype == "object" else pa.from_numpy_dtype(np.dtype(var.dtype))
-            schema_fields.append((var.column, pa_type))
+        dataframe_stream = self.crawl_netatmo_by_area(event.start_time, event.end_time, event.use_cache)
+        batch_stream = dataframes_to_record_batches(
+            dataframe_stream,
+            schema=self._arrow_schema,
+            preserve_index=False,
+        )
 
         try:
-            total_rows = await stream_dataframes_to_parquet(
-                dataframe_stream(),
-                path,
-                schema_fields,
+            total_rows = await self.arrow_store.write_record_batches(
+                object_key,
+                batch_stream,
+                schema=self._arrow_schema,
             )
 
             request_duration = perf_counter() - request_start
@@ -311,12 +313,12 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
                 return None
 
             self.metrics.sources.record_ingestion_request(dataset_name, "success")
-            self.logger.info("Wrote parquet file", rows=total_rows, path=str(path))
+            self.logger.info("Wrote data to object store", rows=total_rows, key=object_key)
 
             return IngestDataCommand(
                 id=uuid4(),
                 metadata=self.metadata,
-                payload_location=path,
+                payload_location=object_key,
                 start_time=event.start_time,
                 end_time=event.end_time,
             )
@@ -332,10 +334,14 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
 
 async def main():
     from prometheus_client import CollectorRegistry
-    
-    config = NetAtmoConfig(base_url="", data_path=pathlib.Path("./data-raw"), username="", password="")
+
+    config = NetAtmoConfig(base_url="", username="", password="")
     metrics = IonbeamMetrics(CollectorRegistry())
-    source = NetAtmoSource(config, metrics)
+
+    from ionbeam.storage.arrow_store import LocalFileSystemStore
+    arrow_store = LocalFileSystemStore(pathlib.Path("./data-raw"))
+
+    source = NetAtmoSource(config, metrics, arrow_store)
 
     now = datetime.now(timezone.utc)
     start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)

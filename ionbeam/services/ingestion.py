@@ -3,10 +3,10 @@ import time
 
 import pandas as pd
 import pyarrow as pa
-import pyarrow.parquet as pq
 from pydantic import BaseModel
 
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
+from ionbeam.storage.arrow_store import ArrowStore
 
 from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ..core.handler import BaseHandler
@@ -16,7 +16,7 @@ from ..utilities.dataframe_tools import coerce_types
 
 
 class IngestionConfig(BaseModel):
-    parquet_chunk_size: int = 65536
+    batch_size: int = 65536
 
 
 class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
@@ -25,13 +25,15 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
         config: IngestionConfig,
         timeseries_db: TimeSeriesDatabase,
         metrics: IonbeamMetricsProtocol,
+        arrow_store: ArrowStore,
     ):
         super().__init__("IngestionService", metrics)
         self.config = config
         self.timeseries_db = timeseries_db
+        self.arrow_store = arrow_store
 
     async def _handle(self, event: IngestDataCommand) -> DataAvailableEvent:
-        self.logger.debug("Ingestion config", parquet_chunk_size=self.config.parquet_chunk_size)
+        self.logger.debug("Ingestion config", batch_size=self.config.batch_size)
 
         dataset_name = event.metadata.dataset.name
         ingest_started = time.perf_counter()
@@ -41,10 +43,19 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
         lat_col = ingestion_map.lat.from_col or LatitudeColumn
         lon_col = ingestion_map.lon.from_col or LongitudeColumn
 
-        parquet_file = pq.ParquetFile(event.payload_location)
+        # Read Arrow batches from object store
+        batch_stream = self.arrow_store.read_record_batches(
+            event.payload_location,
+            batch_size=self.config.batch_size
+        )
+        
         total_points = 0
-        for batch_num, batch in enumerate(parquet_file.iter_batches(batch_size=5000)): # Optmium for influxdb https://docs.influxdata.com/influxdb/v2/write-data/best-practices/optimize-writes/#batch-writes
-            await asyncio.sleep(0)  # keep event loop responsive - not sure if needed, this seems to stop rabbitmq from kicking client if they don't respond to keep-alive type reqs
+        batch_num = 0
+        
+        async for batch in batch_stream:
+            await asyncio.sleep(0)  # keep event loop responsive
+            
+            # Convert Arrow batch to pandas for processing
             df_chunk = batch.to_pandas(types_mapper={pa.string(): pd.StringDtype(storage="python")}.get)
             df_chunk = coerce_types(df_chunk, ingestion_map)
 
@@ -71,10 +82,9 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
             if lon_col != LongitudeColumn:
                 df_chunk.rename(columns={lon_col: LongitudeColumn}, inplace=True)
 
-            df_chunk[time_col] = pd.to_datetime(df_chunk[time_col], utc=True, errors="coerce") # TODO - this shouldn't be needed as it's already done as part of coerce_types above
+            df_chunk[time_col] = pd.to_datetime(df_chunk[time_col], utc=True, errors="coerce") # TODO - is this needed?
             df_chunk.dropna(subset=[time_col], inplace=True)
             df_chunk.sort_values([time_col], kind="mergesort", inplace=True) # this is only sorting a chunk - not the full DF but that' doesn't matter as we only sort to speed up writes to influxdb
-
 
             field_cols = [LatitudeColumn, LongitudeColumn] + [f for (_, f, _) in canonical_vars]
             df_chunk.dropna(subset=field_cols, how="all", inplace=True)
@@ -82,6 +92,7 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
             n_points = len(df_chunk)
             if n_points == 0:
                 self.logger.info("No points to write in batch; skipping", batch=batch_num + 1)
+                batch_num += 1
                 continue
 
             self.logger.info("Writing batch", batch=batch_num + 1, points=n_points)
@@ -92,6 +103,7 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
                 timestamp_column=time_col,
             )
             total_points += n_points
+            batch_num += 1
 
         self.metrics.ingestion.observe_dataset_points(dataset_name, total_points)
         self.metrics.ingestion.observe_dataset_duration(dataset_name, time.perf_counter() - ingest_started)

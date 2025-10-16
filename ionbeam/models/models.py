@@ -1,4 +1,3 @@
-import pathlib
 from datetime import datetime, timedelta
 from typing import List, Optional, Union
 from uuid import UUID
@@ -173,7 +172,7 @@ class IngestionMetadata(BaseModel):
 class IngestDataCommand(BaseModel):
     id: UUID
     metadata: IngestionMetadata
-    payload_location: pathlib.Path
+    payload_location: str
     start_time: datetime
     end_time: datetime
 
@@ -188,6 +187,6 @@ class DataAvailableEvent(BaseModel):
 class DataSetAvailableEvent(BaseModel):
     id: UUID
     metadata: DatasetMetadata
-    dataset_location: pathlib.Path
+    dataset_location: str
     start_time: datetime
     end_time: datetime

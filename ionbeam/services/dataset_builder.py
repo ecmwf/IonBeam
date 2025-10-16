@@ -6,7 +6,6 @@ datasets in the background. Intended to be run as long-lived worker(s).
 """
 
 import asyncio
-import pathlib
 import time
 import uuid
 from datetime import timedelta
@@ -21,8 +20,8 @@ from pydantic import BaseModel
 
 from ionbeam.models.models import DataSetAvailableEvent, IngestionMetadata
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
+from ionbeam.storage.arrow_store import ArrowStore
 from ionbeam.utilities.dataframe_tools import coerce_types
-from ionbeam.utilities.parquet_tools import stream_dataframes_to_parquet
 
 from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ..services.models import Window
@@ -35,7 +34,6 @@ from .dataset_coordinator import WindowStateManager
 class DatasetBuilderConfig(BaseModel):
     queue_key: str = "dataset_queue"
     poll_interval_seconds: float = 3.0
-    data_path: pathlib.Path = pathlib.Path("data/aggregated")
     delete_after_export: Optional[bool] = False
     concurrency: int = 2
 
@@ -50,11 +48,13 @@ class DatasetBuilder:
         queue: OrderedQueue,
         timeseries_db: TimeSeriesDatabase,
         metrics: IonbeamMetricsProtocol,
+        arrow_store: ArrowStore,
         broker: Optional[RabbitBroker] = None,
     ) -> None:
         self.config = config
         self.state = WindowStateManager(record_store, queue)
         self.timeseries_db = timeseries_db
+        self.arrow_store = arrow_store
         self.broker = broker
         self.metrics = metrics
         self._stop = asyncio.Event()
@@ -86,7 +86,7 @@ class DatasetBuilder:
             latest = max(records, key=lambda r: (r.end_time, r.start_time))
             metadata = latest.metadata
             
-            dataset_event = await self._build_dataset_file(window, metadata)
+            dataset_event = await self._build_dataset_file(window, metadata, desired.hash)
             
             if dataset_event:
                 await self._publish_event(dataset_event)
@@ -99,6 +99,7 @@ class DatasetBuilder:
                 dataset=window.dataset,
                 window_start=window.start.isoformat(),
                 window_end=window.end.isoformat(),
+                hash=desired.hash[:8],
             )
             
         except Exception:
@@ -114,13 +115,19 @@ class DatasetBuilder:
         self,
         window: Window,
         metadata: IngestionMetadata,
+        desired_hash: str,
     ) -> Optional[DataSetAvailableEvent]:
         """Fetch data from time series DB using streaming, and create dataset event."""
+        dataset_key = f"{window.dataset}/{window.start.strftime("%Y%m%dT%H%M%S")}_{metadata.dataset.aggregation_span}_{desired_hash}"
         
-        self.config.data_path.mkdir(parents=True, exist_ok=True)
-        dataset_filename = f"{window.dataset}_{window.start.strftime('%Y%m%dT%H%M%S')}_{window.window_id.split('_')[1]}.parquet"
-        dataset_path = self.config.data_path / dataset_filename
-        self.logger.info("Creating dataset file", path=str(dataset_path))
+        if await self.arrow_store.exists(dataset_key):
+            self.logger.warning(
+                "Dataset file already exists; overwriting",
+                key=dataset_key,
+                hash=desired_hash[:8],
+            )
+        
+        self.logger.info("Creating dataset", key=dataset_key, hash=desired_hash[:8])
         
         schema_fields: List[Tuple[str, pa.DataType]] = [
             (ObservationTimestampColumn, pa.timestamp("ns", tz="UTC")),
@@ -128,10 +135,13 @@ class DatasetBuilder:
             (LongitudeColumn, pa.float64()),
         ]
         for var in metadata.ingestion_map.canonical_variables + metadata.ingestion_map.metadata_variables:
-            pa_type = (
-                pa.string() if var.dtype == "string" or var.dtype == "object" else pa.from_numpy_dtype(np.dtype(var.dtype))
-            )
+            if var.dtype is None or var.dtype in {"string", "object"}:
+                pa_type = pa.string()
+            else:
+                pa_type = pa.from_numpy_dtype(np.dtype(var.dtype))
             schema_fields.append((var.to_canonical_name(), pa_type))
+        
+        schema = pa.schema([pa.field(name, dtype) for name, dtype in schema_fields])
         
         async def processed_dataframe_stream():
             """Stream and process data from time series database."""
@@ -174,10 +184,32 @@ class DatasetBuilder:
                 if df_wide is not None and not df_wide.empty:
                     yield df_wide
         
-        total_rows = await stream_dataframes_to_parquet(
-            processed_dataframe_stream(),
-            dataset_path,
-            schema_fields,
+        async def record_batch_stream():
+            async for df_wide in processed_dataframe_stream():
+                for col_name, col_type in zip(schema.names, schema.types):
+                    if col_name not in df_wide.columns:
+                        df_wide[col_name] = "" if pa.types.is_string(col_type) else np.nan
+                df_prepared = df_wide[schema.names]
+                try:
+                    batch = pa.RecordBatch.from_pandas(
+                        df_prepared,
+                        schema=schema,
+                        preserve_index=False,
+                    )
+                except Exception:
+                    self.logger.exception(
+                        "Failed to convert dataframe to Arrow batch",
+                        columns=list(df_prepared.columns),
+                    )
+                    raise
+                yield batch
+                await asyncio.sleep(0)
+        
+        total_rows = await self.arrow_store.write_record_batches(
+            dataset_key,
+            record_batch_stream(),
+            schema=schema,
+            overwrite=True,
         )
         self.metrics.builders.observe_rows_exported(window.dataset, int(total_rows))
         
@@ -189,12 +221,12 @@ class DatasetBuilder:
             )
             return None
         
-        self.logger.info("Wrote parquet file", rows=total_rows, path=str(dataset_path))
+        self.logger.info("Wrote dataset to store", rows=total_rows, key=dataset_key)
         
         return DataSetAvailableEvent(
             id=uuid.uuid4(),
             metadata=metadata.dataset,
-            dataset_location=dataset_path,
+            dataset_location=dataset_key,
             start_time=window.start,
             end_time=window.end,
         )

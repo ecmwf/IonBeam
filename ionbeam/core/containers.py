@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import redis.asyncio as redis
 from dependency_injector import containers, providers
@@ -9,6 +10,7 @@ from prometheus_client import CollectorRegistry
 
 from ionbeam.observability.metrics import IonbeamMetrics
 from ionbeam.sources.metno.netatmo_mqtt import NetAtmoMQTTConfig, NetAtmoMQTTSource
+from ionbeam.storage.arrow_store import LocalFileSystemStore
 
 from ..projections.odb.projection_service import ODBProjectionService, ODBProjectionServiceConfig
 from ..projections.pygeoapi.projection_service import (
@@ -90,40 +92,45 @@ class IonbeamContainer(containers.DeclarativeContainer):
         org=config.influxdb_common.influxdb_org,
     )
 
+    arrow_store = providers.Selector(
+        config.arrow_store.type,
+        local_filesystem=providers.Singleton(
+            LocalFileSystemStore,
+            base_path=providers.Callable(lambda cfg: Path(cfg.get("data_path", "./data/")), config.arrow_store),
+        ),
+    )
+
     # source scheduler
     scheduler_config = providers.Factory(lambda cfg: SchedulerConfig(**cfg), config.sources.scheduler)
     source_scheduler = providers.Factory(SourceScheduler, config=scheduler_config, broker=broker)
 
     # sensor_community
     sensor_community_config = providers.Factory(lambda cfg: SensorCommunityConfig(**cfg), config.sources.sensor_community)
-    sensor_community_source = providers.Factory(SensorCommunitySource, config=sensor_community_config, metrics=metrics)
+    sensor_community_source = providers.Factory(SensorCommunitySource, config=sensor_community_config, metrics=metrics, arrow_store=arrow_store)
 
     # meteotracker
     meteotracker_config = providers.Factory(lambda cfg: MeteoTrackerConfig(**cfg), config.sources.meteotracker)
-    meteotracker_source = providers.Factory(MeteoTrackerSource, config=meteotracker_config, metrics=metrics)
+    meteotracker_source = providers.Factory(MeteoTrackerSource, config=meteotracker_config, metrics=metrics, arrow_store=arrow_store)
 
     # netatmo
     netatmo_config = providers.Factory(lambda cfg: NetAtmoConfig(**cfg), config.sources.netatmo)
-    netatmo_source = providers.Factory(NetAtmoSource, config=netatmo_config, metrics=metrics)
+    netatmo_source = providers.Factory(NetAtmoSource, config=netatmo_config, metrics=metrics, arrow_store=arrow_store)
 
     # netatmo - mqtt
     netatmo_mqtt_config = providers.Factory(lambda cfg: NetAtmoMQTTConfig(**cfg), config.sources.netatmo_mqtt)
-    netatmo_mqtt_source = providers.Factory(NetAtmoMQTTSource, config=netatmo_mqtt_config, metrics=metrics)
+    netatmo_mqtt_source = providers.Factory(NetAtmoMQTTSource, config=netatmo_mqtt_config, metrics=metrics, arrow_store=arrow_store)
 
     # netatmo - archive
     netatmo_archive_config = providers.Factory(lambda cfg: NetAtmoArchiveConfig(**cfg), config.sources.netatmo_archive)
-    netatmo_archive_source = providers.Factory(NetAtmoArchiveSource, config=netatmo_archive_config, metrics=metrics)
+    netatmo_archive_source = providers.Factory(NetAtmoArchiveSource, config=netatmo_archive_config, metrics=metrics, arrow_store=arrow_store)
 
     # ioncannon - stress tester
-    ion_cannon_config = providers.Factory(lambda cfg: IonCannonConfig(**cfg), config.sources.ioncannon)
-    ion_cannon_source = providers.Factory(IonCannonSource, config=ion_cannon_config, metrics=metrics)
+    # ion_cannon_config = providers.Factory(lambda cfg: IonCannonConfig(**cfg), config.sources.ioncannon)
+    ion_cannon_source = providers.Factory(IonCannonSource, config=IonCannonConfig(), metrics=metrics, arrow_store=arrow_store)
 
     # ingestion service
     ingestion_service = providers.Factory(
-        IngestionService,
-        config=IngestionConfig(),
-        timeseries_db=timeseries_db,
-        metrics=metrics,
+        IngestionService, config=IngestionConfig(), timeseries_db=timeseries_db, metrics=metrics, arrow_store=arrow_store
     )
 
     # dataset coordinator service
@@ -143,14 +150,17 @@ class IonbeamContainer(containers.DeclarativeContainer):
         record_store=ingestion_record_store,
         queue=ordered_queue,
         timeseries_db=timeseries_db,
+        arrow_store=arrow_store,
         broker=broker,
         metrics=metrics,
     )
 
     # PyGeoAPI projection service
     pygeoapi_projection_service_config = providers.Factory(lambda cfg: PyGeoApiConfig(**cfg), config.projections.pygeoapi_service)
-    pygeoapi_projection_service = providers.Factory(PyGeoApiProjectionService, config=pygeoapi_projection_service_config, metrics=metrics)
+    pygeoapi_projection_service = providers.Factory(
+        PyGeoApiProjectionService, config=pygeoapi_projection_service_config, metrics=metrics, arrow_store=arrow_store
+    )
 
     # ODB projection service
     odb_projection_service_config = providers.Factory(lambda cfg: ODBProjectionServiceConfig(**cfg), config.projections.odb_service)
-    odb_projection_service = providers.Factory(ODBProjectionService, config=odb_projection_service_config, metrics=metrics)
+    odb_projection_service = providers.Factory(ODBProjectionService, config=odb_projection_service_config, metrics=metrics, arrow_store=arrow_store)

@@ -15,15 +15,14 @@ from pydantic import BaseModel
 from ...core.handler import BaseHandler
 from ...models.models import IngestDataCommand, StartSourceCommand
 from ...observability.metrics import IonbeamMetricsProtocol
-from ...utilities.parquet_tools import stream_dataframes_to_parquet
+from ...storage.arrow_store import ArrowStore
 from .netatmo import netatmo_metadata
-from .netatmo_processing import netatmo_dataframe_stream
+from .netatmo_processing import netatmo_record_batch_stream
 
 
 class NetAtmoArchiveConfig(BaseModel):
     """Configuration for NetAtmo Archive source."""
     archives_path: Optional[Path] = None  # Backwards-compat: single archive file
-    data_path: Path
     countries: Optional[List[str]] = None
     batch_size: int = 50000
     process_all: bool = True
@@ -32,9 +31,10 @@ class NetAtmoArchiveConfig(BaseModel):
 class NetAtmoArchiveSource(BaseHandler[StartSourceCommand, Optional[List[IngestDataCommand]]]):
     """Read Netatmo JSONL tar archives from a directory and emit IngestDataCommand"""
 
-    def __init__(self, config: NetAtmoArchiveConfig, metrics: IonbeamMetricsProtocol):
+    def __init__(self, config: NetAtmoArchiveConfig, metrics: IonbeamMetricsProtocol, arrow_store: ArrowStore):
         super().__init__("NetAtmoArchiveSource", metrics)
         self.config = config
+        self.arrow_store = arrow_store
         self.metadata = netatmo_metadata
 
     @staticmethod
@@ -214,21 +214,21 @@ class NetAtmoArchiveSource(BaseHandler[StartSourceCommand, Optional[List[IngestD
             start_s = self._format_ts_for_path(start_time)
             end_s = self._format_ts_for_path(end_time)
             now_s = self._format_ts_for_path(now_utc)
-            path = self.config.data_path / f"{self.metadata.dataset.name}_{start_s}-{end_s}_{now_s}.parquet"
+            object_key = f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
-            async def batch_stream():
-                for obj in batch:
-                    yield obj
-
-            df_stream = netatmo_dataframe_stream(
-                batch_stream(),
+            batch_stream = netatmo_record_batch_stream(
+                batch,
                 batch_size=self.config.batch_size,
                 logger=self.logger,
             )
-            rows = await stream_dataframes_to_parquet(df_stream, path, schema_fields=None)
+
+            rows = await self.arrow_store.write_record_batches(
+                object_key,
+                batch_stream,
+            )
 
             if rows == 0:
-                self.logger.warning("No rows written for batch", path=str(path))
+                self.logger.warning("No rows written for batch", key=object_key)
                 self.metrics.sources.record_ingestion_request(source_name, "no_data")
                 return None
 
@@ -238,9 +238,9 @@ class NetAtmoArchiveSource(BaseHandler[StartSourceCommand, Optional[List[IngestD
             self.metrics.sources.observe_data_lag(source_name, lag_seconds)
 
             self.logger.info(
-                "Batch parquet write completed",
+                "Batch write completed",
                 rows=rows,
-                path=str(path),
+                key=object_key,
                 start=start_time.isoformat(),
                 end=end_time.isoformat(),
             )
@@ -248,7 +248,7 @@ class NetAtmoArchiveSource(BaseHandler[StartSourceCommand, Optional[List[IngestD
             return IngestDataCommand(
                 id=uuid4(),
                 metadata=self.metadata,
-                payload_location=path,
+                payload_location=object_key,
                 start_time=start_time,
                 end_time=end_time,
             )
@@ -293,8 +293,6 @@ class NetAtmoArchiveSource(BaseHandler[StartSourceCommand, Optional[List[IngestD
         fetch_started = time.perf_counter()
 
         try:
-            self.config.data_path.mkdir(parents=True, exist_ok=True)
-
             if self.config.archives_path is None:
                 raise ValueError("NetAtmoArchiveConfig requires 'archives_path' to be set")
 

@@ -1,11 +1,29 @@
+import asyncio
 import logging
-import structlog
 import time
+from collections.abc import AsyncIterable, Iterable
 from typing import AsyncIterator, List, Optional
 
 import pandas as pd
+import pyarrow as pa
+import structlog
+
+from ionbeam.utilities.arrow_tools import dataframes_to_record_batches
 
 _logger = structlog.get_logger(__name__)
+
+
+async def _iter_messages(message_stream: Iterable[dict] | AsyncIterable[dict]) -> AsyncIterator[dict]:
+    """
+    Normalise message sources so netatmo streams can consume either iterables or async iterables.
+    """
+    if isinstance(message_stream, AsyncIterable):
+        async for msg in message_stream:
+            yield msg
+    else:
+        for msg in message_stream:
+            yield msg
+            await asyncio.sleep(0)
 
 
 def process_netatmo_geojson_messages_to_df(buffer: List[dict], logger: Optional[logging.Logger] = None) -> pd.DataFrame:
@@ -140,12 +158,12 @@ def process_netatmo_geojson_messages_to_df(buffer: List[dict], logger: Optional[
 
 
 async def netatmo_dataframe_stream(
-    message_stream: AsyncIterator[dict],
+    message_stream: Iterable[dict] | AsyncIterable[dict],
     batch_size: int = 50000,
     logger: Optional[logging.Logger] = None,
 ) -> AsyncIterator[pd.DataFrame]:
     """
-    Consume an async stream of GeoJSON messages and yield pivoted DataFrames in batches.
+    Consume a stream of GeoJSON messages (iterable or async iterable) and yield pivoted DataFrames in batches.
     Deduplication is performed within each batch.
     """
     log = logger or _logger
@@ -153,7 +171,7 @@ async def netatmo_dataframe_stream(
     total_msgs = 0
     total_batches = 0
     stream_start = time.perf_counter()
-    async for msg in message_stream:
+    async for msg in _iter_messages(message_stream):
         buffer.append(msg)
         if len(buffer) >= batch_size:
             df = process_netatmo_geojson_messages_to_df(buffer, log)
@@ -176,3 +194,25 @@ async def netatmo_dataframe_stream(
     log.info("Netatmo dataframe stream complete", batches=total_batches, total_input_msgs=total_msgs, elapsed=stream_elapsed)
 
 
+async def netatmo_record_batch_stream(
+    message_stream: Iterable[dict] | AsyncIterable[dict],
+    *,
+    batch_size: int = 50000,
+    logger: Optional[logging.Logger] = None,
+    schema: pa.Schema | None = None,
+    preserve_index: bool = False,
+) -> AsyncIterator[pa.RecordBatch]:
+    """
+    Produce Arrow RecordBatches directly from a stream of Netatmo GeoJSON messages.
+    """
+    df_stream = netatmo_dataframe_stream(
+        message_stream,
+        batch_size=batch_size,
+        logger=logger,
+    )
+    async for batch in dataframes_to_record_batches(
+        df_stream,
+        schema=schema,
+        preserve_index=preserve_index,
+    ):
+        yield batch

@@ -1,16 +1,15 @@
-import pathlib
 import random
 import time
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterator, List, Optional, Tuple
+from typing import AsyncIterator, Optional
 from uuid import uuid4
 
-import numpy as np
 import pandas as pd
-import pyarrow as pa
 from pydantic import BaseModel
 
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
+from ionbeam.storage.arrow_store import ArrowStore
+from ionbeam.utilities.arrow_tools import dataframes_to_record_batches, schema_from_ingestion_map
 
 from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ..core.handler import BaseHandler
@@ -20,13 +19,10 @@ from ..models.models import (
     IngestionMetadata,
     StartSourceCommand,
 )
-from ..utilities.parquet_tools import stream_dataframes_to_parquet
 from .metno.netatmo import netatmo_metadata
 
 
 class IonCannonConfig(BaseModel):
-    data_path: pathlib.Path
-
     # Core parameters
     num_stations: int = 10000
     measurement_frequency: timedelta = timedelta(minutes=5)
@@ -46,9 +42,10 @@ class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand
     where shape is based on DataIngestionMap configurations.
     """
 
-    def __init__(self, config: IonCannonConfig, metrics: IonbeamMetricsProtocol):
+    def __init__(self, config: IonCannonConfig, metrics: IonbeamMetricsProtocol, arrow_store: ArrowStore):
         super().__init__("IonCannonSource", metrics)
         self._config = config
+        self.arrow_store = arrow_store
 
         self.metadata: IngestionMetadata = IngestionMetadata(
             dataset=DatasetMetadata(
@@ -61,6 +58,13 @@ class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand
             ingestion_map=netatmo_metadata.ingestion_map,
             version=1,
         )
+        self._arrow_schema = schema_from_ingestion_map(self.metadata.ingestion_map)
+
+    def _build_object_key(self, start_time: datetime, end_time: datetime) -> str:
+        start_s = start_time.strftime("%Y%m%dT%H%M%SZ")
+        end_s = end_time.strftime("%Y%m%dT%H%M%SZ")
+        now_s = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        return f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
     async def generate_data_chunk(self, start_time: datetime, end_time: datetime) -> AsyncIterator[pd.DataFrame]:
         """Generate synthetic data for the time window"""
@@ -104,35 +108,18 @@ class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand
         total_rows = 0
 
         try:
-            self._config.data_path.mkdir(parents=True, exist_ok=True)
-            path = (
-                self._config.data_path
-                / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
+            object_key = self._build_object_key(event.start_time, event.end_time)
+
+            batch_stream = dataframes_to_record_batches(
+                self.generate_data_chunk(event.start_time, event.end_time),
+                schema=self._arrow_schema,
+                preserve_index=False,
             )
 
-            # Build schema from ingestion_map (same as other sources)
-            schema_fields: List[Tuple[str, pa.DataType]] = [
-                (
-                    self.metadata.ingestion_map.datetime.from_col or ObservationTimestampColumn,
-                    pa.timestamp("ns", tz="UTC"),
-                ),
-                (self.metadata.ingestion_map.lat.from_col or LatitudeColumn, pa.float64()),
-                (self.metadata.ingestion_map.lon.from_col or LongitudeColumn, pa.float64()),
-            ]
-
-            for var in self.metadata.ingestion_map.canonical_variables + self.metadata.ingestion_map.metadata_variables:
-                pa_type = (
-                    pa.string()
-                    if var.dtype == "string" or var.dtype == "object"
-                    else pa.from_numpy_dtype(np.dtype(var.dtype))
-                )
-                schema_fields.append((var.column, pa_type))
-
-            # Stream synthetic data to parquet
-            total_rows = await stream_dataframes_to_parquet(
-                self.generate_data_chunk(event.start_time, event.end_time),
-                path,
-                schema_fields,
+            total_rows = await self.arrow_store.write_record_batches(
+                object_key,
+                batch_stream,
+                schema=self._arrow_schema,
             )
 
             request_duration = time.perf_counter() - request_start
@@ -146,12 +133,12 @@ class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand
 
             self.metrics.sources.record_ingestion_request(dataset_name, "success")
 
-            self.logger.info("Generated synthetic data", rows=total_rows, path=str(path))
+            self.logger.info("Generated synthetic data", rows=total_rows, key=object_key)
 
             return IngestDataCommand(
                 id=uuid4(),
                 metadata=self.metadata,
-                payload_location=path,
+                payload_location=object_key,
                 start_time=event.start_time,
                 end_time=event.end_time,
             )

@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 import cf_units
 import pandas as pd
+import pyarrow as pa
 import pyodc as odc
 from pydantic import BaseModel
 
@@ -12,6 +13,7 @@ from ionbeam.core.constants import LatitudeColumn, LongitudeColumn, ObservationT
 from ionbeam.core.handler import BaseHandler
 from ionbeam.models.models import CanonicalStandard, CanonicalVariable, DataSetAvailableEvent, DatasetMetadata
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
+from ionbeam.storage.arrow_store import ArrowStore
 
 
 class VarNoMapping(BaseModel):
@@ -20,7 +22,6 @@ class VarNoMapping(BaseModel):
 
 
 class ODBProjectionServiceConfig(BaseModel):
-    input_path: pathlib.Path
     output_path: pathlib.Path
     variable_map: List[VarNoMapping]
 
@@ -42,9 +43,10 @@ varno_units = {
 
 
 class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
-    def __init__(self, config: ODBProjectionServiceConfig, metrics: IonbeamMetricsProtocol):
+    def __init__(self, config: ODBProjectionServiceConfig, metrics: IonbeamMetricsProtocol, arrow_store: ArrowStore):
         super().__init__("ODBProjectionService", metrics)
         self.config = config
+        self.arrow_store = arrow_store
 
         # Create lookup dict from ODB mapping config (keeps config style readable)
         self.variable_lookup: Dict[CanonicalStandard, List[int]] = defaultdict(list)
@@ -52,7 +54,12 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
             for canonical in mapping.mapped_from:
                 self.variable_lookup[canonical].append(mapping.varno)
 
-    def _map_canonical_df_to_odb(self, metadata: DatasetMetadata, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    def _map_canonical_batch_to_odb(self, metadata: DatasetMetadata, batch: pa.RecordBatch) -> Optional[pa.Table]:
+        """Process a single Arrow batch and return ODB-formatted Arrow table."""
+        
+        # Convert to pandas for complex operations (ODB encoding requires pandas anyway)
+        df = batch.to_pandas(types_mapper={pa.string(): pd.StringDtype(storage="python")}.get)
+        
         odb_frames: List[pd.DataFrame] = []
 
         # Extract header values
@@ -151,7 +158,7 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
                 try:
                     from_cf_unit = cf_units.Unit(col_var.cf_unit)
                     to_cf_unit = cf_units.Unit(varno_unit)
-                    converted = from_cf_unit.convert(values[mask].to_numpy(), to_cf_unit)  # returns numpy.ndarray
+                    converted = from_cf_unit.convert(values[mask].to_numpy(), to_cf_unit)
                 except Exception as e:
                     self.logger.error("Unit conversion failed", column=col, from_unit=col_var.cf_unit, to_unit=varno_unit, error=str(e))
                     continue  # Skip this column but continue to process others
@@ -166,28 +173,46 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         if not odb_frames:
             return None
 
-        return pd.concat(odb_frames, ignore_index=True)
+        combined_df = pd.concat(odb_frames, ignore_index=True)
+        return pa.Table.from_pandas(combined_df)
 
     async def _handle(self, event: DataSetAvailableEvent):
-        dataset_path = pathlib.Path(event.dataset_location)
-        if dataset_path.exists():
-            df = pd.read_parquet(dataset_path)  # TODO - implement Parquet streaming
+        # Read Arrow batches from object store
+        batch_stream = self.arrow_store.read_record_batches(event.dataset_location)
 
-            odb_df = self._map_canonical_df_to_odb(event.metadata, df)
-            if odb_df is None:
-                self.logger.error("Unable to create valid ODB dataframe")
-                return
-            output_filename = dataset_path.stem + ".odb"
+        # Process batches and collect ODB tables
+        odb_tables: List[pa.Table] = []
+        
+        async for batch in batch_stream:
+            if batch.num_rows == 0:
+                continue
+                
+            odb_table = self._map_canonical_batch_to_odb(event.metadata, batch)
+            if odb_table is not None:
+                odb_tables.append(odb_table)
 
-            # Ensure output directory exists
-            odb_path = self.config.output_path
-            odb_path.mkdir(parents=True, exist_ok=True)
+        if not odb_tables:
+            self.logger.warning("No ODB data generated", key=event.dataset_location)
+            return
 
-            odb_df.to_parquet(str(odb_path / output_filename).replace(".odb", ".parquet"))  # easy debugging
-            odc.encode_odb(odb_df, str(odb_path / output_filename))
-            self.logger.info("Wrote ODB file", path=str(odb_path / output_filename))
-        else:
-            self.logger.error("Dataset file not found", path=str(dataset_path))
+        # Concatenate all ODB tables
+        combined_table = pa.concat_tables(odb_tables)
+        
+        # Convert to pandas for ODB encoding (pyodc requires pandas)
+        odb_df = combined_table.to_pandas()
+        
+        # Generate output filename from event metadata
+        start_str = event.start_time.strftime("%Y%m%d_%H%M")
+        end_str = event.end_time.strftime("%Y%m%d_%H%M")
+        output_filename = f"{event.metadata.name}_{start_str}_{end_str}.odb"
+
+        # Ensure output directory exists
+        odb_path = self.config.output_path
+        odb_path.mkdir(parents=True, exist_ok=True)
+
+        odb_df.to_parquet(str(odb_path / output_filename).replace(".odb", ".parquet"))  # easy debugging
+        odc.encode_odb(odb_df, str(odb_path / output_filename))
+        self.logger.info("Wrote ODB file", path=str(odb_path / output_filename), rows=len(odb_df))
 
 
 if __name__ == "__main__":
@@ -268,7 +293,6 @@ if __name__ == "__main__":
 
     # Build a mapping tolerant to both surface and MSLP pressure names.
     config = ODBProjectionServiceConfig(
-        input_path=pathlib.Path("./data-raw"),
         output_path=pathlib.Path("./data-raw"),
         variable_map=[
             VarNoMapping(
@@ -374,8 +398,11 @@ if __name__ == "__main__":
     )
 
     from ionbeam.observability.metrics import IonbeamMetrics
+    from ionbeam.storage.arrow_store import LocalFileSystemStore
+    
     metrics = IonbeamMetrics()
-    odb_service = ODBProjectionService(config, metrics)
+    arrow_store = LocalFileSystemStore(pathlib.Path("./data-raw"))
+    odb_service = ODBProjectionService(config, metrics, arrow_store)
 
     metadata = DatasetMetadata(
         name="test",
@@ -386,7 +413,8 @@ if __name__ == "__main__":
         keywords=["meteotracker", "iot", "data"],
     )
 
-    out = odb_service._map_canonical_df_to_odb(metadata, df)
+    out = odb_service._map_canonical_batch_to_odb(metadata, pa.RecordBatch.from_pandas(df))
 
     print(df.head())
-    print(out)
+    if out:
+        print(out.to_pandas())

@@ -3,7 +3,6 @@ import json
 import ssl
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import List
 from uuid import uuid4
 
@@ -15,10 +14,11 @@ from pydantic import BaseModel
 
 from ionbeam.models.models import IngestDataCommand
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
-from ionbeam.utilities.parquet_tools import stream_dataframes_to_parquet
+from ionbeam.storage.arrow_store import ArrowStore
+from ionbeam.utilities.arrow_tools import schema_from_ingestion_map
 
 from .netatmo import netatmo_metadata
-from .netatmo_processing import netatmo_dataframe_stream
+from .netatmo_processing import netatmo_record_batch_stream
 
 
 class NetAtmoMQTTConfig(BaseModel):
@@ -29,7 +29,6 @@ class NetAtmoMQTTConfig(BaseModel):
     client_id: str
     keepalive: int = 120
     use_tls: bool = True
-    data_path: Path
     url: str
     routing_key: str = "ionbeam.ingestion.ingestV1"
     flush_interval_seconds: int = 60
@@ -38,7 +37,7 @@ class NetAtmoMQTTConfig(BaseModel):
 
 
 class NetAtmoMQTTSource:
-    def __init__(self, config: NetAtmoMQTTConfig, metrics: IonbeamMetricsProtocol):
+    def __init__(self, config: NetAtmoMQTTConfig, metrics: IonbeamMetricsProtocol, arrow_store: ArrowStore):
         self.config = config
         self._buffer: List[dict] = []
         self._lock = asyncio.Lock()
@@ -50,6 +49,8 @@ class NetAtmoMQTTSource:
         self.metrics = metrics
         self._source_name = self.metadata.dataset.name
         self._last_flush = time.monotonic()
+        self.arrow_store = arrow_store
+        self._arrow_schema = schema_from_ingestion_map(self.metadata.ingestion_map)
 
         self._identifier = self.config.client_id
 
@@ -173,44 +174,45 @@ class NetAtmoMQTTSource:
                     start_time = times.min().to_pydatetime()
                     end_time = times.max().to_pydatetime()
 
-                    self.config.data_path.mkdir(parents=True, exist_ok=True)
                     start_s = self._ts_for_path(start_time)
                     end_s = self._ts_for_path(end_time)
                     now_s = self._ts_for_path(datetime.now(timezone.utc))
-                    path = self.config.data_path / f"{self.metadata.dataset.name}_{start_s}-{end_s}_{now_s}.parquet"
-
-                    async def drained_stream():
-                        for obj in drained:
-                            yield obj
+                    object_key = f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
                     try:
-                        df_stream = netatmo_dataframe_stream(
-                            drained_stream(),
+                        batch_stream = netatmo_record_batch_stream(
+                            drained,
                             batch_size=self.config.flush_max_records,
                             logger=self.logger,
+                            schema=self._arrow_schema,
                         )
-                        rows = await stream_dataframes_to_parquet(df_stream, path, schema_fields=None)
+                        rows = await self.arrow_store.write_record_batches(
+                            object_key,
+                            batch_stream,
+                            schema=self._arrow_schema,
+                        )
+
                         now_utc = datetime.now(timezone.utc)
                         lag_seconds = max(0.0, (now_utc - start_time).total_seconds())
                         self.metrics.sources.observe_data_lag(source, lag_seconds)
                         self.metrics.sources.observe_request_rows(source, int(rows))
                         self.metrics.sources.record_ingestion_request(source, "success")
                         self.logger.info(
-                            "Wrote parquet file",
+                            "Wrote data to object store",
                             rows=rows,
-                            path=str(path),
+                            key=object_key,
                             start=start_time.isoformat(),
                             end=end_time.isoformat(),
                         )
                     except Exception as e:
                         self.metrics.sources.record_ingestion_request(source, "error")
-                        self.logger.error("Failed to write parquet file", error=str(e), path=str(path))
+                        self.logger.error("Failed to write to object store", error=str(e), key=object_key)
                         continue
 
                     ingestion_command = IngestDataCommand(
                         id=uuid4(),
                         metadata=self.metadata,
-                        payload_location=path,
+                        payload_location=object_key,
                         start_time=start_time,
                         end_time=end_time,
                     )
@@ -226,15 +228,14 @@ class NetAtmoMQTTSource:
                             break
                         except Exception as e:
                             if attempt < 2:
-                                self.logger.warning("Failed to publish", error=str(e), path=str(path))
+                                self.logger.warning("Failed to publish", error=str(e), key=object_key)
                                 await asyncio.sleep(1)
                             else:
-                                self.logger.error("AMQP publish error", error=str(e), path=str(path))
+                                self.logger.error("AMQP publish error", error=str(e), key=object_key)
                     if not published:
-                        self.logger.error("Failed to publish ingestion command after retries", path=str(path))
+                        self.logger.error("Failed to publish ingestion command after retries", key=object_key)
                     self._last_flush = time.monotonic()
         except asyncio.CancelledError:
             raise
-        except Exception as e:
+        except Exception:
             self.metrics.sources.record_ingestion_request(self._source_name, "error")
-            self.logger.error("Aggregate/publish task error", error=str(e))

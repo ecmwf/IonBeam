@@ -2,26 +2,25 @@ import asyncio
 import gzip
 import io
 import logging
-import pathlib
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from time import perf_counter
-from typing import AsyncIterator, Iterable, List, Optional, Tuple
+from typing import AsyncIterator, Iterable, Optional
 from uuid import UUID, uuid4
 
 import httpx
 import numpy as np
 import pandas as pd
-import pyarrow as pa
 from aiostream import stream
 from bs4 import BeautifulSoup
 from httpx_retries import Retry, RetryTransport
 from pydantic import BaseModel
 
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
+from ionbeam.storage.arrow_store import ArrowStore
+from ionbeam.utilities.arrow_tools import dataframes_to_record_batches, schema_from_ingestion_map
 
-from ..core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ..core.handler import BaseHandler
 from ..models.models import (
     CanonicalVariable,
@@ -36,7 +35,6 @@ from ..models.models import (
     TimeAxis,
 )
 from ..utilities.dataframe_tools import coerce_types
-from ..utilities.parquet_tools import stream_dataframes_to_parquet
 
 
 @dataclass
@@ -50,7 +48,6 @@ class SensorCommunityConfig(BaseModel):
     base_url: str = "https://archive.sensor.community"
     timeout_seconds: int = 60
     concurrency: int = 10
-    data_path: pathlib.Path
     use_cache: Optional[bool] = True
 
 
@@ -74,9 +71,10 @@ retry_transport = RetryTransport(retry=Retry(total=5, backoff_factor=0.5))
 
 
 class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]):
-    def __init__(self, config: SensorCommunityConfig, metrics: IonbeamMetricsProtocol):
+    def __init__(self, config: SensorCommunityConfig, metrics: IonbeamMetricsProtocol, arrow_store: ArrowStore):
         super().__init__("SensorCommunitySource", metrics)
         self._config = config
+        self.arrow_store = arrow_store
         self.metadata: IngestionMetadata = IngestionMetadata(
             dataset=DatasetMetadata(
                 name="sensor.community",
@@ -105,6 +103,7 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
                 ],
             ),
         )
+        self._arrow_schema = schema_from_ingestion_map(self.metadata.ingestion_map)
 
     async def load_raw_to_df(self, url: str, client: httpx.AsyncClient):
         # @cached(f'raw_sensor_data_{url}', timeout=timedelta(days=365), use_cache=self._config.use_cache)
@@ -235,35 +234,28 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
         total_rows = 0
 
         try:
-            self._config.data_path.mkdir(parents=True, exist_ok=True)
-            path = (
-                self._config.data_path
-                / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
-            )
+            # Generate object key
+            start_s = event.start_time.strftime("%Y%m%dT%H%M%SZ")
+            end_s = event.end_time.strftime("%Y%m%dT%H%M%SZ")
+            now_s = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            object_key = f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
-            # Create async generator that yields just the dataframes
             async def dataframe_stream():
                 async for chunk in self.crawl_sensor_data_in_chunks(event.start_time, event.end_time):
-                    if chunk.data is not None:
+                    if chunk.data is not None and not chunk.data.empty:
                         yield chunk.data
-            
-            # Build schema from ingestion_map
-            schema_fields: List[Tuple[str, pa.DataType]] = [
-                (self.metadata.ingestion_map.datetime.from_col or ObservationTimestampColumn, pa.timestamp("ns", tz="UTC")),
-                (self.metadata.ingestion_map.lat.from_col or LatitudeColumn, pa.float64()),
-                (self.metadata.ingestion_map.lon.from_col or LongitudeColumn, pa.float64()),
-            ]
 
-            for var in self.metadata.ingestion_map.canonical_variables + self.metadata.ingestion_map.metadata_variables:
-                pa_type = pa.string() if var.dtype == "string" or var.dtype == "object" else pa.from_numpy_dtype(np.dtype(var.dtype))
-                schema_fields.append((var.column, pa_type))
-    
-            
-            # Stream data directly to parquet file using helper
-            total_rows = await stream_dataframes_to_parquet(
+            batch_stream = dataframes_to_record_batches(
                 dataframe_stream(),
-                path,
-                schema_fields,
+                schema=self._arrow_schema,
+                preserve_index=False,
+            )
+
+            # Stream data to object store
+            total_rows = await self.arrow_store.write_record_batches(
+                object_key,
+                batch_stream,
+                schema=self._arrow_schema,
             )
 
             request_duration = perf_counter() - request_start
@@ -277,12 +269,12 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
 
             self.metrics.sources.record_ingestion_request(dataset_name, "success")
 
-            self.logger.info(f"Saved {total_rows} rows to {path}")
+            self.logger.info("Saved data to object store", rows=total_rows, key=object_key)
 
             return IngestDataCommand(
                 id=uuid4(),
                 metadata=self.metadata,
-                payload_location=path,
+                payload_location=object_key,
                 start_time=event.start_time,
                 end_time=event.end_time,
             )

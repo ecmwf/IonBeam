@@ -1,5 +1,4 @@
 import asyncio
-import pathlib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -12,6 +11,8 @@ import pandas as pd
 from pydantic import BaseModel
 
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
+from ionbeam.storage.arrow_store import ArrowStore
+from ionbeam.utilities.arrow_tools import dataframes_to_record_batches, schema_from_ingestion_map
 
 from ..core.constants import LatitudeColumn, LongitudeColumn
 from ..core.handler import BaseHandler
@@ -30,7 +31,6 @@ from ..models.models import (
 
 
 class MeteoTrackerConfig(BaseModel):
-    data_path: pathlib.Path
     base_url: str = "https://app.meteotracker.com/api/"
     token_endpoint: str = "https://app.meteotracker.com/auth/login/api"
     refresh_endpoint: str = "https://app.meteotracker.com/auth/refreshtoken"
@@ -84,9 +84,10 @@ class MT_Session:
 
 
 class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]):
-    def __init__(self, config: MeteoTrackerConfig, metrics: IonbeamMetricsProtocol):
+    def __init__(self, config: MeteoTrackerConfig, metrics: IonbeamMetricsProtocol, arrow_store: ArrowStore):
         super().__init__("MeteoTrackerSource", metrics)
         self.config = config
+        self.arrow_store = arrow_store
         self._access_token: Optional[str] = None
         self._refresh_token: Optional[str] = None
         self.metadata: IngestionMetadata = IngestionMetadata(
@@ -109,27 +110,31 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
                     CanonicalVariable(column="H", standard_name="relative_humidity", cf_unit="1"),
                     CanonicalVariable(column="tp", standard_name="air_potential_temperature", cf_unit="K"),
                     CanonicalVariable(column="td", standard_name="dew_point_temperature", cf_unit="degC"),
-                    CanonicalVariable(column="HDX", standard_name="humidity_index", cf_unit="degC"), # Not a valid cf standard
-                    CanonicalVariable(column="i", standard_name="air_temperature_lapse_rate", cf_unit="degC/100m"), # TODO - need to define behavior here - CF standard is only deg_c m-1 - should the source convert?
+                    CanonicalVariable(column="HDX", standard_name="humidity_index", cf_unit="degC"),  # Not a valid cf standard
+                    CanonicalVariable(
+                        column="i", standard_name="air_temperature_lapse_rate", cf_unit="degC/100m"
+                    ),  # TODO - CF standard is only deg_c m-1 - should the source convert?
                     CanonicalVariable(column="s", standard_name="wind_speed", cf_unit="km h-1"),
-                    CanonicalVariable(column="L", standard_name="solar_radiation_index", cf_unit="1"), # Not a valid cf standard
-                    CanonicalVariable(column="bt", standard_name="bluetooth_RSSI", cf_unit="dBm"), # Not a valid cf standard
-                    CanonicalVariable(column="CO2", standard_name="mole_fraction_of_carbon_dioxide_in_air", cf_unit="1e-6"), # ppm
-                    CanonicalVariable(column="CO", standard_name="mole_fraction_of_carbon_monoxide_in_air", cf_unit="1e-6"), # ppm
-                    CanonicalVariable(column="SO2", standard_name="mole_fraction_of_sulphur_dioxide_in_air", cf_unit="1e-6"), # ppm
+                    CanonicalVariable(column="L", standard_name="solar_radiation_index", cf_unit="1"),  # Not a valid cf standard
+                    CanonicalVariable(column="bt", standard_name="bluetooth_RSSI", cf_unit="dBm"),  # Not a valid cf standard
+                    CanonicalVariable(column="CO2", standard_name="mole_fraction_of_carbon_dioxide_in_air", cf_unit="1e-6"),  # ppm
+                    CanonicalVariable(column="CO", standard_name="mole_fraction_of_carbon_monoxide_in_air", cf_unit="1e-6"),  # ppm
+                    CanonicalVariable(column="SO2", standard_name="mole_fraction_of_sulphur_dioxide_in_air", cf_unit="1e-6"),  # ppm
                     CanonicalVariable(column="m1", standard_name="mass_concentration_of_pm1_ambient_aerosol_in_air", cf_unit="ug m-3"),
                     CanonicalVariable(column="m2", standard_name="mass_concentration_of_pm2p5_ambient_aerosol_in_air", cf_unit="ug m-3"),
-                    CanonicalVariable(column="m4", standard_name="mass_concentration_of_pm4_ambient_aerosol_in_air", cf_unit="ug m-3"), # pm4 not a cf standard
+                    CanonicalVariable(
+                        column="m4", standard_name="mass_concentration_of_pm4_ambient_aerosol_in_air", cf_unit="ug m-3"
+                    ),  # pm4 not a cf standard
                     CanonicalVariable(column="m10", standard_name="mass_concentration_of_pm10_ambient_aerosol_in_air", cf_unit="ug m-3"),
-                    CanonicalVariable(column="n0", standard_name="particulate_matter_particle_number_0_5", cf_unit="cm-3"), # Not a valid cf standard
-                    CanonicalVariable(column="n1", standard_name="particulate_matter_particle_number_1", cf_unit="cm-3"), # Not a valid cf standard
-                    CanonicalVariable(column="n2", standard_name="particulate_matter_particle_number_2_5", cf_unit="cm-3"), # Not a valid cf standard
-                    CanonicalVariable(column="n4", standard_name="particulate_matter_particle_number_4", cf_unit="cm-3"), # Not a valid cf standard
-                    CanonicalVariable(column="n10", standard_name="particulate_matter_particle_number_10", cf_unit="cm-3"), # Not a valid cf standard
-                    CanonicalVariable(column="tps", standard_name="typical_particle_size", cf_unit="um"), # Not a valid cf standard
+                    CanonicalVariable(column="n0", standard_name="particulate_matter_particle_number_0_5", cf_unit="cm-3"),  # Not a valid cf standard
+                    CanonicalVariable(column="n1", standard_name="particulate_matter_particle_number_1", cf_unit="cm-3"),  # Not a valid cf standard
+                    CanonicalVariable(column="n2", standard_name="particulate_matter_particle_number_2_5", cf_unit="cm-3"),  # Not a valid cf standard
+                    CanonicalVariable(column="n4", standard_name="particulate_matter_particle_number_4", cf_unit="cm-3"),  # Not a valid cf standard
+                    CanonicalVariable(column="n10", standard_name="particulate_matter_particle_number_10", cf_unit="cm-3"),  # Not a valid cf standard
+                    CanonicalVariable(column="tps", standard_name="typical_particle_size", cf_unit="um"),  # Not a valid cf standard
                     CanonicalVariable(column="EAQ", standard_name="epa_air_quality", cf_unit="1"),  # Not a valid cf standard
                     CanonicalVariable(column="FAQ", standard_name="fast_air_quality", cf_unit="1"),  # Not a valid cf standard
-                    CanonicalVariable(column="O3", standard_name="ozone", cf_unit="1e-9"), # ppb - Also not a valid cf standard
+                    CanonicalVariable(column="O3", standard_name="ozone", cf_unit="1e-9"),  # ppb - Also not a valid cf standard
                 ],
                 metadata_variables=[
                     MetadataVariable(column="station_id"),
@@ -138,11 +143,10 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
                 ],
             ),
         )
+        self._arrow_schema = schema_from_ingestion_map(self.metadata.ingestion_map)
 
         self.author_regex_to_living_lab = {
-            re.compile(pattern): living_lab
-            for living_lab, patterns in self.config.author_patterns.items()
-            for pattern in patterns
+            re.compile(pattern): living_lab for living_lab, patterns in self.config.author_patterns.items() for pattern in patterns
         }
 
     async def _authenticate(self) -> bool:
@@ -324,7 +328,7 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
             if response is None:
                 consecutive_failures += 1
                 self.logger.warning("Failed to fetch page %s (consecutive failures: %s)", i, consecutive_failures)
-                
+
                 # If we've had multiple consecutive failures, assume connectivity issues
                 if consecutive_failures >= max_consecutive_failures:
                     self.logger.error("Multiple consecutive request failures detected. Failing fast.")
@@ -374,9 +378,7 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
             )
             del df["lo"]
 
-        living_labs = {
-            living_lab for pattern, living_lab in self.author_regex_to_living_lab.items() if pattern.match(session.author)
-        }
+        living_labs = {living_lab for pattern, living_lab in self.author_regex_to_living_lab.items() if pattern.match(session.author)}
         if len(living_labs) == 0:
             living_lab = "unknown"
         elif len(living_labs) == 1:
@@ -398,41 +400,53 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
             sessions_metadata = await self._fetch_session_metadata(event.start_time, event.end_time)
             self.logger.debug(sessions_metadata)
 
-            all_chunks = []
-            for session_metadata in sessions_metadata:
-                data = await self._fetch_session_data(session_metadata)
-                if data is not None:
-                    all_chunks.append(data)
-
-            if not all_chunks:
+            if not sessions_metadata:
                 request_duration = perf_counter() - request_start
                 self.metrics.sources.observe_fetch_duration(dataset_name, request_duration)
                 self.metrics.sources.observe_request_rows(dataset_name, 0)
                 self.metrics.sources.record_ingestion_request(dataset_name, "empty")
-                self.logger.warning("No data collected")
+                self.logger.warning("No session metadata available")
                 return None
 
-            complete_df = pd.concat(all_chunks, ignore_index=True)
-            total_rows = int(len(complete_df))
+            start_s = event.start_time.strftime("%Y%m%dT%H%M%SZ")
+            end_s = event.end_time.strftime("%Y%m%dT%H%M%SZ")
+            now_s = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            key = f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
-            self.config.data_path.mkdir(parents=True, exist_ok=True)
-            path = (
-                self.config.data_path
-                / f"{self.metadata.dataset.name}_{event.start_time}-{event.end_time}_{datetime.now(timezone.utc)}.parquet"
+            async def dataframe_stream():
+                for session in sessions_metadata:
+                    df = await self._fetch_session_data(session)
+                    if df is not None and not df.empty:
+                        yield df
+
+            batch_stream = dataframes_to_record_batches(
+                dataframe_stream(),
+                schema=self._arrow_schema,
+                preserve_index=False,
             )
-            complete_df.to_parquet(path, engine="pyarrow")
+
+            total_rows = await self.arrow_store.write_record_batches(
+                key,
+                batch_stream,
+                schema=self._arrow_schema,
+            )
 
             request_duration = perf_counter() - request_start
             self.metrics.sources.observe_fetch_duration(dataset_name, request_duration)
-            self.metrics.sources.observe_request_rows(dataset_name, total_rows)
-            self.metrics.sources.record_ingestion_request(dataset_name, "success")
+            self.metrics.sources.observe_request_rows(dataset_name, int(total_rows))
 
-            self.logger.info(f"Saved {len(complete_df)} rows to {path}")
+            if total_rows == 0:
+                self.metrics.sources.record_ingestion_request(dataset_name, "empty")
+                self.logger.warning("No data collected for MeteoTracker")
+                return None
+
+            self.metrics.sources.record_ingestion_request(dataset_name, "success")
+            self.logger.info("Saved MeteoTracker data to store", rows=total_rows, key=key)
 
             return IngestDataCommand(
                 id=uuid4(),
                 metadata=self.metadata,
-                payload_location=path,
+                payload_location=key,
                 start_time=event.start_time,
                 end_time=event.end_time,
             )
@@ -442,5 +456,5 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
             self.metrics.sources.observe_fetch_duration(dataset_name, request_duration)
             self.metrics.sources.observe_request_rows(dataset_name, int(total_rows))
             self.metrics.sources.record_ingestion_request(dataset_name, "error")
-            self.logger.exception(e)
+            self.logger.exception("MeteoTracker ingestion failed", error=str(e))
             return None

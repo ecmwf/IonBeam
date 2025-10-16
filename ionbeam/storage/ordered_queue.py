@@ -28,9 +28,9 @@ class OrderedQueue(ABC):
 class RedisOrderedQueue(OrderedQueue):
     """Redis implementation using sorted sets for priority queue."""
     
-    def __init__(self, client: redis.Redis, queue_key: str = "dataset_queue"):
+    def __init__(self, client: redis.Redis, queue_key: str = "build_queue"):
         self.client = client
-        self.queue_key = queue_key
+        self.queue_key = "build_queue"
     
     async def enqueue(self, window: Window, priority: int) -> None:
         """Add a window to the queue with the given priority.
