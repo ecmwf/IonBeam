@@ -12,7 +12,6 @@ class StartSourceCommand(BaseModel):
     source_name: str
     start_time: datetime
     end_time: datetime
-    use_cache: bool = False  # TODO - wire this up in both meteotracker and sensor_community
 
 
 class Link(BaseModel):

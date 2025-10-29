@@ -14,12 +14,14 @@ from structlog.stdlib import LoggerFactory, ProcessorFormatter
 
 from ..core.containers import IonbeamContainer
 from ..models.models import DataAvailableEvent, DataSetAvailableEvent, IngestDataCommand, StartSourceCommand
+from ..projections.ionbeam_legacy.projection_service import IonbeamLegacyProjectionService
 from ..projections.odb.projection_service import ODBProjectionService
 from ..projections.pygeoapi.projection_service import PyGeoApiProjectionService
 from ..scheduler.source_scheduler import SourceScheduler
 from ..services.dataset_builder import DatasetBuilder
 from ..services.dataset_coordinator import DatasetCoordinatorService
 from ..services.ingestion import IngestionService
+from ..sources.acronet import AcronetSource
 from ..sources.ioncannon import IonCannonSource
 from ..sources.meteotracker import MeteoTrackerSource
 from ..sources.metno.netatmo import NetAtmoSource
@@ -99,11 +101,15 @@ async def create_faststream_handlers(
     ioncannon_source: IonCannonSource = Provide[IonbeamContainer.ion_cannon_source],
     sensor_community_source: SensorCommunitySource = Provide[IonbeamContainer.sensor_community_source],
     meteotracker_source: MeteoTrackerSource = Provide[IonbeamContainer.meteotracker_source],
+    acronet_source: AcronetSource = Provide[IonbeamContainer.acronet_source],
     netatmo_archive_source: NetAtmoArchiveSource = Provide[IonbeamContainer.netatmo_archive_source],
     ingestion_service: IngestionService = Provide[IonbeamContainer.ingestion_service],
     dataset_coordinator_service: DatasetCoordinatorService = Provide[IonbeamContainer.dataset_coordinator_service],
     pygeoapi_projection_service: PyGeoApiProjectionService = Provide[IonbeamContainer.pygeoapi_projection_service],
     odb_projection_service: ODBProjectionService = Provide[IonbeamContainer.odb_projection_service],
+    ionbeam_legacy_projection_service: IonbeamLegacyProjectionService = Provide[
+        IonbeamContainer.ionbeam_legacy_projection_service
+    ],
 ):
     ingestion_fanout = RabbitExchange(
         "ionbeam.data.available",
@@ -127,6 +133,10 @@ async def create_faststream_handlers(
         "ionbeam.dataset.available.odb",
         durable=True,
     )
+    ionbeam_legacy_q = RabbitQueue(
+        "ionbeam.dataset.available.legacy",
+        durable=True,
+    )
 
     @broker.subscriber("ionbeam.source.netatmo.start")
     async def handle_netatmo(command: StartSourceCommand):
@@ -146,6 +156,11 @@ async def create_faststream_handlers(
     @broker.subscriber("ionbeam.source.meteotracker.start")
     async def handle_meteotracker(command: StartSourceCommand):
         if (result := await meteotracker_source.handle(command)):
+            await broker.publish(result, "ionbeam.ingestion.ingestV1")
+
+    @broker.subscriber("ionbeam.source.acronet.start")
+    async def handle_acronet(command: StartSourceCommand):
+        if (result := await acronet_source.handle(command)):
             await broker.publish(result, "ionbeam.ingestion.ingestV1")
 
     @broker.subscriber("ionbeam.source.netatmo_archive.start")
@@ -169,9 +184,13 @@ async def create_faststream_handlers(
     async def handle_pygeoapi_projection(event: DataSetAvailableEvent):
         await pygeoapi_projection_service.handle(event)
 
-    @broker.subscriber(odb_q, dataset_fanout)
-    async def handle_odb_projection(event: DataSetAvailableEvent):
-        await odb_projection_service.handle(event)
+    # @broker.subscriber(odb_q, dataset_fanout)
+    # async def handle_odb_projection(event: DataSetAvailableEvent):
+    #     await odb_projection_service.handle(event)
+
+    @broker.subscriber(ionbeam_legacy_q, dataset_fanout)
+    async def handle_ionbeam_legacy_projection(event: DataSetAvailableEvent):
+        await ionbeam_legacy_projection_service.handle(event)
 
 
 async def factory():
@@ -200,7 +219,6 @@ async def factory():
             ("/metrics", make_asgi_app(registry)),
         ],
     )
-    # Logging is configured globally via structlog + logging. No per-logger overrides needed.
 
     @app.on_startup
     async def startup():

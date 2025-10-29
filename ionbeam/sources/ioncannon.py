@@ -1,4 +1,5 @@
 import random
+import string
 import time
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator, Optional
@@ -24,7 +25,7 @@ from .metno.netatmo import netatmo_metadata
 
 class IonCannonConfig(BaseModel):
     # Core parameters
-    num_stations: int = 10000
+    num_stations: int = 1000
     measurement_frequency: timedelta = timedelta(minutes=5)
 
     # Geographic bounds for station placement (Central Europe)
@@ -34,6 +35,9 @@ class IonCannonConfig(BaseModel):
         "min_lon": 5.0,
         "max_lon": 15.0,
     }
+
+    # Cardinality control for metadata variables
+    metadata_cardinality: int = 10
 
 
 class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]):
@@ -59,6 +63,30 @@ class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand
             version=1,
         )
         self._arrow_schema = schema_from_ingestion_map(self.metadata.ingestion_map)
+        
+        # Pre-generate fixed pools of metadata values to control cardinality
+        self._metadata_value_pools = self._generate_metadata_value_pools()
+
+    def _generate_metadata_value_pools(self) -> dict[str, list[str]]:
+        """
+        Generate a fixed pool of values for each metadata variable to control cardinality.
+        This prevents high cardinality issues in InfluxDB tags.
+        """
+        pools = {}
+        cardinality = self._config.metadata_cardinality
+        
+        for var in self.metadata.ingestion_map.metadata_variables:
+            column_name = var.column
+            
+            # Generate pool of values in format: <column_name>-<random_suffix>
+            pool = []
+            for i in range(cardinality):
+                suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=3))
+                pool.append(f"{column_name}-{suffix}")
+            
+            pools[column_name] = pool
+        
+        return pools
 
     def _build_object_key(self, start_time: datetime, end_time: datetime) -> str:
         start_s = start_time.strftime("%Y%m%dT%H%M%SZ")
@@ -84,18 +112,26 @@ class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand
             # Generate random station location
             lat = random.uniform(bounds["min_lat"], bounds["max_lat"])
             lon = random.uniform(bounds["min_lon"], bounds["max_lon"])
-
+            time_col = getattr(self.metadata.ingestion_map.datetime, "from_col", None) or ObservationTimestampColumn
+            lat_col = getattr(self.metadata.ingestion_map.lat, "from_col", None) or LatitudeColumn
+            lon_col = getattr(self.metadata.ingestion_map.lon, "from_col", None) or LongitudeColumn
             for timestamp in timestamps:
                 row = {
-                    ObservationTimestampColumn: timestamp,
-                    LatitudeColumn: lat,
-                    LongitudeColumn: lon,
+                    time_col: timestamp,
+                    lat_col: lat,
+                    lon_col: lon,
                     "station_id": f"SYNTH_{station_id:04d}",
                 }
 
                 # Generate simple random values for all canonical variables
                 for var in self.metadata.ingestion_map.canonical_variables:
                     row[var.column] = random.uniform(0, 100)
+
+                # Add metadata variables by randomly selecting from pre-generated pools
+                for var in self.metadata.ingestion_map.metadata_variables:
+                    if var.column != "station_id":
+                        # Select random value from the fixed pool for this metadata variable
+                        row[var.column] = random.choice(self._metadata_value_pools[var.column])
 
                 rows.append(row)
 

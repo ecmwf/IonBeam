@@ -1,11 +1,11 @@
 import asyncio
-import structlog
 import math
 import re
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID, uuid4
 
+import structlog
 from faststream.rabbit import RabbitBroker
 from pydantic import BaseModel, Field, field_validator
 
@@ -72,14 +72,14 @@ class SourceScheduler:
             self._publishers[source_name] = pub
         return pub
 
-    async def trigger_source(self, source_name: str, start_time: datetime, end_time: datetime) -> Optional[StartSourceCommand]:
+    async def trigger_source(self, source_name: str, start_time: datetime, end_time: datetime, id: Optional[UUID] = None) -> Optional[StartSourceCommand]:
         """
         Trigger a source manually without scheduling.
         This is the core business logic for starting sources.
         """
         try:
             command = StartSourceCommand(
-                id=uuid4(),
+                id=id or uuid4(),
                 source_name=source_name,
                 start_time=start_time,
                 end_time=end_time,

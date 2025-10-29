@@ -12,6 +12,7 @@ from ionbeam.observability.metrics import IonbeamMetrics
 from ionbeam.sources.metno.netatmo_mqtt import NetAtmoMQTTConfig, NetAtmoMQTTSource
 from ionbeam.storage.arrow_store import LocalFileSystemStore
 
+from ..projections.ionbeam_legacy.projection_service import IonbeamLegacyConfig, IonbeamLegacyProjectionService
 from ..projections.odb.projection_service import ODBProjectionService, ODBProjectionServiceConfig
 from ..projections.pygeoapi.projection_service import (
     PyGeoApiConfig,
@@ -21,6 +22,7 @@ from ..scheduler.source_scheduler import SchedulerConfig, SourceScheduler
 from ..services.dataset_builder import DatasetBuilder, DatasetBuilderConfig
 from ..services.dataset_coordinator import DatasetCoordinatorConfig, DatasetCoordinatorService
 from ..services.ingestion import IngestionConfig, IngestionService
+from ..sources.acronet import AcronetConfig, AcronetSource
 from ..sources.ioncannon import IonCannonConfig, IonCannonSource
 from ..sources.meteotracker import MeteoTrackerConfig, MeteoTrackerSource
 from ..sources.metno.netatmo import NetAtmoConfig, NetAtmoSource
@@ -112,6 +114,10 @@ class IonbeamContainer(containers.DeclarativeContainer):
     meteotracker_config = providers.Factory(lambda cfg: MeteoTrackerConfig(**cfg), config.sources.meteotracker)
     meteotracker_source = providers.Factory(MeteoTrackerSource, config=meteotracker_config, metrics=metrics, arrow_store=arrow_store)
 
+    # acronet
+    acronet_config = providers.Factory(lambda cfg: AcronetConfig(**cfg), config.sources.acronet)
+    acronet_source = providers.Factory(AcronetSource, config=acronet_config, metrics=metrics, arrow_store=arrow_store)
+
     # netatmo
     netatmo_config = providers.Factory(lambda cfg: NetAtmoConfig(**cfg), config.sources.netatmo)
     netatmo_source = providers.Factory(NetAtmoSource, config=netatmo_config, metrics=metrics, arrow_store=arrow_store)
@@ -164,3 +170,15 @@ class IonbeamContainer(containers.DeclarativeContainer):
     # ODB projection service
     odb_projection_service_config = providers.Factory(lambda cfg: ODBProjectionServiceConfig(**cfg), config.projections.odb_service)
     odb_projection_service = providers.Factory(ODBProjectionService, config=odb_projection_service_config, metrics=metrics, arrow_store=arrow_store)
+
+    # Ionbeam Legacy projection service
+    ionbeam_legacy_projection_service_config = providers.Factory(
+        lambda cfg: IonbeamLegacyConfig(**cfg),
+        config.projections.ionbeam_legacy,
+    )
+    ionbeam_legacy_projection_service = providers.Factory(
+        IonbeamLegacyProjectionService,
+        config=ionbeam_legacy_projection_service_config,
+        metrics=metrics,
+        arrow_store=arrow_store,
+    )

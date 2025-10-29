@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 from ionbeam.observability.metrics import IonbeamMetricsProtocol
 from ionbeam.storage.arrow_store import ArrowStore
 from ionbeam.utilities.arrow_tools import dataframes_to_record_batches, schema_from_ingestion_map
+from ionbeam.utilities.cache import cached
 
 from ..core.constants import LatitudeColumn, LongitudeColumn
 from ..core.handler import BaseHandler
@@ -40,7 +42,7 @@ class MeteoTrackerConfig(BaseModel):
     max_queries: int = 500
     username: Optional[str] = None
     password: Optional[str] = None
-    use_cache: Optional[bool] = True
+    cache_enabled: bool = True
     author_patterns: Dict[str, List[str]] = {
         "Bologna": ["bologna_living_lab_.+"],
         "Barcelona": ["barcelona_living_lab_.+", "Barcelona_living_lab_.+"],
@@ -305,17 +307,20 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
 
         return None
 
-    async def _fetch_session_metadata(self, start_time: datetime, end_time: datetime) -> List[MT_Session]:
-        t1, t2 = (int(t.timestamp()) for t in [start_time, end_time])
+    async def _fetch_session_metadata(self, event: StartSourceCommand) -> List[MT_Session]:
+        t1, t2 = (int(t.timestamp()) for t in [event.start_time, event.end_time])
         params = {
             "startTime": (f'{{"$gte":{t1},"$lte":{t2}}}',),
             "dataType": "all",
             "items": 1000,
         }
 
-        # @cached(lambda x : json.dumps(x), use_cache=self.config.use_cache)
+        @cached(lambda x: f"sessions_{json.dumps(x['startTime'])}_{x.get('page', 0)}", event_id=event.id, cache_enabled=self.config.cache_enabled)
         async def _fetch(params):
-            return await self._make_request("/sessions", params=params)
+            response = await self._make_request("/sessions", params=params)
+            if response is None:
+                return None
+            return response.json()
 
         sessions_metadata = []
         consecutive_failures = 0
@@ -323,13 +328,12 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
 
         for i in range(self.config.max_queries):
             params["page"] = i
-            response = await _fetch(params)
+            payload = await _fetch(params)
 
-            if response is None:
+            if payload is None:
                 consecutive_failures += 1
                 self.logger.warning("Failed to fetch page %s (consecutive failures: %s)", i, consecutive_failures)
 
-                # If we've had multiple consecutive failures, assume connectivity issues
                 if consecutive_failures >= max_consecutive_failures:
                     self.logger.error("Multiple consecutive request failures detected. Failing fast.")
                     raise Exception(f"Unable to connect to MeteoTracker after {consecutive_failures} consecutive failures")
@@ -338,30 +342,30 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
 
             consecutive_failures = 0
 
-            payload = response.json()
             sessions_metadata.append(payload)
-            if len(response.json()) < params["items"]:
+            if len(payload) < params["items"]:
                 break
 
         out = [s for session in sessions_metadata for s in session]
         return [MT_Session(**j) for j in out]
 
-    async def _fetch_session_data(self, session: MT_Session):
+    async def _fetch_session_data(self, session: MT_Session, event: StartSourceCommand):
         self.logger.debug("Session data fetching")
         variables = session.columns + ["time", "lo"]
         params = dict(id=session.id, data=" ".join(variables))
 
-        # @cached(lambda x : json.dumps(x), use_cache=self.config.use_cache)
+        @cached(lambda x: f"session_points_{x['id']}", event_id=event.id, cache_enabled=self.config.cache_enabled)
         async def _fetch(params):
-            return await self._make_request("/points/session", params=params)
+            response = await self._make_request("/points/session", params=params)
+            if response is None:
+                return None
+            return response.json()
 
-        response = await _fetch(params)
+        payload = await _fetch(params)
 
-        if response is None:
+        if payload is None:
             self.logger.error("failed to fetch session data for %s ", session.id)
             return None
-
-        payload = response.json()
 
         df = pd.DataFrame.from_records(payload)
         if df.empty:
@@ -397,7 +401,7 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
         total_rows = 0
 
         try:
-            sessions_metadata = await self._fetch_session_metadata(event.start_time, event.end_time)
+            sessions_metadata = await self._fetch_session_metadata(event)
             self.logger.debug(sessions_metadata)
 
             if not sessions_metadata:
@@ -415,7 +419,7 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
 
             async def dataframe_stream():
                 for session in sessions_metadata:
-                    df = await self._fetch_session_data(session)
+                    df = await self._fetch_session_data(session, event)
                     if df is not None and not df.empty:
                         yield df
 
@@ -457,4 +461,4 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
             self.metrics.sources.observe_request_rows(dataset_name, int(total_rows))
             self.metrics.sources.record_ingestion_request(dataset_name, "error")
             self.logger.exception("MeteoTracker ingestion failed", error=str(e))
-            return None
+            raise

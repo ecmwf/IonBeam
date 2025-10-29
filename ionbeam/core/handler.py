@@ -13,7 +13,7 @@ TOutput = TypeVar("TOutput")
 
 
 class BaseHandler(ABC, Generic[TInput, TOutput]):
-    def __init__(self, name: str, metrics: IonbeamMetricsProtocol):
+    def __init__(self, name: str, metrics: IonbeamMetricsProtocol | None):
         self.name = name
         self.logger: structlog.BoundLogger = structlog.get_logger(self.name)
         self.metrics = metrics
@@ -43,14 +43,16 @@ class BaseHandler(ABC, Generic[TInput, TOutput]):
             yield
             elapsed_seconds = time.perf_counter() - started
             elapsed_ms = int(elapsed_seconds * 1000)
-            self.metrics.handlers.record_run(self.name, "success")
-            self.metrics.handlers.observe_duration(self.name, elapsed_seconds)
+            if(self.metrics):
+                self.metrics.handlers.record_run(self.name, "success")
+                self.metrics.handlers.observe_duration(self.name, elapsed_seconds)
             self.logger.info("Handler completed", elapsed_ms=elapsed_ms)
         except Exception as exc:
             elapsed_seconds = time.perf_counter() - started
             elapsed_ms = int(elapsed_seconds * 1000)
-            self.metrics.handlers.record_run(self.name, "error")
-            self.metrics.handlers.observe_duration(self.name, elapsed_seconds)
+            if(self.metrics):
+                self.metrics.handlers.record_run(self.name, "error")
+                self.metrics.handlers.observe_duration(self.name, elapsed_seconds)
             self.logger.exception("Handler failed", error=str(exc), elapsed_ms=elapsed_ms)
             raise
         finally:

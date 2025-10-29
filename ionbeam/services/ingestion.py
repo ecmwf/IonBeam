@@ -51,6 +51,8 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
         
         total_points = 0
         batch_num = 0
+        actual_start_time = None
+        actual_end_time = None
         
         async for batch in batch_stream:
             await asyncio.sleep(0)  # keep event loop responsive
@@ -95,6 +97,16 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
                 batch_num += 1
                 continue
 
+            # Track actual time bounds from the data
+            chunk_times = df_chunk[time_col]
+            chunk_min = chunk_times.min()
+            chunk_max = chunk_times.max()
+            
+            if actual_start_time is None or chunk_min < actual_start_time:
+                actual_start_time = chunk_min
+            if actual_end_time is None or chunk_max > actual_end_time:
+                actual_end_time = chunk_max
+
             self.logger.info("Writing batch", batch=batch_num + 1, points=n_points)
             await self.timeseries_db.write_dataframe(
                 record=df_chunk,
@@ -107,9 +119,26 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
 
         self.metrics.ingestion.observe_dataset_points(dataset_name, total_points)
         self.metrics.ingestion.observe_dataset_duration(dataset_name, time.perf_counter() - ingest_started)
+        
+        # Use actual data time bounds if available, otherwise fall back to command times
+        final_start_time = actual_start_time if actual_start_time is not None else event.start_time
+        final_end_time = actual_end_time if actual_end_time is not None else event.end_time
+        
+        # Log if there's a discrepancy between declared and actual time bounds
+        if actual_start_time is not None and actual_end_time is not None:
+            if final_start_time != event.start_time or final_end_time != event.end_time:
+                self.logger.warning(
+                    "Actual data time bounds differ from command",
+                    dataset=dataset_name,
+                    command_start=event.start_time.isoformat(),
+                    command_end=event.end_time.isoformat(),
+                    actual_start=final_start_time.isoformat(),
+                    actual_end=final_end_time.isoformat(),
+                )
+        
         return DataAvailableEvent(
             id=event.id,
             metadata=event.metadata,
-            start_time=event.start_time,
-            end_time=event.end_time,
+            start_time=final_start_time,
+            end_time=final_end_time,
         )

@@ -41,6 +41,7 @@ class NetAtmoConfig(BaseModel):
     concurrency: int = 8
     trigger_queue: str = "ionbeam.source.netatmo.start"
     ingestion_queue: str = "ionbeam.ingestion.ingestV1"
+    cache_enabled: bool = True
 
 
 retry_transport = RetryTransport(retry=Retry(total=5, backoff_factor=0.5))
@@ -214,9 +215,8 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
         self,
         start_time: datetime,
         end_time: datetime,
-        cache_only: bool,
     ) -> AsyncIterator[pd.DataFrame]:
-        self.logger.debug("Crawling Netatmo by area", cache_only=cache_only)
+        self.logger.debug("Crawling Netatmo by area")
         assert (end_time - start_time).total_seconds() <= 86400, "NetAtmo only supports 24h windows"
         datetime_range = f"{start_time.strftime('%Y-%m-%dT%H:%MZ')}/{end_time.strftime('%Y-%m-%dT%H:%MZ')}"
 
@@ -289,7 +289,7 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
         now_s = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         object_key = f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
-        dataframe_stream = self.crawl_netatmo_by_area(event.start_time, event.end_time, event.use_cache)
+        dataframe_stream = self.crawl_netatmo_by_area(event.start_time, event.end_time)
         batch_stream = dataframes_to_record_batches(
             dataframe_stream,
             schema=self._arrow_schema,
@@ -352,7 +352,6 @@ async def main():
         source_name="netatmo",
         start_time=start,
         end_time=end,
-        use_cache=False,
     )
     result = await source.handle(command)
     print(result)

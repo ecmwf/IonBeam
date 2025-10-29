@@ -35,7 +35,7 @@ class DatasetBuilderConfig(BaseModel):
     queue_key: str = "dataset_queue"
     poll_interval_seconds: float = 3.0
     delete_after_export: Optional[bool] = False
-    concurrency: int = 2
+    concurrency: int = 1
 
 
 class DatasetBuilder:

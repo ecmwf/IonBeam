@@ -2,7 +2,8 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from typing import Optional
+from uuid import UUID, uuid4
 
 import click
 from dependency_injector.wiring import Provide, inject
@@ -11,6 +12,7 @@ from faststream.rabbit import ExchangeType, RabbitBroker, RabbitExchange
 from ..core.containers import IonbeamContainer
 from ..models.models import DataAvailableEvent, IngestDataCommand, StartSourceCommand
 from ..scheduler.source_scheduler import SourceScheduler
+from ..sources.acronet import AcronetSource
 from ..sources.ioncannon import IonCannonSource
 from ..sources.meteotracker import MeteoTrackerSource
 from ..sources.metno.netatmo import NetAtmoSource
@@ -30,9 +32,10 @@ async def trigger_source_backfill(
     source_name: str,
     start_time: datetime,
     end_time: datetime,
+    id: Optional[UUID] = None,
     scheduler: SourceScheduler = Provide[IonbeamContainer.source_scheduler],
 ):
-    result = await scheduler.trigger_source(source_name, start_time, end_time)
+    result = await scheduler.trigger_source(source_name, start_time, end_time, id=id)
     if not result:
         raise RuntimeError(f"Failed to trigger source {source_name}")
     return result
@@ -46,12 +49,14 @@ async def run_source_directly(
     netatmo_source: NetAtmoSource = Provide[IonbeamContainer.netatmo_source],
     sensor_community_source: SensorCommunitySource = Provide[IonbeamContainer.sensor_community_source],
     meteotracker_source: MeteoTrackerSource = Provide[IonbeamContainer.meteotracker_source],
+    acronet_source: AcronetSource = Provide[IonbeamContainer.acronet_source],
     ioncannon_source: IonCannonSource = Provide[IonbeamContainer.ion_cannon_source],
 ):
     sources = {
         "netatmo": netatmo_source,
         "sensor_community": sensor_community_source,
         "meteotracker": meteotracker_source,
+        "acronet": acronet_source,
         "ioncannon": ioncannon_source,
     }
 
@@ -88,6 +93,7 @@ async def aggregate_window(
     netatmo_source: NetAtmoSource = Provide[IonbeamContainer.netatmo_source],
     sensor_community_source: SensorCommunitySource = Provide[IonbeamContainer.sensor_community_source],
     meteotracker_source: MeteoTrackerSource = Provide[IonbeamContainer.meteotracker_source],
+    acronet_source: AcronetSource = Provide[IonbeamContainer.acronet_source],
     ioncannon_source: IonCannonSource = Provide[IonbeamContainer.ion_cannon_source],
 ):
     """
@@ -99,6 +105,7 @@ async def aggregate_window(
         "netatmo": netatmo_source,
         "sensor_community": sensor_community_source,
         "meteotracker": meteotracker_source,
+        "acronet": acronet_source,
         "ioncannon": ioncannon_source,
     }
 
@@ -134,6 +141,7 @@ async def reingest_data(
     netatmo_source: NetAtmoSource = Provide[IonbeamContainer.netatmo_source],
     sensor_community_source: SensorCommunitySource = Provide[IonbeamContainer.sensor_community_source],
     meteotracker_source: MeteoTrackerSource = Provide[IonbeamContainer.meteotracker_source],
+    acronet_source: AcronetSource = Provide[IonbeamContainer.acronet_source],
     ioncannon_source: IonCannonSource = Provide[IonbeamContainer.ion_cannon_source],
 ):
     """
@@ -147,6 +155,7 @@ async def reingest_data(
         "netatmo": netatmo_source,
         "sensor_community": sensor_community_source,
         "meteotracker": meteotracker_source,
+        "acronet": acronet_source,
         "ioncannon": ioncannon_source,
     }
 
@@ -191,21 +200,32 @@ def cli(ctx, verbose, config):
 @click.argument("source_name")
 @click.argument("start_date")
 @click.argument("end_date")
+@click.argument("id", required=False)
 @click.pass_context
-def trigger(ctx, source_name, start_date, end_date):
+def trigger(ctx, source_name, start_date, end_date, id):
     """Trigger source via AMQP messaging (requires RabbitMQ).
 
-    SOURCE_NAME: Source to trigger (netatmo, sensor_community, meteotracker, ioncannon)
+    SOURCE_NAME: Source to trigger (netatmo, sensor_community, meteotracker, acronet, ioncannon)
 
     START_DATE: Start date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
 
     END_DATE: End date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+
+    ID: Optional UUID for the command (if not provided, one will be generated)
     """
     try:
         start_time = parse_datetime(start_date)
         end_time = parse_datetime(end_date)
     except ValueError as e:
         raise click.ClickException(str(e))
+
+    # Parse the ID if provided
+    command_id = None
+    if id:
+        try:
+            command_id = UUID(id)
+        except ValueError:
+            raise click.ClickException(f"Invalid UUID format: {id}")
 
     async def execute():
         container = IonbeamContainer()
@@ -215,8 +235,9 @@ def trigger(ctx, source_name, start_date, end_date):
             init = container.init_resources()
             if init is not None:
                 await init
-            await trigger_source_backfill(source_name, start_time, end_time)
-            click.echo(f"✓ Trigger command published for {source_name}: {start_time} to {end_time}")
+            await trigger_source_backfill(source_name, start_time, end_time, id=command_id)
+            id_info = f" (ID: {command_id})" if command_id else ""
+            click.echo(f"✓ Trigger command published for {source_name}: {start_time} to {end_time}{id_info}")
         finally:
             shutdown = container.shutdown_resources()
             if shutdown is not None:
@@ -233,7 +254,7 @@ def trigger(ctx, source_name, start_date, end_date):
 def run(ctx, source_name, start_date, end_date):
     """Run source directly.
 
-    SOURCE_NAME: Source to run (netatmo, sensor_community, meteotracker, ioncannon)
+    SOURCE_NAME: Source to run (netatmo, sensor_community, meteotracker, acronet, ioncannon)
 
     START_DATE: Start date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
 

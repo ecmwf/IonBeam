@@ -48,7 +48,7 @@ class SensorCommunityConfig(BaseModel):
     base_url: str = "https://archive.sensor.community"
     timeout_seconds: int = 60
     concurrency: int = 10
-    use_cache: Optional[bool] = True
+    cache_enabled: bool = True
 
 
 @dataclass
