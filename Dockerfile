@@ -26,7 +26,7 @@ COPY --from=ionbeam-builder /app/dist/*.whl .
 RUN python3 -m venv /app/.venv && \
     /app/.venv/bin/pip install *.whl
 
-FROM python-install AS ionbeam-faststream
+FROM python-install AS ionbeam
 
 WORKDIR /app
 
