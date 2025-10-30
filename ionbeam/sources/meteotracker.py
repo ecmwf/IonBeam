@@ -415,7 +415,7 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
             start_s = event.start_time.strftime("%Y%m%dT%H%M%SZ")
             end_s = event.end_time.strftime("%Y%m%dT%H%M%SZ")
             now_s = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            key = f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
+            key = f"raw/{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
             async def dataframe_stream():
                 for session in sessions_metadata:

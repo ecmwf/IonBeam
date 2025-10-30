@@ -92,7 +92,7 @@ class IonCannonSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand
         start_s = start_time.strftime("%Y%m%dT%H%M%SZ")
         end_s = end_time.strftime("%Y%m%dT%H%M%SZ")
         now_s = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        return f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
+        return f"raw/{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
     async def generate_data_chunk(self, start_time: datetime, end_time: datetime) -> AsyncIterator[pd.DataFrame]:
         """Generate synthetic data for the time window"""

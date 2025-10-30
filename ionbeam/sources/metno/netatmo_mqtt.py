@@ -177,7 +177,7 @@ class NetAtmoMQTTSource:
                     start_s = self._ts_for_path(start_time)
                     end_s = self._ts_for_path(end_time)
                     now_s = self._ts_for_path(datetime.now(timezone.utc))
-                    object_key = f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
+                    object_key = f"raw/{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
                     try:
                         batch_stream = netatmo_record_batch_stream(

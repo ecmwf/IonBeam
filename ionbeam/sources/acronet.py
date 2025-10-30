@@ -672,7 +672,7 @@ class AcronetSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
         start_s = start_time.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         end_s = end_time.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         now_s = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        return f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
+        return f"raw/{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
     @staticmethod
     def _format_timestamp(dt: datetime) -> str:

@@ -287,7 +287,7 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
         end_s = event.end_time.strftime("%Y%m%dT%H%M%SZ")
         
         now_s = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        object_key = f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
+        object_key = f"raw/{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
         dataframe_stream = self.crawl_netatmo_by_area(event.start_time, event.end_time)
         batch_stream = dataframes_to_record_batches(

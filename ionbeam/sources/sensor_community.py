@@ -238,7 +238,7 @@ class SensorCommunitySource(BaseHandler[StartSourceCommand, Optional[IngestDataC
             start_s = event.start_time.strftime("%Y%m%dT%H%M%SZ")
             end_s = event.end_time.strftime("%Y%m%dT%H%M%SZ")
             now_s = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            object_key = f"{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
+            object_key = f"raw/{self.metadata.dataset.name}/{start_s}-{end_s}_{now_s}"
 
             async def dataframe_stream():
                 async for chunk in self.crawl_sensor_data_in_chunks(event.start_time, event.end_time):
