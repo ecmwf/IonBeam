@@ -121,8 +121,8 @@ class IngestionService(BaseHandler[IngestDataCommand, DataAvailableEvent]):
         self.metrics.ingestion.observe_dataset_duration(dataset_name, time.perf_counter() - ingest_started)
         
         # Use actual data time bounds if available, otherwise fall back to command times
-        final_start_time = actual_start_time if actual_start_time is not None else event.start_time
-        final_end_time = actual_end_time if actual_end_time is not None else event.end_time
+        final_start_time = event.start_time
+        final_end_time = actual_end_time if actual_end_time and actual_end_time > event.end_time else event.end_time
         
         # Log if there's a discrepancy between declared and actual time bounds
         if actual_start_time is not None and actual_end_time is not None:
