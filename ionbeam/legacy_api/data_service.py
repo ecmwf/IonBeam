@@ -5,11 +5,25 @@ from typing import List, Optional
 
 import duckdb
 import pandas as pd
-from fastapi import HTTPException
 
 from .models import StationMetadata
 
 logger = logging.getLogger(__name__)
+
+
+class DataServiceError(Exception):
+    """Base exception for data service errors."""
+    pass
+
+
+class QueryError(DataServiceError):
+    """Raised when a database query fails."""
+    pass
+
+
+class InvalidFilterError(DataServiceError):
+    """Raised when an invalid SQL filter is provided."""
+    pass
 
 
 class LegacyAPIDataService:
@@ -32,11 +46,8 @@ class LegacyAPIDataService:
         end_time: Optional[datetime] = None,
     ) -> List[StationMetadata]:
         try:
-            # Build the parquet file path pattern
-            if platform:
-                metadata_pattern = str(self.metadata_dir / f"platform={platform}" / "metadata.parquet")
-            else:
-                metadata_pattern = str(self.metadata_dir / "platform=*" / "metadata.parquet")
+            # Use wildcard pattern - DuckDB handles platform filtering via WHERE clause with hive_partitioning
+            metadata_pattern = str(self.metadata_dir / "**" / "metadata.parquet")
 
             # Check if metadata files exist
             if not self.metadata_dir.exists():
@@ -117,13 +128,7 @@ class LegacyAPIDataService:
 
         except Exception as e:
             logger.error(f"Station query failed: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "message": "Failed to query station metadata",
-                    "error": str(e),
-                },
-            )
+            raise QueryError(f"Failed to query station metadata: {e}") from e
 
     def query_observations(
         self,
@@ -134,18 +139,31 @@ class LegacyAPIDataService:
         sql_filter: Optional[str] = None,
     ) -> pd.DataFrame:
         try:
-            # Build parquet file pattern
-            data_pattern = str(self.data_dir / f"platform={platform}" / "*.parquet")
+            # Use recursive pattern - DuckDB prunes partitions automatically with hive_partitioning
+            data_pattern = str(self.data_dir / "**" / "*.parquet")
 
-            # Build WHERE clause conditions
+            # Build WHERE clause with partition columns for efficient pruning
             conditions = []
             params = {}
 
+            # Platform filter (partition column - enables directory-level pruning)
+            conditions.append("platform = $platform")
+            params["platform"] = platform
+
+            # Add partition hints for better pruning, then precise datetime filters
             if start_time:
+                # Year partition hint for pruning
+                conditions.append("year >= $start_year")
+                params["start_year"] = start_time.year
+                # Precise datetime filter
                 conditions.append("datetime >= $start_time")
                 params["start_time"] = start_time.isoformat()
 
             if end_time:
+                # Year partition hint for pruning
+                conditions.append("year <= $end_year")
+                params["end_year"] = end_time.year
+                # Precise datetime filter
                 conditions.append("datetime <= $end_time")
                 params["end_time"] = end_time.isoformat()
 
@@ -171,14 +189,21 @@ class LegacyAPIDataService:
                 result_df = con.execute(query, params).df()
 
             if result_df.empty:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No data found for the given query.",
-                )
+                logger.info("No observations found matching criteria")
+                return pd.DataFrame()
 
             # Apply additional SQL filter if provided
             if sql_filter:
                 result_df = self._apply_sql_filter(result_df, sql_filter)
+
+            # Remove Hive partition columns (internal storage fields) from the final payload
+            # These columns (year, month, day) are used for efficient querying
+            # but should not be exposed to API consumers
+            partition_columns = ["year", "month", "day"]
+            columns_to_drop = [col for col in partition_columns if col in result_df.columns]
+            if columns_to_drop:
+                result_df = result_df.drop(columns=columns_to_drop)
+                logger.debug(f"Dropped partition columns from result: {columns_to_drop}")
 
             logger.info(
                 f"Observation query completed - row_count={len(result_df)}, "
@@ -187,17 +212,9 @@ class LegacyAPIDataService:
 
             return result_df
 
-        except HTTPException:
-            raise
         except Exception as e:
             logger.error(f"Observation query failed: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "message": "Failed to retrieve observational data",
-                    "error": str(e),
-                },
-            )
+            raise QueryError(f"Failed to retrieve observational data: {e}") from e
 
     def _apply_sql_filter(
         self,
@@ -218,7 +235,4 @@ class LegacyAPIDataService:
 
         except Exception as e:
             logger.error(f"SQL filter failed - filter={sql_filter}, error={e}")
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid SQL filter: {str(e)}",
-            )
+            raise InvalidFilterError(f"Invalid SQL filter: {e}") from e

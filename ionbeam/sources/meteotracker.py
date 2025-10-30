@@ -96,7 +96,7 @@ class MeteoTrackerSource(BaseHandler[StartSourceCommand, Optional[IngestDataComm
             dataset=DatasetMetadata(
                 name="meteotracker",
                 description="raw IoT data collected from MeteoTracker",
-                subject_to_change_window=timedelta(days=1),
+                subject_to_change_window=timedelta(days=0),
                 aggregation_span=timedelta(days=1),
                 source_links=[],
                 keywords=["meteotracker", "iot", "data"],

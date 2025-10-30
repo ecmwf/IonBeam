@@ -425,24 +425,100 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         
         legacy_table = self._transform_raw_data(table, platform)
         
+        if legacy_table.num_rows == 0:
+            self.logger.warning("No rows after transformation", dataset=event.metadata.name)
+            return
+        
+        # Convert to pandas to group by observation date and hour
+        df = legacy_table.to_pandas()
+        
+        # Parse datetime string to extract date and hour for partitioning
+        df['_observation_datetime'] = pd.to_datetime(df['datetime'])
+        df['_observation_date'] = df['_observation_datetime'].dt.date
+        df['_observation_hour'] = df['_observation_datetime'].dt.hour
+        
+        # Group data by observation date and hour, write to respective partitions
         raw_dir = self.config.output_path / self.RAW_DIR / self.DATA_SUBDIR
-        raw_platform_dir = raw_dir / f"platform={platform}"
-        raw_platform_dir.mkdir(parents=True, exist_ok=True)
+        total_rows_written = 0
+        files_written = []
         
-        start_str = event.start_time.strftime("%Y%m%d_%H%M")
-        end_str = event.end_time.strftime("%Y%m%d_%H%M")
-        raw_file = raw_platform_dir / f"{start_str}_{end_str}.parquet"
-        
-        pq.write_table(
-            legacy_table,
-            str(raw_file),
-            compression="snappy",
-        )
+        # Group by date and hour to create hourly files
+        for (observation_date, observation_hour), hour_group in df.groupby(['_observation_date', '_observation_hour']):
+            # Extract year, month, day for partition hierarchy
+            year = observation_date.year
+            month = observation_date.month
+            day = observation_date.day
+            
+            # Build hierarchical partition path: platform=X/year=Y/month=M/day=D/
+            partition_path = (
+                raw_dir
+                / f"platform={platform}"
+                / f"year={year}"
+                / f"month={month}"
+                / f"day={day}"
+            )
+            partition_path.mkdir(parents=True, exist_ok=True)
+            
+            # Drop temporary columns used for grouping
+            hour_group_clean = hour_group.drop(columns=['_observation_datetime', '_observation_date', '_observation_hour'])
+            
+            # Convert back to Arrow table with original schema
+            hour_table = pa.Table.from_pandas(hour_group_clean, schema=legacy_table.schema)
+            
+            # Use hour-based filename: YYYYMMDD_HH.parquet
+            hour_str = f"{year:04d}{month:02d}{day:02d}_{observation_hour:02d}"
+            raw_file = partition_path / f"{hour_str}.parquet"
+            
+            # Append to existing file if it exists, otherwise create new
+            if raw_file.exists():
+                try:
+                    existing_table = pq.read_table(str(raw_file))
+                    combined_table = pa.concat_tables([existing_table, hour_table])
+                    
+                    pq.write_table(
+                        combined_table,
+                        str(raw_file),
+                        compression="snappy",
+                    )
+                    
+                    self.logger.debug(
+                        "Appended to existing hourly file",
+                        new_rows=hour_table.num_rows,
+                        total_rows=combined_table.num_rows,
+                        path=str(raw_file),
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        "Failed to append to existing file, overwriting",
+                        path=str(raw_file),
+                        error=str(e),
+                    )
+                    pq.write_table(
+                        hour_table,
+                        str(raw_file),
+                        compression="snappy",
+                    )
+            else:
+                pq.write_table(
+                    hour_table,
+                    str(raw_file),
+                    compression="snappy",
+                )
+                
+                self.logger.debug(
+                    "Created new hourly file",
+                    rows=hour_table.num_rows,
+                    path=str(raw_file),
+                )
+            
+            total_rows_written += hour_table.num_rows
+            files_written.append(str(raw_file.relative_to(raw_dir)))
         
         self.logger.info(
-            "Raw data written",
-            rows=legacy_table.num_rows,
-            path=str(raw_file),
+            "Raw data written to date/hour partitions",
+            total_rows=total_rows_written,
+            files_written=files_written,
+            file_count=len(files_written),
         )
         
         metadata_table = self._aggregate_station_metadata(table, platform)

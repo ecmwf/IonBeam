@@ -255,16 +255,15 @@ class ListResult(BaseModel):
     )
 
 
-class FDBError(BaseModel):
-    """Error response for FDB operations."""
+class ApiError(BaseModel):
     message: str = Field(..., description="Error message")
     error: str = Field(..., description="Detailed error information")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "message": "FDB retrieve failed",
-                "error": "Unable to connect to FDB database"
+                "message": "Internal Server Error",
+                "error": "Unable to fulfill request due to internal server error"
             }
         }
     )
@@ -291,19 +290,6 @@ class DataLimitError(BaseModel):
         json_schema_extra={
             "example": {
                 "detail": "This request would return more than 200 data granules, please request a smaller time span repeatedly."
-            }
-        }
-    )
-
-
-class NotFoundError(BaseModel):
-    """Error response when no data is found."""
-    detail: str = Field(..., description="Not found error details")
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "detail": "No data found for the given query."
             }
         }
     )

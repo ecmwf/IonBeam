@@ -12,11 +12,10 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from .comparison_v2 import StationsComparisonServiceV2, compare_observations_response, compare_stations_response
-from .data_service import LegacyAPIDataService
+from .data_service import InvalidFilterError, LegacyAPIDataService, QueryError
 from .models import (
+    ApiError,
     DataLimitError,
-    FDBError,
-    NotFoundError,
     OutputFormat,
     StationMetadata,
     StationResponse,
@@ -33,7 +32,7 @@ if not logging.getLogger().handlers:
 
 logger = logging.getLogger(__name__)
 
-# Platform configurations - only time_index lookup is needed
+# Platform configurations to satisfy legacy API behavior
 PLATFORM_CONFIGS = {
     "meteotracker": {"has_time_index": True},
     "acronet": {"has_time_index": False},
@@ -53,9 +52,7 @@ DEFAULT_MARS_REQUEST = {
 class LegacyApiConfig(BaseModel):
     title: str = "Ionbeam Legacy API"
     version: str = "0.1.0"
-    docs_url: str | None = "/docs"
-    redoc_url: str | None = None
-    openapi_url: str | None = "/openapi.json"
+    root_path: str = "/legacy"
     # DuckDB data layer configuration
     projection_base_path: Path = Path("./projections/ionbeam-legacy")
     metadata_subdir: str = "metadata"
@@ -138,7 +135,6 @@ def _build_station_response(
 
 
 def _normalize_datetime(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize datetime column to legacy format (milliseconds + Z suffix)."""
     if 'datetime' in df.columns:
         df = df.copy()
         # Parse datetime strings with flexible ISO8601 format handling
@@ -149,20 +145,17 @@ def _normalize_datetime(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _format_to_json(df: pd.DataFrame) -> str:
-    """Format DataFrame to JSON with legacy datetime format."""
     df = _normalize_datetime(df)
     return df.to_json(orient="records", double_precision=15)
 
 
 def _format_to_csv(df: pd.DataFrame) -> BytesIO:
-    """Format DataFrame to CSV with legacy datetime format."""
     df = _normalize_datetime(df)
     csv_string = df.to_csv(index=False)
     return BytesIO(csv_string.encode("utf-8"))
 
 
 def _format_to_parquet(df: pd.DataFrame) -> BytesIO:
-    """Format DataFrame to Parquet with legacy datetime format."""
     df = _normalize_datetime(df)
     buffer = BytesIO()
     df.to_parquet(buffer, index=False)
@@ -172,17 +165,6 @@ def _format_to_parquet(df: pd.DataFrame) -> BytesIO:
 
 def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
     router = APIRouter()
-
-    @router.get(
-        "/legacy/healthz",
-        name="legacy:health",
-        tags=["health"],
-        summary="Legacy API health check",
-        response_description="Health check status",
-    )
-    async def health_check() -> dict[str, str]:
-        """Health check endpoint for the legacy API."""
-        return {"status": "ok"}
 
     @router.get(
         "/api/v1/stations",
@@ -200,8 +182,8 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
                 "model": List[StationResponse],
             },
             500: {
-                "description": "Database or FDB error",
-                "model": FDBError,
+                "description": "Internal error",
+                "model": ApiError,
             },
         },
     )
@@ -234,7 +216,6 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
         ),
     ) -> List[dict]:
         try:
-            # Query data layer - returns clean domain objects
             station_metadata = duckdb_service.query_stations(
                 external_id=external_id,
                 station_id=station_id,
@@ -243,13 +224,11 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
                 end_time=end_time,
             )
             
-            # Transform to API response format
             stations = [
                 _build_station_response(metadata)
                 for metadata in station_metadata
             ]
             
-            # Temp response comparison against legacy API
             comparison_service = getattr(request.app.state, 'comparison_service', None)
             if comparison_service:
                 await compare_stations_response(
@@ -261,15 +240,17 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
                 logger.debug("Comparison service not available for stations endpoint")
             
             return stations
-        except HTTPException:
-            raise
-        except Exception as e:
+        except QueryError as e:
+            logger.error(f"Data service query error: {e}")
             raise HTTPException(
                 status_code=500,
-                detail={
-                    "message": "Failed to retrieve stations",
-                    "error": str(e),
-                },
+                detail="Failed to retrieve stations",
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in get_stations: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to retrieve stations",
             )
 
     @router.get(
@@ -308,13 +289,9 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
                 "description": "Request would return too many data granules",
                 "model": DataLimitError,
             },
-            404: {
-                "description": "No data found for the given query",
-                "model": NotFoundError,
-            },
             500: {
                 "description": "FDB or processing error",
-                "model": FDBError,
+                "model": ApiError,
             },
         },
     )
@@ -347,7 +324,6 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
         ),
     ):
         try:
-            # Validate timezone information
             if start_time is not None and start_time.tzinfo is None:
                 raise HTTPException(
                     status_code=400,
@@ -366,14 +342,11 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
             adjusted_end_time = end_time + timedelta(hours=1) if end_time else None
 
             # Extract MARS parameters from query params
-            excluded_params = {"format", "filter", "start_time", "end_time", "station_id"}
             mars_params = {
                 k: v for k, v in request.query_params.items()
-                if k not in excluded_params
+                if k not in {"format", "filter", "start_time", "end_time", "station_id"}
             }
             mars_request = DEFAULT_MARS_REQUEST | mars_params
-            
-            # Get platform from MARS request
             platform = mars_request.get("platform")
             if not platform:
                 raise HTTPException(
@@ -381,7 +354,6 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
                     detail="platform parameter is required"
                 )
 
-            # Query observational data using DuckDB
             result_df = duckdb_service.query_observations(
                 platform=platform,
                 start_time=start_time,
@@ -390,14 +362,11 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
                 sql_filter=filter,
             )
             
-            # Format response based on requested format
             if format == OutputFormat.JSON:
                 json_content = _format_to_json(result_df)
                 
-                # Perform comparison if enabled (only for JSON format)
                 comparison_service = getattr(request.app.state, 'comparison_service', None)
-                if comparison_service:
-                    # Parse JSON to list of dicts for comparison
+                if comparison_service and not result_df.empty:
                     import json
                     observations = json.loads(json_content)
                     await compare_observations_response(
@@ -430,16 +399,23 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
                         "Content-Disposition": "attachment; filename=data.parquet"
                     },
                 )
-                
-        except HTTPException:
-            raise
-        except Exception as e:
+        except InvalidFilterError as e:
+            logger.error(f"Invalid SQL filter: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid SQL filter provided",
+            )
+        except QueryError as e:
+            logger.error(f"Data service query error: {e}")
             raise HTTPException(
                 status_code=500,
-                detail={
-                    "message": "Data retrieve failed",
-                    "error": str(e),
-                },
+                detail="Failed to retrieve observational data",
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in retrieve: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to retrieve observational data",
             )
 
     return router
@@ -448,7 +424,6 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
 def create_legacy_application(config: LegacyApiConfig | None = None) -> FastAPI:
     app_config = config or LegacyApiConfig()
     
-    # Ensure logging is configured
     if not logging.getLogger().handlers:
         logging.basicConfig(
             level=logging.INFO,
@@ -456,7 +431,6 @@ def create_legacy_application(config: LegacyApiConfig | None = None) -> FastAPI:
             handlers=[logging.StreamHandler(sys.stdout)]
         )
 
-    # Initialize DuckDB service
     duckdb_service = LegacyAPIDataService(
         projection_base_path=app_config.projection_base_path,
         metadata_subdir=app_config.metadata_subdir,
@@ -466,25 +440,20 @@ def create_legacy_application(config: LegacyApiConfig | None = None) -> FastAPI:
     app = FastAPI(
         title=app_config.title,
         version=app_config.version,
-        docs_url=app_config.docs_url,
-        redoc_url=app_config.redoc_url,
-        openapi_url=app_config.openapi_url,
+        root_path=app_config.root_path,
         description=(
             "IonBeam API"
         ),
     )
 
-    # Initialize stations comparison service V2 if enabled
     if app_config.enable_comparison and app_config.legacy_api_base_url:
         comparison_service = StationsComparisonServiceV2(
             legacy_base_url=app_config.legacy_api_base_url,
-            significant_digits=2,  # 0.01 tolerance
+            significant_digits=2,
             timeout=app_config.comparison_timeout,
         )
-        # Store in app state for endpoint access
         app.state.comparison_service = comparison_service
 
-    # Configure CORS middleware matching legacy implementation - not sure why there are needed?
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
