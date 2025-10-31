@@ -473,6 +473,15 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
             if raw_file.exists():
                 try:
                     existing_table = pq.read_table(str(raw_file))
+                    
+                    # debugging schema issues
+                    self.logger.debug(
+                        "Schema comparison before merge",
+                        path=str(raw_file),
+                        existing_platform_type=str(existing_table.schema.field('platform').type),
+                        new_platform_type=str(hour_table.schema.field('platform').type),
+                    )
+                    
                     combined_table = pa.concat_tables([existing_table, hour_table])
                     
                     pq.write_table(
