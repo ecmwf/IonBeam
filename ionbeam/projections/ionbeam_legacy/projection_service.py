@@ -1,4 +1,5 @@
 import pathlib
+import uuid
 from dataclasses import dataclass
 from typing import AsyncIterator, Callable
 
@@ -43,9 +44,10 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
     METADATA_SUBDIR = "metadata"
 
     # Common fields shared across all platforms
+    # NOTE: 'platform' is NOT included here because it exists as a Hive partition
+    # and will be automatically added by DuckDB when reading with hive_partitioning=true
     LEGACY_COMMON_FIELDS = [
         pa.field("datetime", pa.string()),
-        pa.field("platform", pa.string()),
         pa.field("author", pa.string()),
         pa.field("station_id", pa.string()),
         pa.field("external_station_id", pa.string()),
@@ -57,7 +59,6 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         pa.field("lon", pa.float64()),
     ]
 
-    # MeteoTracker-specific schema
     LEGACY_METEOTRACKER_SCHEMA = pa.schema(LEGACY_COMMON_FIELDS + [
         pa.field("relative_humidity_near_surface", pa.float64()),
         pa.field("solar_radiation_index", pa.float64()),
@@ -72,7 +73,6 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         pa.field("living_lab", pa.string()),
     ])
 
-    # Acronet-specific schema
     LEGACY_ACRONET_SCHEMA = pa.schema(LEGACY_COMMON_FIELDS + [
         pa.field("rainfall", pa.float64()),
         pa.field("air_temperature_near_surface", pa.float64()),
@@ -90,8 +90,6 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         pa.field("signal_strength", pa.float64()),
     ])
 
-    # Metadata schema - 'platform' is excluded because it's part of the Hive partition structure
-    # and will be automatically added by DuckDB when reading with hive_partitioning=true
     METADATA_SCHEMA = pa.schema([
         pa.field("external_id", pa.string()),
         pa.field("internal_id", pa.string()),
@@ -162,20 +160,17 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
             ),
         }
 
-        # Platform-specific name resolvers for metadata
         self._station_name_resolver: dict[str, Callable[[str, pd.DataFrame, str], str]] = {
             "meteotracker": lambda sid, grp, platform: f"{platform}: {sid}",
             "acronet": lambda sid, grp, platform: grp["station_name"].iloc[-1] if "station_name" in grp.columns else sid,
         }
 
     def _calculate_trajectory_wkt(self, group_df: pd.DataFrame) -> str:
-        """Store the full trajectory as WKT MultiPoint for later merging."""
         coords = group_df[[LongitudeColumn, LatitudeColumn]].values
         trajectory = MultiPoint(coords)
         return trajectory.wkt
     
     def _calculate_centroid_from_trajectory(self, trajectory_wkt: str) -> tuple[float, float, str]:
-        """Calculate centroid and bbox from a trajectory WKT."""
         trajectory = wkt_parser.loads(trajectory_wkt)
         bbox = box(*trajectory.bounds)
         centroid = bbox.centroid
@@ -187,39 +182,32 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         platform: str,
         dt_series: pd.Series
     ) -> pd.DataFrame:
-        """Build common legacy fields from raw data (DRY principle)."""
         legacy_df = pd.DataFrame()
         
-        # Datetime formatting
         legacy_df["datetime"] = dt_series.apply(
             lambda x: x.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
         )
         
-        # Common fields
-        legacy_df["platform"] = platform
         legacy_df["author"] = df.get("author", None)
         legacy_df["station_id"] = df["station_id"]
         legacy_df["external_station_id"] = df["station_id"]
         legacy_df["aggregation_type"] = "by_time"
         
-        # Chunk calculations
         floored = dt_series.dt.floor('H')
         legacy_df["chunk_date"] = floored.dt.strftime("%Y%m%d")
         legacy_df["chunk_time"] = floored.dt.strftime("%H%M")
         
-        # Location
         legacy_df["lat"] = df[LatitudeColumn]
         legacy_df["lon"] = df[LongitudeColumn]
         
         return legacy_df
 
-    def _transform_raw_data_unified(
+    def _transform_raw_data(
         self,
         table: pa.Table,
         platform: str,
         config: PlatformConfig
     ) -> pa.Table:
-        """Unified transformation applying platform-specific config."""
         df = table.to_pandas()
         
         if df.empty:
@@ -229,14 +217,11 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         
         legacy_df = self._build_common_fields(df, platform, dt_series)
         
-        # Apply platform-specific station name
         legacy_df["station_name"] = config.station_name_builder(df, platform)
         
-        # Apply column mapping
         for canonical_name, legacy_name in config.column_map.items():
             legacy_df[legacy_name] = df.get(canonical_name, None)
         
-        # Apply extra platform-specific fields
         for field_name, extractor in config.extra_fields.items():
             result = extractor(df)
             if result is not None:
@@ -245,14 +230,6 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
                 legacy_df[field_name] = None
         
         return pa.Table.from_pandas(legacy_df, schema=config.schema)
-
-    def _transform_raw_data(self, table: pa.Table, platform: str) -> pa.Table:
-        """Route to platform-specific raw data transformation."""
-        config = self._platform_configs.get(platform)
-        if config is None:
-            # Return empty table with MeteoTracker schema as default
-            return pa.table({}, schema=self.LEGACY_METEOTRACKER_SCHEMA)
-        return self._transform_raw_data_unified(table, platform, config)
 
     def _build_metadata_base(
         self,
@@ -265,11 +242,9 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         
         results = []
         for station_id, group in df.groupby("station_id"):
-            # Store the full trajectory as WKT MultiPoint
             trajectory_wkt = self._calculate_trajectory_wkt(group)
             lat, lon, bbox_wkt = self._calculate_centroid_from_trajectory(trajectory_wkt)
             
-            # Convert station_id to string if needed
             station_id_str = str(station_id)
             
             result = {
@@ -278,7 +253,7 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
                 "time_span_end": group[ObservationTimestampColumn].max(),
                 "location_lat": lat,
                 "location_lon": lon,
-                "geometry_wkt": trajectory_wkt,  # Store trajectory, not bbox
+                "geometry_wkt": trajectory_wkt,
                 "author": group["author"].iloc[-1] if "author" in group.columns else None,
                 "resolved_name": name_resolver(station_id_str, group, platform)
             }
@@ -286,7 +261,6 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         
         agg = pd.DataFrame(results)
         
-        # Transform to final schema
         agg["external_id"] = agg["station_id"]
         agg["internal_id"] = platform + "_" + agg["station_id"]
         agg["name"] = agg["resolved_name"]
@@ -346,26 +320,19 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         
         results = []
         for internal_id, group in combined_df.groupby("internal_id"):
-            # Collect all trajectory points from all windows
             all_points = []
             for wkt in group["geometry_wkt"].dropna():
-                try:
-                    geom = wkt_parser.loads(wkt)
-                    if geom.geom_type == 'MultiPoint':
-                        for point in geom.geoms:  # type: ignore
-                            all_points.append((point.x, point.y))
-                except Exception:
-                    continue
+                geom = wkt_parser.loads(wkt)
+                if geom.geom_type == 'MultiPoint':
+                    for point in geom.geoms:  # type: ignore
+                        all_points.append((point.x, point.y)) # TODO - this is too naive, incoming points aren't always after existing ones
             
             if all_points:
-                # Create merged trajectory from all windows
                 merged_trajectory = MultiPoint(all_points)
-                # Calculate centroid from the full trajectory
                 bbox = box(*merged_trajectory.bounds)
                 centroid = bbox.centroid
                 location_lat = centroid.y
                 location_lon = centroid.x
-                # Store the merged trajectory for future windows
                 geometry_wkt = merged_trajectory.wkt
             else:
                 location_lat = group["location_lat"].iloc[-1]
@@ -388,13 +355,24 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
             results.append(result)
         
         agg = pd.DataFrame(results)
+        
+        agg = agg.drop_duplicates(subset=['internal_id'], keep='last')
+        
         merged_table = pa.Table.from_pandas(agg, schema=self.METADATA_SCHEMA)
         
-        pq.write_table(
-            merged_table,
-            str(metadata_file),
-            compression="snappy",
-        )
+        temp_path = metadata_file.parent / f"{metadata_file.name}.tmp-{uuid.uuid4().hex}"
+        
+        try:
+            pq.write_table(
+                merged_table,
+                str(temp_path),
+                compression="snappy",
+            )
+            temp_path.replace(metadata_file)
+        except Exception:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
         
         self.logger.info(
             "Station metadata written",
@@ -422,34 +400,31 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         
         platform = event.metadata.name
         table = pa.Table.from_batches(batches)
-        
-        legacy_table = self._transform_raw_data(table, platform)
+
+        platform_config = self._platform_configs.get(platform)
+        if platform_config is None:
+            self.logger.warning("No platform configuration found; skipping projection", platform=platform)
+            return
+        legacy_table = self._transform_raw_data(table, platform, platform_config)
         
         if legacy_table.num_rows == 0:
             self.logger.warning("No rows after transformation", dataset=event.metadata.name)
             return
         
-        # Convert to pandas to group by observation date and hour
         df = legacy_table.to_pandas()
-        
-        # Parse datetime string to extract date and hour for partitioning
         df['_observation_datetime'] = pd.to_datetime(df['datetime'])
         df['_observation_date'] = df['_observation_datetime'].dt.date
         df['_observation_hour'] = df['_observation_datetime'].dt.hour
         
-        # Group data by observation date and hour, write to respective partitions
         raw_dir = self.config.output_path / self.RAW_DIR / self.DATA_SUBDIR
         total_rows_written = 0
         files_written = []
         
-        # Group by date and hour to create hourly files
         for (observation_date, observation_hour), hour_group in df.groupby(['_observation_date', '_observation_hour']):
-            # Extract year, month, day for partition hierarchy
             year = observation_date.year
             month = observation_date.month
             day = observation_date.day
             
-            # Build hierarchical partition path: platform=X/year=Y/month=M/day=D/
             partition_path = (
                 raw_dir
                 / f"platform={platform}"
@@ -459,66 +434,31 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
             )
             partition_path.mkdir(parents=True, exist_ok=True)
             
-            # Drop temporary columns used for grouping
             hour_group_clean = hour_group.drop(columns=['_observation_datetime', '_observation_date', '_observation_hour'])
-            
-            # Convert back to Arrow table with original schema
             hour_table = pa.Table.from_pandas(hour_group_clean, schema=legacy_table.schema)
-            
-            # Use hour-based filename: YYYYMMDD_HH.parquet
             hour_str = f"{year:04d}{month:02d}{day:02d}_{observation_hour:02d}"
             raw_file = partition_path / f"{hour_str}.parquet"
             
-            # Append to existing file if it exists, otherwise create new
-            if raw_file.exists():
-                try:
-                    existing_table = pq.read_table(str(raw_file))
-                    
-                    # debugging schema issues
-                    self.logger.debug(
-                        "Schema comparison before merge",
-                        path=str(raw_file),
-                        existing_platform_type=str(existing_table.schema.field('platform').type),
-                        new_platform_type=str(hour_table.schema.field('platform').type),
-                    )
-                    
-                    combined_table = pa.concat_tables([existing_table, hour_table])
-                    
-                    pq.write_table(
-                        combined_table,
-                        str(raw_file),
-                        compression="snappy",
-                    )
-                    
-                    self.logger.debug(
-                        "Appended to existing hourly file",
-                        new_rows=hour_table.num_rows,
-                        total_rows=combined_table.num_rows,
-                        path=str(raw_file),
-                    )
-                except Exception as e:
-                    self.logger.error(
-                        "Failed to append to existing file, overwriting",
-                        path=str(raw_file),
-                        error=str(e),
-                    )
-                    pq.write_table(
-                        hour_table,
-                        str(raw_file),
-                        compression="snappy",
-                    )
-            else:
+            temp_path = raw_file.parent / f"{raw_file.name}.tmp-{uuid.uuid4().hex}"
+            
+            try:
                 pq.write_table(
                     hour_table,
-                    str(raw_file),
+                    str(temp_path),
                     compression="snappy",
                 )
+                temp_path.replace(raw_file)
                 
                 self.logger.debug(
-                    "Created new hourly file",
+                    "Wrote hourly file",
+                    schema=hour_table.schema.names,
                     rows=hour_table.num_rows,
                     path=str(raw_file),
                 )
+            except Exception:
+                if temp_path.exists():
+                    temp_path.unlink()
+                raise
             
             total_rows_written += hour_table.num_rows
             files_written.append(str(raw_file.relative_to(raw_dir)))
