@@ -8,7 +8,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pydantic import BaseModel
 from shapely import wkt as wkt_parser
-from shapely.geometry import MultiPoint, box
+from shapely.geometry import box
 
 from ionbeam.core.constants import LatitudeColumn, LongitudeColumn, ObservationTimestampColumn
 from ionbeam.core.handler import BaseHandler
@@ -165,42 +165,6 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
             "acronet": lambda sid, grp, platform: grp["station_name"].iloc[-1] if "station_name" in grp.columns else sid,
         }
 
-    def _calculate_trajectory_wkt(self, group_df: pd.DataFrame) -> str:
-        coords = group_df[[LongitudeColumn, LatitudeColumn]].values
-        trajectory = MultiPoint(coords)
-        return trajectory.wkt
-    
-    def _calculate_centroid_from_trajectory(self, trajectory_wkt: str) -> tuple[float, float, str]:
-        trajectory = wkt_parser.loads(trajectory_wkt)
-        bbox = box(*trajectory.bounds)
-        centroid = bbox.centroid
-        return centroid.y, centroid.x, bbox.wkt
-
-    def _build_common_fields(
-        self,
-        df: pd.DataFrame,
-        platform: str,
-        dt_series: pd.Series
-    ) -> pd.DataFrame:
-        legacy_df = pd.DataFrame()
-        
-        legacy_df["datetime"] = dt_series.apply(
-            lambda x: x.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
-        )
-        
-        legacy_df["author"] = df.get("author", None)
-        legacy_df["station_id"] = df["station_id"]
-        legacy_df["external_station_id"] = df["station_id"]
-        legacy_df["aggregation_type"] = "by_time"
-        
-        floored = dt_series.dt.floor('H')
-        legacy_df["chunk_date"] = floored.dt.strftime("%Y%m%d")
-        legacy_df["chunk_time"] = floored.dt.strftime("%H%M")
-        
-        legacy_df["lat"] = df[LatitudeColumn]
-        legacy_df["lon"] = df[LongitudeColumn]
-        
-        return legacy_df
 
     def _transform_raw_data(
         self,
@@ -214,173 +178,180 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
             return pa.table({}, schema=config.schema)
 
         dt_series = pd.to_datetime(df[ObservationTimestampColumn], unit="ms", utc=True)
+        floored = dt_series.dt.floor('h')
         
-        legacy_df = self._build_common_fields(df, platform, dt_series)
+        # Build common fields inline
+        legacy_df = pd.DataFrame({
+            "datetime": dt_series.apply(lambda x: x.isoformat(timespec='milliseconds').replace('+00:00', 'Z')),
+            "author": df.get("author", None),
+            "station_id": df["station_id"],
+            "external_station_id": df["station_id"],
+            "station_name": config.station_name_builder(df, platform),
+            "aggregation_type": "by_time",
+            "chunk_date": floored.dt.strftime("%Y%m%d"),
+            "chunk_time": floored.dt.strftime("%H%M"),
+            "lat": df[LatitudeColumn],
+            "lon": df[LongitudeColumn],
+        })
         
-        legacy_df["station_name"] = config.station_name_builder(df, platform)
-        
+        # Add platform-specific columns
         for canonical_name, legacy_name in config.column_map.items():
             legacy_df[legacy_name] = df.get(canonical_name, None)
         
+        # Add extra fields
         for field_name, extractor in config.extra_fields.items():
-            result = extractor(df)
-            if result is not None:
-                legacy_df[field_name] = result
-            else:
-                legacy_df[field_name] = None
+            legacy_df[field_name] = extractor(df) if (result := extractor(df)) is not None else None
         
         return pa.Table.from_pandas(legacy_df, schema=config.schema)
 
-    def _build_metadata_base(
-        self,
-        df: pd.DataFrame,
-        platform: str,
-        name_resolver: Callable[[str, pd.DataFrame, str], str]
-    ) -> pd.DataFrame:
-        if df.empty:
-            return pd.DataFrame()
-        
-        results = []
-        for station_id, group in df.groupby("station_id"):
-            trajectory_wkt = self._calculate_trajectory_wkt(group)
-            lat, lon, bbox_wkt = self._calculate_centroid_from_trajectory(trajectory_wkt)
-            
-            station_id_str = str(station_id)
-            
-            result = {
-                "station_id": station_id_str,
-                "time_span_start": group[ObservationTimestampColumn].min(),
-                "time_span_end": group[ObservationTimestampColumn].max(),
-                "location_lat": lat,
-                "location_lon": lon,
-                "geometry_wkt": trajectory_wkt,
-                "author": group["author"].iloc[-1] if "author" in group.columns else None,
-                "resolved_name": name_resolver(station_id_str, group, platform)
-            }
-            results.append(result)
-        
-        agg = pd.DataFrame(results)
-        
-        agg["external_id"] = agg["station_id"]
-        agg["internal_id"] = platform + "_" + agg["station_id"]
-        agg["name"] = agg["resolved_name"]
-        agg["description"] = None
-        agg["aggregation_type"] = "by_time"
-        
-        agg["time_span_start"] = pd.to_datetime(agg["time_span_start"], utc=True)
-        agg["time_span_end"] = pd.to_datetime(agg["time_span_end"], utc=True)
-        
-        return agg[[
-            "external_id", "internal_id", "name", "description",
-            "aggregation_type", "time_span_start", "time_span_end",
-            "location_lat", "location_lon", "author", "geometry_wkt"
-        ]]
-
-    def _aggregate_metadata_unified(
-        self,
-        table: pa.Table,
-        platform: str,
-        name_resolver: Callable[[str, pd.DataFrame, str], str]
-    ) -> pa.Table:
-        """Unified metadata aggregation."""
+    def _aggregate_station_metadata(self, table: pa.Table, platform: str) -> pa.Table:
+        """Aggregate station metadata from raw observation data."""
         df = table.to_pandas()
         
         if df.empty:
             return pa.table({}, schema=self.METADATA_SCHEMA)
         
-        result_df = self._build_metadata_base(df, platform, name_resolver)
-        return pa.Table.from_pandas(result_df, schema=self.METADATA_SCHEMA)
-
-    def _aggregate_station_metadata(self, table: pa.Table, platform: str) -> pa.Table:
-        """Route to platform-specific metadata aggregation."""
+        # Get platform-specific name resolver
         name_resolver = self._station_name_resolver.get(
             platform,
             lambda sid, grp, p: f"{p}: {sid}"
         )
-        return self._aggregate_metadata_unified(table, platform, name_resolver)
+        
+        # Build metadata for each station
+        results = []
+        for station_id, group in df.groupby("station_id"):
+            # Create bounding box from coordinates
+            coords = group[[LongitudeColumn, LatitudeColumn]].values
+            lons = coords[:, 0]
+            lats = coords[:, 1]
+            
+            # Create bbox and calculate centroid inline
+            bbox = box(min(lons), min(lats), max(lons), max(lats))
+            centroid = bbox.centroid
+            lat, lon = centroid.y, centroid.x
+            bbox_wkt = bbox.wkt
+            
+            station_id_str = str(station_id)
+            
+            results.append({
+                "external_id": station_id_str,
+                "internal_id": f"{platform}_{station_id_str}",
+                "name": name_resolver(station_id_str, group, platform),
+                "description": None,
+                "aggregation_type": "by_time",
+                "time_span_start": pd.to_datetime(group[ObservationTimestampColumn].min(), utc=True),
+                "time_span_end": pd.to_datetime(group[ObservationTimestampColumn].max(), utc=True),
+                "location_lat": lat,
+                "location_lon": lon,
+                "author": group["author"].iloc[-1] if "author" in group.columns else None,
+                "geometry_wkt": bbox_wkt,
+            })
+        
+        return pa.Table.from_pandas(pd.DataFrame(results), schema=self.METADATA_SCHEMA)
 
     def _merge_metadata(self, new_table: pa.Table, platform: str) -> None:
         """Merge new metadata with existing and write to disk."""
-        out_dir = self.config.output_path / self.RAW_DIR / self.METADATA_SUBDIR
-        platform_dir = out_dir / f"platform={platform}"
-        platform_dir.mkdir(parents=True, exist_ok=True)
+        metadata_file = (
+            self.config.output_path / self.RAW_DIR / self.METADATA_SUBDIR
+            / f"platform={platform}" / "metadata.parquet"
+        )
+        metadata_file.parent.mkdir(parents=True, exist_ok=True)
         
-        metadata_file = platform_dir / "metadata.parquet"
         new_df = new_table.to_pandas()
         
-        if metadata_file.exists():
-            try:
-                existing_df = pq.read_table(str(metadata_file)).to_pandas()
-                combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-            except Exception as e:
-                self.logger.warning("Failed to read existing metadata, overwriting", error=str(e))
-                combined_df = new_df
-        else:
-            combined_df = new_df
+        if not metadata_file.exists():
+            # No existing metadata, just write new data
+            self._write_parquet_atomically(metadata_file, pa.Table.from_pandas(new_df, schema=self.METADATA_SCHEMA))
+            self.logger.info(
+                "Station metadata written (new file)",
+                platform=platform,
+                stations=len(new_df),
+                path=str(metadata_file),
+            )
+            return
         
+        # Read existing metadata and identify conflicts
+        existing_df = pq.read_table(str(metadata_file)).to_pandas()
+        new_ids = set(new_df["internal_id"])
+        existing_ids = set(existing_df["internal_id"])
+        conflicting_ids = new_ids & existing_ids
+        
+        # Build result efficiently
         results = []
-        for internal_id, group in combined_df.groupby("internal_id"):
-            all_points = []
-            for wkt in group["geometry_wkt"].dropna():
-                geom = wkt_parser.loads(wkt)
-                if geom.geom_type == 'MultiPoint':
-                    for point in geom.geoms:  # type: ignore
-                        all_points.append((point.x, point.y))
+        
+        # Add non-conflicting stations AS-IS
+        non_conflicting_existing = existing_ids - new_ids
+        non_conflicting_new = new_ids - existing_ids
+        
+        if non_conflicting_existing:
+            results.extend(existing_df[existing_df["internal_id"].isin(non_conflicting_existing)].to_dict('records'))
+        if non_conflicting_new:
+            results.extend(new_df[new_df["internal_id"].isin(non_conflicting_new)].to_dict('records'))
+
+        for internal_id in conflicting_ids:
+            existing_records = existing_df[existing_df["internal_id"] == internal_id]
+            new_records = new_df[new_df["internal_id"] == internal_id]
             
-            if all_points:
-                unique_points = list(set(all_points))
-                merged_trajectory = MultiPoint(unique_points)
-                bbox = box(*merged_trajectory.bounds)
-                centroid = bbox.centroid
-                location_lat = centroid.y
-                location_lon = centroid.x
-                geometry_wkt = merged_trajectory.wkt
+            # Merge bounding boxes by collecting all bbox bounds and creating a new encompassing bbox
+            all_bounds: list[tuple[float, float, float, float]] = []
+            for wkt_str in pd.concat([existing_records["geometry_wkt"], new_records["geometry_wkt"]]).dropna():
+                geom = wkt_parser.loads(str(wkt_str))
+                all_bounds.append(geom.bounds)
+
+            if all_bounds:
+                minx, miny, maxx, maxy = (func(col) for func, col in zip(
+                    (min, min, max, max),
+                    zip(*all_bounds)
+                ))
+                merged_bbox = box(minx, miny, maxx, maxy)
+                c = merged_bbox.centroid
+                location_lat, location_lon = c.y, c.x
+                geometry_wkt = merged_bbox.wkt
             else:
-                location_lat = group["location_lat"].iloc[-1]
-                location_lon = group["location_lon"].iloc[-1]
-                geometry_wkt = group["geometry_wkt"].iloc[-1]
+                # Fallback to new record values
+                location_lat = new_records["location_lat"].iloc[-1]
+                location_lon = new_records["location_lon"].iloc[-1]
+                geometry_wkt = new_records["geometry_wkt"].iloc[-1]
             
-            result = {
+            # Combine time spans and use latest values for other fields
+            all_records = pd.concat([existing_records, new_records])
+            results.append({
                 "internal_id": internal_id,
-                "external_id": group["external_id"].iloc[0],
-                "name": group["name"].iloc[0],
-                "description": group["description"].iloc[0],
-                "aggregation_type": group["aggregation_type"].iloc[0],
-                "time_span_start": group["time_span_start"].min(),
-                "time_span_end": group["time_span_end"].max(),
+                "external_id": new_records["external_id"].iloc[0],
+                "name": new_records["name"].iloc[0],
+                "description": new_records["description"].iloc[0],
+                "aggregation_type": new_records["aggregation_type"].iloc[0],
+                "time_span_start": all_records["time_span_start"].min(),
+                "time_span_end": all_records["time_span_end"].max(),
                 "location_lat": location_lat,
                 "location_lon": location_lon,
-                "author": group["author"].iloc[-1],
+                "author": new_records["author"].iloc[-1],
                 "geometry_wkt": geometry_wkt,
-            }
-            results.append(result)
+            })
         
-        agg = pd.DataFrame(results)
-        
-        agg = agg.drop_duplicates(subset=['internal_id'], keep='last')
-        
-        merged_table = pa.Table.from_pandas(agg, schema=self.METADATA_SCHEMA)
-        
-        temp_path = metadata_file.parent / f"{metadata_file.name}.tmp-{uuid.uuid4().hex}"
+        # Write merged metadata
+        self._write_parquet_atomically(metadata_file, pa.Table.from_pandas(pd.DataFrame(results), schema=self.METADATA_SCHEMA))
+        self.logger.info(
+            "Station metadata written (optimized)",
+            platform=platform,
+            total_stations=len(results),
+            conflicting_stations=len(conflicting_ids),
+            new_stations=len(non_conflicting_new),
+            existing_kept=len(non_conflicting_existing),
+            path=str(metadata_file),
+        )
+    
+    def _write_parquet_atomically(self, file_path: pathlib.Path, table: pa.Table) -> None:
+        """Write a Parquet table to disk atomically using a temporary file."""
+        temp_path = file_path.parent / f"{file_path.name}.tmp-{uuid.uuid4().hex}"
         
         try:
-            pq.write_table(
-                merged_table,
-                str(temp_path),
-                compression="snappy",
-            )
-            temp_path.replace(metadata_file)
+            pq.write_table(table, str(temp_path), compression="snappy")
+            temp_path.replace(file_path)
         except Exception:
             if temp_path.exists():
                 temp_path.unlink()
             raise
-        
-        self.logger.info(
-            "Station metadata written",
-            platform=platform,
-            stations=merged_table.num_rows,
-            path=str(metadata_file),
-        )
 
     async def _persist_batches(
         self,
@@ -402,10 +373,10 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         platform = event.metadata.name
         table = pa.Table.from_batches(batches)
 
-        platform_config = self._platform_configs.get(platform)
-        if platform_config is None:
+        if (platform_config := self._platform_configs.get(platform)) is None:
             self.logger.warning("No platform configuration found; skipping projection", platform=platform)
             return
+        
         legacy_table = self._transform_raw_data(table, platform, platform_config)
         
         if legacy_table.num_rows == 0:
@@ -422,44 +393,27 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         files_written = []
         
         for (observation_date, observation_hour), hour_group in df.groupby(['_observation_date', '_observation_hour']):
-            year = observation_date.year
-            month = observation_date.month
-            day = observation_date.day
-            
             partition_path = (
-                raw_dir
-                / f"platform={platform}"
-                / f"year={year}"
-                / f"month={month}"
-                / f"day={day}"
+                raw_dir / f"platform={platform}"
+                / f"year={observation_date.year}"
+                / f"month={observation_date.month}"
+                / f"day={observation_date.day}"
             )
             partition_path.mkdir(parents=True, exist_ok=True)
             
             hour_group_clean = hour_group.drop(columns=['_observation_datetime', '_observation_date', '_observation_hour'])
             hour_table = pa.Table.from_pandas(hour_group_clean, schema=legacy_table.schema)
-            hour_str = f"{year:04d}{month:02d}{day:02d}_{observation_hour:02d}"
+            
+            hour_str = f"{observation_date.year:04d}{observation_date.month:02d}{observation_date.day:02d}_{observation_hour:02d}"
             raw_file = partition_path / f"{hour_str}.parquet"
             
-            temp_path = raw_file.parent / f"{raw_file.name}.tmp-{uuid.uuid4().hex}"
-            
-            try:
-                pq.write_table(
-                    hour_table,
-                    str(temp_path),
-                    compression="snappy",
-                )
-                temp_path.replace(raw_file)
-                
-                self.logger.debug(
-                    "Wrote hourly file",
-                    schema=hour_table.schema.names,
-                    rows=hour_table.num_rows,
-                    path=str(raw_file),
-                )
-            except Exception:
-                if temp_path.exists():
-                    temp_path.unlink()
-                raise
+            self._write_parquet_atomically(raw_file, hour_table)
+            self.logger.debug(
+                "Wrote hourly file",
+                schema=hour_table.schema.names,
+                rows=hour_table.num_rows,
+                path=str(raw_file),
+            )
             
             total_rows_written += hour_table.num_rows
             files_written.append(str(raw_file.relative_to(raw_dir)))
