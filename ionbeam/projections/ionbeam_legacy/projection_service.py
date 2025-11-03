@@ -325,10 +325,11 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
                 geom = wkt_parser.loads(wkt)
                 if geom.geom_type == 'MultiPoint':
                     for point in geom.geoms:  # type: ignore
-                        all_points.append((point.x, point.y)) # TODO - this is too naive, incoming points aren't always after existing ones
+                        all_points.append((point.x, point.y))
             
             if all_points:
-                merged_trajectory = MultiPoint(all_points)
+                unique_points = list(set(all_points))
+                merged_trajectory = MultiPoint(unique_points)
                 bbox = box(*merged_trajectory.bounds)
                 centroid = bbox.centroid
                 location_lat = centroid.y
