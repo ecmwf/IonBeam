@@ -13,11 +13,13 @@ logger = logging.getLogger(__name__)
 PLATFORM_IGNORE_PATHS = {
     "meteotracker": [
         "root['name']"
+        "root['location']['lat']",
+        "root['location']['lon']",
     ],
     "acronet": [
-        "root['mars_selection']['date']",
-        "root['time_span']['start']",
-        "root['time_span']['end']",
+        # "root['mars_selection']['date']",
+        # "root['time_span']['start']",
+        # "root['time_span']['end']",
     ],
 }
 
@@ -593,12 +595,9 @@ def _add_differing_items_to_log(
         return
         
     log_parts.append(header)
-    for item in items[:5]:
+    for item in items:
         log_parts.append(format_fn(item))
         log_parts.append(_format_diff_git_style(item['diff']))
-    
-    if len(items) > 5:
-        log_parts.append(f"  ... and {len(items) - 5} more")
 
 
 def _add_only_in_items_to_log(
@@ -619,11 +618,8 @@ def _add_only_in_items_to_log(
         return
         
     log_parts.append(header)
-    for item in items[:5]:
+    for item in items:
         log_parts.append(format_fn(item))
-    
-    if len(items) > 5:
-        log_parts.append(f"  ... and {len(items) - 5} more")
 
 
 __all__ = [

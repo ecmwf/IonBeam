@@ -60,8 +60,6 @@ class LegacyApiConfig(BaseModel):
     # Comparison configuration
     legacy_api_base_url: str | None = "http://ionbeam-ichange.ecmwf-ichange.f.ewcloud.host"
     enable_comparison: bool = True
-    comparison_tolerance: float = 0.01  # 3 decimal places
-    excluded_fields: set[str] = {"_metadata", "timestamp_generated"}
     comparison_timeout: float = 5.0
 
 

@@ -1,39 +1,50 @@
 FROM python:3.12-alpine AS python-base
 
-# bleeding edge repo for eccodes, udunits - TODO - build from source?
-RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
-RUN apk add build-base python3-dev git gdal-dev udunits udunits-dev eccodes
+# bleeding edge repo for eccodes, udunits
+RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories && \
+    apk add --no-cache build-base python3-dev git gdal-dev udunits udunits-dev eccodes
+
 ENV UDUNITS2_XML_PATH=/usr/share/udunits/udunits2.xml
 
 WORKDIR /app
 
-FROM python-base AS ionbeam-builder
+FROM python-base AS builder-proj-deps
 
+# Copy UV from official image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-ADD . /app
+ENV UV_LINK_MODE=copy
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project --no-dev --no-editable
 
-RUN ls /app
+FROM builder-proj-deps AS builder
 
-RUN uv sync --locked
-RUN uv build
+COPY . /app
 
-FROM python-base AS python-install
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable
 
-# COPY dist/*.whl .
-COPY --from=ionbeam-builder /app/dist/*.whl .
+FROM python-base AS ionbeam
 
-RUN python3 -m venv /app/.venv && \
-    /app/.venv/bin/pip install *.whl
-
-FROM python-install AS ionbeam
-
-WORKDIR /app
-
-CMD ["/app/.venv/bin/python3","-m", "ionbeam",  "faststream"]
-
-FROM python-install AS ionbeam-legacy-api
+ENV PATH="/app/.venv/bin:$PATH" \
+    VIRTUAL_ENV=/app/.venv
 
 WORKDIR /app
 
-CMD ["/app/.venv/bin/python3","-m", "ionbeam",  "legacy-api"]
+COPY --from=builder /app/.venv /app/.venv
+
+CMD ["python3", "-m", "ionbeam", "faststream"]
+
+FROM python-base AS ionbeam-legacy-api
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    VIRTUAL_ENV=/app/.venv
+
+WORKDIR /app
+
+# Copy the virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
+
+CMD ["python3", "-m", "ionbeam", "legacy-api"]

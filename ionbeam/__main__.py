@@ -33,7 +33,7 @@ def faststream_cmd():
 @click.option("--config", "-c", default="config.yaml", help="Path to config file")
 def legacy_api_cmd(host, port, log_level, config):
     # Set config path environment variable for consistency
-    os.environ["IONBEAM_CONFIG_PATH"] = config
+    config = config or os.getenv("IONBEAM_CONFIG_PATH", "config.yaml")
     
     # Load configuration from YAML file
     config_path = Path(config)
