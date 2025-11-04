@@ -397,7 +397,17 @@ class AcronetSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
             response = await self._make_request("GET", "sensors/classes")
             if response is None:
                 return []
-            return response.json()
+            
+            # Handle empty response body
+            if not response.text or response.text.strip() == "":
+                self.logger.warning("Empty response body from sensors/classes endpoint")
+                return []
+            
+            try:
+                return response.json()
+            except Exception as exc:
+                self.logger.error("Failed to parse JSON response from sensors/classes", error=str(exc))
+                return []
         
         payload = await _fetch()
         
