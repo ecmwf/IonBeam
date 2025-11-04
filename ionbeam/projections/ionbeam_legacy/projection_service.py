@@ -38,8 +38,6 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
       - Raw data: ionbeam-legacy/data/platform={platform}/{start}_{end}.parquet
       - Station metadata: ionbeam-legacy/metadata/platform={platform}/metadata.parquet
     """
-
-    RAW_DIR = "ionbeam-legacy"
     DATA_SUBDIR = "data"
     METADATA_SUBDIR = "metadata"
 
@@ -252,7 +250,7 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
     def _merge_metadata(self, new_table: pa.Table, platform: str) -> None:
         """Merge new metadata with existing and write to disk."""
         metadata_file = (
-            self.config.output_path / self.RAW_DIR / self.METADATA_SUBDIR
+            self.config.output_path / self.METADATA_SUBDIR
             / f"platform={platform}" / "metadata.parquet"
         )
         metadata_file.parent.mkdir(parents=True, exist_ok=True)
@@ -388,7 +386,7 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         df['_observation_date'] = df['_observation_datetime'].dt.date
         df['_observation_hour'] = df['_observation_datetime'].dt.hour
         
-        raw_dir = self.config.output_path / self.RAW_DIR / self.DATA_SUBDIR
+        raw_dir = self.config.output_path / self.DATA_SUBDIR
         total_rows_written = 0
         files_written = []
         
