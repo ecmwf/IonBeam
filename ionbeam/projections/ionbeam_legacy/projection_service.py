@@ -45,7 +45,7 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
     # NOTE: 'platform' is NOT included here because it exists as a Hive partition
     # and will be automatically added by DuckDB when reading with hive_partitioning=true
     LEGACY_COMMON_FIELDS = [
-        pa.field("datetime", pa.string()),
+        pa.field("datetime", pa.timestamp("ms", tz="UTC")),
         pa.field("author", pa.string()),
         pa.field("station_id", pa.string()),
         pa.field("external_station_id", pa.string()),
@@ -175,12 +175,12 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         if df.empty:
             return pa.table({}, schema=config.schema)
 
-        dt_series = pd.to_datetime(df[ObservationTimestampColumn], unit="ms", utc=True)
+        dt_series = df[ObservationTimestampColumn]
         floored = dt_series.dt.floor('h')
         
         # Build common fields inline
         legacy_df = pd.DataFrame({
-            "datetime": dt_series.apply(lambda x: x.isoformat(timespec='milliseconds').replace('+00:00', 'Z')),
+            "datetime": dt_series,
             "author": df.get("author", None),
             "station_id": df["station_id"],
             "external_station_id": df["station_id"],

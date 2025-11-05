@@ -139,6 +139,18 @@ class LegacyAPIDataService:
             query_start = time.perf_counter()
             data_pattern = str(self.data_dir / "**" / "*.parquet")
 
+            def _utc_aware(dt: Optional[datetime]) -> Optional[datetime]:
+                if dt is None:
+                    return None
+                # If naive, assume UTC; otherwise convert to UTC to be consistent
+                return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+            # Normalize times to UTC-aware datetimes
+            if start_time:
+                start_time = _utc_aware(start_time)
+            if end_time:
+                end_time = _utc_aware(end_time)
+
             params: Dict[str, Any] = {"platform": platform}
             predicates = ["platform = $platform"]
 
@@ -172,23 +184,28 @@ class LegacyAPIDataService:
                 WHERE {" AND ".join(predicates)}
             """
 
+            logger.debug("Executing observation query - query=%s, params=%s", query, params)
+
             with duckdb.connect(":memory:") as con:
+                con.execute("SET TimeZone = 'UTC'")
                 df = con.execute(query, params).df()
 
             if df.empty:
+                logger.info("No observations found matching criteria")
                 return pd.DataFrame()
 
             if sql_filter:
                 df = self._apply_sql_filter(df, sql_filter)
 
-            # Drop partition columns
+            # Drop hive partition columns from the API response
             drop_cols = [c for c in ("year", "month", "day") if c in df.columns]
             if drop_cols:
                 df = df.drop(columns=drop_cols)
+                logger.debug("Dropped partition columns from result: %s", drop_cols)
 
             logger.info(
-                "Query completed in %.3fs - rows=%d, platform=%s",
-                time.perf_counter() - query_start, len(df), platform
+                "Query completed in %.3fs - rows=%d, platform=%s, time_range=(%s, %s)",
+                time.perf_counter() - query_start, len(df), platform, start_time, end_time
             )
             return df
 
