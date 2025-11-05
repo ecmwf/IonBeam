@@ -330,7 +330,7 @@ class IonbeamLegacyProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         # Write merged metadata
         self._write_parquet_atomically(metadata_file, pa.Table.from_pandas(pd.DataFrame(results), schema=self.METADATA_SCHEMA))
         self.logger.info(
-            "Station metadata written (optimized)",
+            "Station metadata written",
             platform=platform,
             total_stations=len(results),
             conflicting_stations=len(conflicting_ids),

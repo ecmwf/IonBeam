@@ -1,7 +1,8 @@
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import duckdb
 import pandas as pd
@@ -46,15 +47,12 @@ class LegacyAPIDataService:
         end_time: Optional[datetime] = None,
     ) -> List[StationMetadata]:
         try:
-            # Use wildcard pattern - DuckDB handles platform filtering via WHERE clause with hive_partitioning
             metadata_pattern = str(self.metadata_dir / "**" / "metadata.parquet")
 
-            # Check if metadata files exist
             if not self.metadata_dir.exists():
                 logger.error(f"Metadata directory does not exist: {self.metadata_dir}")
                 return []
 
-            # Build WHERE clause conditions
             conditions = []
             params = {}
 
@@ -73,7 +71,6 @@ class LegacyAPIDataService:
             # Time span overlap filtering
             if start_time or end_time:
                 if start_time and end_time:
-                    # Check for overlap: station spans overlap with query range
                     conditions.append(
                         "(time_span_start <= $end_time AND time_span_end >= $start_time)"
                     )
@@ -139,81 +136,64 @@ class LegacyAPIDataService:
         sql_filter: Optional[str] = None,
     ) -> pd.DataFrame:
         try:
-            # Use recursive pattern - DuckDB prunes partitions automatically with hive_partitioning
+            query_start = time.perf_counter()
             data_pattern = str(self.data_dir / "**" / "*.parquet")
 
-            # Build WHERE clause with partition columns for efficient pruning
-            conditions = []
-            params = {}
+            params: Dict[str, Any] = {"platform": platform}
+            predicates = ["platform = $platform"]
 
-            # Platform filter (partition column - enables directory-level pruning)
-            conditions.append("platform = $platform")
-            params["platform"] = platform
-
-            # Add partition hints for better pruning, then precise datetime filters
             if start_time:
-                # Year partition hint for pruning
-                conditions.append("year >= $start_year")
-                params["start_year"] = start_time.year
-                # Precise datetime filter
-                conditions.append("datetime >= $start_time")
-                params["start_time"] = start_time.isoformat()
+                params.update(
+                    start_time=start_time,
+                    start_year=start_time.year,
+                    start_month=start_time.month,
+                    start_day=start_time.day,
+                )
+                predicates.append("datetime >= $start_time")
+                predicates.append("(year, month, day) >= ($start_year, $start_month, $start_day)")
 
             if end_time:
-                # Year partition hint for pruning
-                conditions.append("year <= $end_year")
-                params["end_year"] = end_time.year
-                # Precise datetime filter
-                conditions.append("datetime <= $end_time")
-                params["end_time"] = end_time.isoformat()
+                params.update(
+                    end_time=end_time,
+                    end_year=end_time.year,
+                    end_month=end_time.month,
+                    end_day=end_time.day,
+                )
+                predicates.append("datetime <= $end_time")
+                predicates.append("(year, month, day) <= ($end_year, $end_month, $end_day)")
 
             if station_id:
-                conditions.append("station_id = $station_id")
                 params["station_id"] = station_id
+                predicates.append("station_id = $station_id")
 
-            # Build base query
             query = f"""
                 SELECT *
                 FROM read_parquet('{data_pattern}', hive_partitioning=true)
+                WHERE {" AND ".join(predicates)}
             """
 
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
-
-            logger.debug(
-                f"Executing observation query - query={query}, params={params}"
-            )
-
-            # Execute query
             with duckdb.connect(":memory:") as con:
-                result_df = con.execute(query, params).df()
+                df = con.execute(query, params).df()
 
-            if result_df.empty:
-                logger.info("No observations found matching criteria")
+            if df.empty:
                 return pd.DataFrame()
 
-            # Apply additional SQL filter if provided
             if sql_filter:
-                result_df = self._apply_sql_filter(result_df, sql_filter)
+                df = self._apply_sql_filter(df, sql_filter)
 
-            # Remove Hive partition columns (internal storage fields) from the final payload
-            # These columns (year, month, day) are used for efficient querying
-            # but should not be exposed to API consumers
-            partition_columns = ["year", "month", "day"]
-            columns_to_drop = [col for col in partition_columns if col in result_df.columns]
-            if columns_to_drop:
-                result_df = result_df.drop(columns=columns_to_drop)
-                logger.debug(f"Dropped partition columns from result: {columns_to_drop}")
+            # Drop partition columns
+            drop_cols = [c for c in ("year", "month", "day") if c in df.columns]
+            if drop_cols:
+                df = df.drop(columns=drop_cols)
 
             logger.info(
-                f"Observation query completed - row_count={len(result_df)}, "
-                f"platform={platform}, time_range=({start_time}, {end_time})"
+                "Query completed in %.3fs - rows=%d, platform=%s",
+                time.perf_counter() - query_start, len(df), platform
             )
-
-            return result_df
+            return df
 
         except Exception as e:
-            logger.error(f"Observation query failed: {e}", exc_info=True)
+            logger.error("Observation query failed: %s", e, exc_info=True)
             raise QueryError(f"Failed to retrieve observational data: {e}") from e
 
     def _apply_sql_filter(
@@ -223,10 +203,8 @@ class LegacyAPIDataService:
     ) -> pd.DataFrame:
         try:
             with duckdb.connect(":memory:") as con:
-                # Register the DataFrame as a table
                 con.register("data", df)
                 
-                # Execute the filter query
                 query = f"SELECT * FROM data WHERE {sql_filter}"
                 filtered_df = con.execute(query).df()
 
