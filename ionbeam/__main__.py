@@ -27,34 +27,26 @@ def faststream_cmd():
 
 
 @main.command("legacy-api")
-@click.option("--host", default="0.0.0.0", help="Host to bind to")
-@click.option("--port", default=8080, type=int, help="Port to bind to")
-@click.option("--log-level", default="info", help="Log level (debug, info, warning, error)")
-@click.option("--config", "-c", default="config.yaml", help="Path to config file")
-def legacy_api_cmd(host, port, log_level, config):
-    # Set config path environment variable for consistency
-    config = config or os.getenv("IONBEAM_CONFIG_PATH", "config.yaml")
+def legacy_api_cmd():
+    """Run the legacy API server."""
+    config_path = Path(os.getenv("IONBEAM_CONFIG_PATH", "config.yaml"))
     
-    # Load configuration from YAML file
-    config_path = Path(config)
     if config_path.exists():
         with open(config_path) as f:
             yaml_config = yaml.safe_load(f)
-        
-        # Extract legacy API config if it exists in the YAML
+
         legacy_config_dict = yaml_config.get("legacy_api", {})
         legacy_api_config = LegacyApiConfig(**legacy_config_dict)
     else:
-        # Use default config if file doesn't exist
         legacy_api_config = LegacyApiConfig()
     
     app = create_legacy_application(config=legacy_api_config)
     
     uvicorn.run(
         app,
-        host=host,
-        port=port,
-        log_level=log_level,
+        host="0.0.0.0",
+        port=8080,
+        log_level="info",
     )
 
 

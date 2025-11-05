@@ -76,11 +76,6 @@ class RetrieveQueryParams(BaseModel):
         description="Output format for the response. Default is JSON. Options are 'json', 'csv', 'parquet'",
         examples=["json"]
     )
-    filter: Optional[str] = Field(
-        default=None,
-        description="An SQL filter to apply to the retrieved data",
-        examples=["status = 'active' AND age > 30"]
-    )
     start_time: Optional[dt] = Field(
         default=None,
         description="The start datetime for the data retrieval in ISO 8601 format",

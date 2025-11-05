@@ -12,7 +12,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from .comparison_v2 import StationsComparisonServiceV2, compare_observations_response, compare_stations_response
-from .data_service import InvalidFilterError, LegacyAPIDataService, QueryError
+from .data_service import LegacyAPIDataService, QueryError
 from .models import (
     ApiError,
     DataLimitError,
@@ -53,11 +53,10 @@ class LegacyApiConfig(BaseModel):
     title: str = "Ionbeam Legacy API"
     version: str = "0.1.0"
     root_path: str = "/legacy"
-    # DuckDB data layer configuration
     projection_base_path: Path = Path("./projections/ionbeam-legacy")
     metadata_subdir: str = "metadata"
     data_subdir: str = "data"
-    # Comparison configuration
+    max_time_range_days: int = 31
     legacy_api_base_url: str | None = "http://ionbeam-ichange.ecmwf-ichange.f.ewcloud.host"
     enable_comparison: bool = True
     comparison_timeout: float = 5.0
@@ -135,7 +134,6 @@ def _build_station_response(
 def _normalize_datetime(df: pd.DataFrame) -> pd.DataFrame:
     if 'datetime' in df.columns:
         df = df.copy()
-        # Parse datetime strings with flexible ISO8601 format handling
         df['datetime'] = pd.to_datetime(df['datetime'], format='ISO8601', utc=True).apply(
             lambda x: x.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
         )
@@ -161,7 +159,7 @@ def _format_to_parquet(df: pd.DataFrame) -> BytesIO:
     return buffer
 
 
-def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
+def create_legacy_router(duckdb_service: LegacyAPIDataService, max_time_range_days: int = 31) -> APIRouter:
     router = APIRouter()
 
     @router.get(
@@ -300,11 +298,6 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
             description="Output format for the response. Default is JSON. Options are 'json', 'csv', 'parquet'",
             example="json",
         ),
-        filter: str | None = Query(
-            None,
-            description="An SQL filter to apply to the retrieved data (DuckDB syntax)",
-            example="air_temperature_near_surface > 20",
-        ),
         start_time: datetime | None = Query(
             None,
             description="The start datetime for the data retrieval in ISO 8601 format with timezone",
@@ -334,6 +327,14 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
                     detail="end_time must be ISO formatted with a timezone like '2024-01-01T00:00:00Z' or '2024-01-01T00:00:00+00:00'"
                 )
 
+            if start_time and end_time:
+                time_range_days = (end_time - start_time).days
+                if time_range_days > max_time_range_days:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Time range exceeds maximum allowed: {time_range_days} days (max: {max_time_range_days} days). Please request a smaller time span."
+                    )
+
             # Legacy behavior: end_time represents the hour boundary and should include the full hour
             # e.g., end_time=2025-10-20T01:00:00Z means include all data up to but not including
             # 2025-10-20T02:00:00Z (latest timestamp: 2025-10-20T01:59:58.011Z)
@@ -357,7 +358,6 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
                 start_time=start_time,
                 end_time=adjusted_end_time,
                 station_id=station_id,
-                sql_filter=filter,
             )
             
             if format == OutputFormat.JSON:
@@ -397,12 +397,6 @@ def create_legacy_router(duckdb_service: LegacyAPIDataService) -> APIRouter:
                         "Content-Disposition": "attachment; filename=data.parquet"
                     },
                 )
-        except InvalidFilterError as e:
-            logger.error(f"Invalid SQL filter: {e}")
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid SQL filter provided",
-            )
         except QueryError as e:
             logger.error(f"Data service query error: {e}")
             raise HTTPException(
@@ -460,7 +454,7 @@ def create_legacy_application(config: LegacyApiConfig | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.include_router(create_legacy_router(duckdb_service))
+    app.include_router(create_legacy_router(duckdb_service, app_config.max_time_range_days))
 
     return app
 

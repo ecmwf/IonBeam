@@ -22,11 +22,6 @@ class QueryError(DataServiceError):
     pass
 
 
-class InvalidFilterError(DataServiceError):
-    """Raised when an invalid SQL filter is provided."""
-    pass
-
-
 class LegacyAPIDataService:
     def __init__(
         self,
@@ -133,7 +128,6 @@ class LegacyAPIDataService:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         station_id: Optional[str] = None,
-        sql_filter: Optional[str] = None,
     ) -> pd.DataFrame:
         try:
             query_start = time.perf_counter()
@@ -194,9 +188,6 @@ class LegacyAPIDataService:
                 logger.info("No observations found matching criteria")
                 return pd.DataFrame()
 
-            if sql_filter:
-                df = self._apply_sql_filter(df, sql_filter)
-
             # Drop hive partition columns from the API response
             drop_cols = [c for c in ("year", "month", "day") if c in df.columns]
             if drop_cols:
@@ -212,22 +203,3 @@ class LegacyAPIDataService:
         except Exception as e:
             logger.error("Observation query failed: %s", e, exc_info=True)
             raise QueryError(f"Failed to retrieve observational data: {e}") from e
-
-    def _apply_sql_filter(
-        self,
-        df: pd.DataFrame,
-        sql_filter: str,
-    ) -> pd.DataFrame:
-        try:
-            with duckdb.connect(":memory:") as con:
-                con.register("data", df)
-                
-                query = f"SELECT * FROM data WHERE {sql_filter}"
-                filtered_df = con.execute(query).df()
-
-            logger.debug(f"SQL filter applied - filter={sql_filter}, result_rows={len(filtered_df)}")
-            return filtered_df
-
-        except Exception as e:
-            logger.error(f"SQL filter failed - filter={sql_filter}, error={e}")
-            raise InvalidFilterError(f"Invalid SQL filter: {e}") from e
