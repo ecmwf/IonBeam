@@ -9,10 +9,10 @@ from uuid import uuid4
 import httpx
 import pandas as pd
 from httpx_retries import Retry, RetryTransport
-from pydantic import BaseModel
 from shapely import Polygon
 
 from ionbeam.observability.metrics import IonbeamMetrics, IonbeamMetricsProtocol
+from ionbeam.sources.metno.config import NetAtmoHTTPConfig
 from ionbeam.storage.arrow_store import ArrowStore
 from ionbeam.utilities.arrow_tools import dataframes_to_record_batches, schema_from_ingestion_map
 from ionbeam.utilities.dataframe_tools import coerce_types
@@ -31,18 +31,6 @@ from ...models.models import (
     StartSourceCommand,
     TimeAxis,
 )
-
-
-class NetAtmoConfig(BaseModel):
-    base_url: str = "https://observations.meteogate.eu"
-    username: str
-    password: str
-    timeout_seconds: int = 60
-    concurrency: int = 8
-    trigger_queue: str = "ionbeam.source.netatmo.start"
-    ingestion_queue: str = "ionbeam.ingestion.ingestV1"
-    cache_enabled: bool = True
-
 
 retry_transport = RetryTransport(retry=Retry(total=5, backoff_factor=0.5))
 
@@ -126,7 +114,7 @@ netatmo_metadata: IngestionMetadata = IngestionMetadata(
 
 
 class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]):
-    def __init__(self, config: NetAtmoConfig, metrics: IonbeamMetricsProtocol, arrow_store: ArrowStore):
+    def __init__(self, config: NetAtmoHTTPConfig, metrics: IonbeamMetricsProtocol, arrow_store: ArrowStore):
         super().__init__("NetAtmoSource", metrics)
         self._config = config
         self.arrow_store = arrow_store
@@ -335,7 +323,7 @@ class NetAtmoSource(BaseHandler[StartSourceCommand, Optional[IngestDataCommand]]
 async def main():
     from prometheus_client import CollectorRegistry
 
-    config = NetAtmoConfig(base_url="", username="", password="")
+    config = NetAtmoHTTPConfig(base_url="", username="", password="")
     metrics = IonbeamMetrics(CollectorRegistry())
 
     from ionbeam.storage.arrow_store import LocalFileSystemStore

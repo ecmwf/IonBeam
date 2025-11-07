@@ -9,7 +9,9 @@ from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
 from prometheus_client import CollectorRegistry
 
 from ionbeam.observability.metrics import IonbeamMetrics
-from ionbeam.sources.metno.netatmo_mqtt import NetAtmoMQTTConfig, NetAtmoMQTTSource
+from ionbeam.sources.metno.config import NetAtmoHTTPConfig, NetAtmoMQTTConfig
+from ionbeam.sources.metno.netatmo_mqtt import NetAtmoMQTTSource
+from ionbeam.sources.metno.netatmo_qc_mqtt import NetAtmoQCMQTTSource
 from ionbeam.storage.arrow_store import LocalFileSystemStore
 
 from ..projections.ionbeam_legacy.projection_service import IonbeamLegacyConfig, IonbeamLegacyProjectionService
@@ -25,7 +27,7 @@ from ..services.ingestion import IngestionConfig, IngestionService
 from ..sources.acronet import AcronetConfig, AcronetSource
 from ..sources.ioncannon import IonCannonConfig, IonCannonSource
 from ..sources.meteotracker import MeteoTrackerConfig, MeteoTrackerSource
-from ..sources.metno.netatmo import NetAtmoConfig, NetAtmoSource
+from ..sources.metno.netatmo import NetAtmoSource
 from ..sources.metno.netatmo_archive import NetAtmoArchiveConfig, NetAtmoArchiveSource
 from ..sources.sensor_community import SensorCommunityConfig, SensorCommunitySource
 from ..storage.ingestion_record_store import RedisIngestionRecordStore
@@ -118,13 +120,26 @@ class IonbeamContainer(containers.DeclarativeContainer):
     acronet_config = providers.Factory(lambda cfg: AcronetConfig(**cfg), config.sources.acronet)
     acronet_source = providers.Factory(AcronetSource, config=acronet_config, metrics=metrics, arrow_store=arrow_store)
 
-    # netatmo
-    netatmo_config = providers.Factory(lambda cfg: NetAtmoConfig(**cfg), config.sources.netatmo)
-    netatmo_source = providers.Factory(NetAtmoSource, config=netatmo_config, metrics=metrics, arrow_store=arrow_store)
+    # netatmo http
+    netatmo_http_config = providers.Factory(lambda cfg: NetAtmoHTTPConfig(**cfg), config.sources.netatmo.http)
+    netatmo_http_source = providers.Factory(NetAtmoSource, config=netatmo_http_config, metrics=metrics, arrow_store=arrow_store)
 
     # netatmo - mqtt
-    netatmo_mqtt_config = providers.Factory(lambda cfg: NetAtmoMQTTConfig(**cfg), config.sources.netatmo_mqtt)
-    netatmo_mqtt_source = providers.Factory(NetAtmoMQTTSource, config=netatmo_mqtt_config, metrics=metrics, arrow_store=arrow_store)
+    netatmo_mqtt_config = providers.Factory(lambda cfg: NetAtmoMQTTConfig(**cfg), config.sources.netatmo.mqtt)
+    netatmo_mqtt_source = providers.Factory(
+        NetAtmoMQTTSource,
+        config=netatmo_mqtt_config,
+        metrics=metrics,
+        arrow_store=arrow_store,
+    )
+
+    # netatmo QC - mqtt
+    netatmo_qc_mqtt_source = providers.Factory(
+        NetAtmoQCMQTTSource,
+        config=netatmo_mqtt_config,
+        metrics=metrics,
+        arrow_store=arrow_store,
+    )
 
     # netatmo - archive
     netatmo_archive_config = providers.Factory(lambda cfg: NetAtmoArchiveConfig(**cfg), config.sources.netatmo_archive)

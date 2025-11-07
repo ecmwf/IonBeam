@@ -30,6 +30,7 @@ def process_netatmo_geojson_messages_to_df(buffer: List[dict], logger: Optional[
     """
     Transform a list of Netatmo-like GeoJSON Feature dicts into a wide DataFrame:
     - Deduplicate by (station_id, datetime, lat, lon, parameter) keeping latest by pubtime, then by arrival order
+    - Create separate QC columns for each parameter (e.g., temperature and temperature_qc)
     """
     log = logger or _logger
     t0 = time.perf_counter()
@@ -72,6 +73,9 @@ def process_netatmo_geojson_messages_to_df(buffer: List[dict], logger: Optional[
             parts = [standard_name, props.get("level"), props.get("function"), props.get("period")]
             parameter = ":".join(str(p) for p in parts if p not in (None, ""))
 
+            # Extract quality code
+            quality_code = props.get("quality_code")
+
             records.append(
                 {
                     "_row_idx": idx,  # arrival order within this chunk (fallback tie-break)
@@ -82,6 +86,7 @@ def process_netatmo_geojson_messages_to_df(buffer: List[dict], logger: Optional[
                     "pubtime": props.get("pubtime"),
                     "parameter": parameter,
                     "value": content.get("value"),
+                    "qc_code": quality_code,
                 }
             )
         except Exception:
@@ -98,8 +103,11 @@ def process_netatmo_geojson_messages_to_df(buffer: List[dict], logger: Optional[
     df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
     df["pubtime"] = pd.to_datetime(df["pubtime"], utc=True, errors="coerce")
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    # Keep qc_code as-is (can be None/NaN or integer)
+    if "qc_code" in df.columns:
+        df["qc_code"] = pd.to_numeric(df["qc_code"], errors="coerce")
 
-    # Drop rows with invalid essential fields. Keep NaN values in 'value'.
+    # Drop rows with invalid essential fields. Keep NaN values in 'value' and 'qc_code'.
     before = len(df)
     df = df.dropna(subset=["station_id", "datetime", "lat", "lon"])
     dropped = before - len(df)
@@ -135,13 +143,26 @@ def process_netatmo_geojson_messages_to_df(buffer: List[dict], logger: Optional[
     )
     dedup = df.drop_duplicates(subset=key, keep="last").drop(columns=["has_pubtime", "_row_idx"])
 
-    # Pivot to wide
-    wide = (
-        dedup.pivot(index=["station_id", "datetime", "lat", "lon"], columns="parameter", values="value")
-        .reset_index()
-        .sort_values(["station_id", "datetime"])
-        .reset_index(drop=True)
+    # Pivot values to wide format
+    wide_values = dedup.pivot(
+        index=["station_id", "datetime", "lat", "lon"],
+        columns="parameter",
+        values="value"
     )
+    
+    # Pivot QC codes to wide format
+    wide_qc = dedup.pivot(
+        index=["station_id", "datetime", "lat", "lon"],
+        columns="parameter",
+        values="qc_code"
+    )
+    
+    # Rename QC columns to add _qc suffix
+    wide_qc.columns = [f"{col}_qc" for col in wide_qc.columns]
+    
+    # Combine value and QC columns
+    wide = pd.concat([wide_values, wide_qc], axis=1).reset_index()
+    wide = wide.sort_values(["station_id", "datetime"]).reset_index(drop=True)
     wide.columns.name = None
 
     elapsed = time.perf_counter() - t0

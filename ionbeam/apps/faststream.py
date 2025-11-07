@@ -27,6 +27,7 @@ from ..sources.meteotracker import MeteoTrackerSource
 from ..sources.metno.netatmo import NetAtmoSource
 from ..sources.metno.netatmo_archive import NetAtmoArchiveSource
 from ..sources.metno.netatmo_mqtt import NetAtmoMQTTSource
+from ..sources.metno.netatmo_qc_mqtt import NetAtmoQCMQTTSource
 from ..sources.sensor_community import SensorCommunitySource
 
 
@@ -97,7 +98,7 @@ def setup_logging(level: int = logging.INFO, log_dir: Path = Path("."), log_name
 @inject
 async def create_faststream_handlers(
     broker: RabbitBroker = Provide[IonbeamContainer.broker],
-    netatmo_source: NetAtmoSource = Provide[IonbeamContainer.netatmo_source],
+    netatmo_source: NetAtmoSource = Provide[IonbeamContainer.netatmo_http_source],
     ioncannon_source: IonCannonSource = Provide[IonbeamContainer.ion_cannon_source],
     sensor_community_source: SensorCommunitySource = Provide[IonbeamContainer.sensor_community_source],
     meteotracker_source: MeteoTrackerSource = Provide[IonbeamContainer.meteotracker_source],
@@ -206,6 +207,7 @@ async def factory():
     broker: RabbitBroker = await container.broker()  # type: ignore
     scheduler: SourceScheduler = await container.source_scheduler()  # type: ignore
     netatmo_mqtt_source: NetAtmoMQTTSource = container.netatmo_mqtt_source()  # type: ignore
+    netatmo_qc_mqtt_source: NetAtmoQCMQTTSource = container.netatmo_qc_mqtt_source()  # type: ignore
     dataset_builder: DatasetBuilder = await container.dataset_builder_service()  # type: ignore
     registry: CollectorRegistry = container.registry()
 
@@ -225,14 +227,16 @@ async def factory():
         """Start the source scheduler when the app starts"""
         scheduler.start()
         await dataset_builder.start()
-        # await netatmo_mqtt_source.start()
+        await netatmo_mqtt_source.start()
+        await netatmo_qc_mqtt_source.start()
 
     @app.on_shutdown
     async def shutdown():
         """Stop the source scheduler when the app shuts down"""
         await dataset_builder.stop()
         await scheduler.stop()
-        # await netatmo_mqtt_source.stop()
+        await netatmo_mqtt_source.stop()
+        await netatmo_qc_mqtt_source.stop()
         shutdown_resources = container.shutdown_resources()
         if shutdown_resources is not None:
             await shutdown_resources
