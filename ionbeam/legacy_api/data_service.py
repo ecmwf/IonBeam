@@ -131,7 +131,7 @@ class LegacyAPIDataService:
     ) -> pd.DataFrame:
         try:
             query_start = time.perf_counter()
-            data_pattern = str(self.data_dir / "**" / "*.parquet")
+            data_pattern = str(self.data_dir / f"platform={platform}" / "**" / "*.parquet")
 
             def _utc_aware(dt: Optional[datetime]) -> Optional[datetime]:
                 if dt is None:
