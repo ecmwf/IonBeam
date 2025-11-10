@@ -140,9 +140,10 @@ class IonbeamContainer(containers.DeclarativeContainer):
     )
 
     # dataset coordinator service
+    dataset_coordinator_config = providers.Factory(lambda cfg: DatasetCoordinatorConfig(**cfg), config.dataset_coordinator)
     dataset_coordinator_service = providers.Factory(
         DatasetCoordinatorService,
-        config=DatasetCoordinatorConfig(),
+        config=dataset_coordinator_config,
         record_store=ingestion_record_store,
         queue=ordered_queue,
         metrics=metrics,
