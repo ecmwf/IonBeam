@@ -1,4 +1,3 @@
-import json
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -523,3 +522,62 @@ class TestDatasetCoordinator:
         assert len(ids) == 2
         assert str(ev1.id) in ids
         assert str(ev2.id) in ids
+
+    @pytest.mark.asyncio
+    async def test_coordinator_allows_incomplete_windows_when_configured(
+        self,
+        mock_ingestion_record_store: MockIngestionRecordStore,
+        mock_ordered_queue: MockOrderedQueue,
+        mock_metrics: IonbeamMetricsProtocol
+    ) -> None:
+        metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
+        service = DatasetCoordinatorService(
+            DatasetCoordinatorConfig(allow_incomplete_windows=True),
+            mock_ingestion_record_store,
+            mock_ordered_queue,
+            mock_metrics
+        )
+
+        base = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+
+        # 10:00-10:30 (incomplete coverage - only half the window)
+        e1 = _create_data_available_event(uuid4(), metadata, base, base + timedelta(minutes=30))
+        await service.handle(e1)
+
+        queue = mock_ordered_queue.get_queue_dict()
+        # Window should be enqueued despite incomplete coverage
+        assert len(queue) == 1
+        wid = _window_id(base, timedelta(hours=1))
+        assert f"{metadata.dataset.name}:{wid}" in queue
+
+    @pytest.mark.asyncio
+    async def test_coordinator_allows_windows_with_gaps_when_configured(
+        self,
+        mock_ingestion_record_store: MockIngestionRecordStore,
+        mock_ordered_queue: MockOrderedQueue,
+        mock_metrics: IonbeamMetricsProtocol
+    ) -> None:
+        metadata = _create_metadata(aggregation_span=timedelta(hours=1), stc_window=timedelta(hours=1))
+        service = DatasetCoordinatorService(
+            DatasetCoordinatorConfig(allow_incomplete_windows=True),
+            mock_ingestion_record_store,
+            mock_ordered_queue,
+            mock_metrics
+        )
+
+        base = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+
+        # 10:00-10:30
+        e1 = _create_data_available_event(uuid4(), metadata, base, base + timedelta(minutes=30))
+        # 10:45-11:00 (gap 10:30-10:45)
+        e2 = _create_data_available_event(uuid4(), metadata, base + timedelta(minutes=45), base + timedelta(hours=1))
+
+        for ev in (e1, e2):
+            await service.handle(ev)
+
+        queue = mock_ordered_queue.get_queue_dict()
+        # Window should be enqueued despite gap
+        assert len(queue) == 1
+        wid = _window_id(base, timedelta(hours=1))
+        assert f"{metadata.dataset.name}:{wid}" in queue
+
