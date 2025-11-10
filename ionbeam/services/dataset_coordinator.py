@@ -7,7 +7,6 @@ building into a prioritized queue.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
 
 import structlog
 from pydantic import BaseModel
@@ -21,7 +20,6 @@ from .models import CoverageAnalysis, EventSet, IngestionRecord, Window
 
 
 def align_to_aggregation(ts: datetime, aggregation: timedelta) -> datetime:
-    """Align timestamp to aggregation boundary (UTC)."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     delta = ts - epoch
     aligned_seconds = (delta.total_seconds() // aggregation.total_seconds()) * aggregation.total_seconds()
@@ -29,7 +27,6 @@ def align_to_aggregation(ts: datetime, aggregation: timedelta) -> datetime:
 
 
 class WindowStateManager:
-    """Manages window state and event associations."""
     
     def __init__(self, record_store: IngestionRecordStore, queue: OrderedQueue):
         self.record_store = record_store
@@ -39,11 +36,10 @@ class WindowStateManager:
     async def save_ingestion_record(self, record: IngestionRecord) -> None:
         await self.record_store.save_ingestion_record(record)
     
-    async def get_ingestion_records(self, dataset: str) -> List[IngestionRecord]:
+    async def get_ingestion_records(self, dataset: str) -> list[IngestionRecord]:
         return await self.record_store.get_ingestion_records(dataset)
     
-    def analyze_coverage(self, events: List[IngestionRecord]) -> CoverageAnalysis:
-        """Analyze event coverage and find gaps."""
+    def analyze_coverage(self, events: list[IngestionRecord]) -> CoverageAnalysis:
         if not events:
             return CoverageAnalysis([], None, None, [])
         
@@ -77,7 +73,7 @@ class WindowStateManager:
     async def set_desired_events(self, window: Window, events: EventSet) -> None:
         await self.record_store.set_desired_event_ids(window, sorted(events.ids))
     
-    async def get_observed_hash(self, window: Window) -> Optional[str]:
+    async def get_observed_hash(self, window: Window) -> str | None:
         state = await self.record_store.get_window_state(window)
         return state.event_ids_hash if state else None
     
@@ -99,10 +95,10 @@ class WindowStateManager:
 class DatasetCoordinatorConfig(BaseModel):
     only_process_spanned_windows: bool = True
     queue_key: str = "dataset_queue"
+    allow_incomplete_windows: bool = False
 
 
 class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
-    """Coordinates window readiness detection and build enqueueing."""
     
     def __init__(
         self,
@@ -152,10 +148,11 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
         desired = existing.union(new_events)
         await self.state.set_desired_events(window, desired)
         
-        skip_reason = self._check_readiness(window, coverage, stc_cutoff)
-        if skip_reason:
-            self.metrics.coordinator.window_skipped(window.dataset, skip_reason)
-            return
+        if not self.config.allow_incomplete_windows:
+            skip_reason = self._check_readiness(window, coverage, stc_cutoff)
+            if skip_reason:
+                self.metrics.coordinator.window_skipped(window.dataset, skip_reason)
+                return
         
         observed_hash = await self.state.get_observed_hash(window)
         if observed_hash == desired.hash:
@@ -180,8 +177,7 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
         window: Window,
         coverage: CoverageAnalysis,
         stc_cutoff: datetime
-    ) -> Optional[str]:
-        """Returns skip reason if not ready, None if ready."""
+    ) -> str | None:
         if window.end >= stc_cutoff:
             return "stc_cutoff"
         
@@ -200,8 +196,7 @@ class DatasetCoordinatorService(BaseHandler[DataAvailableEvent, None]):
         self,
         event: DataAvailableEvent,
         coverage: CoverageAnalysis
-    ) -> List[Window]:
-        """Generate windows to check based on configuration."""
+    ) -> list[Window]:
         aggregation = event.metadata.dataset.aggregation_span
         dataset = event.metadata.dataset.name
         
