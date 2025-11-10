@@ -77,7 +77,7 @@ class NetAtmoQCMQTTSource:
             port=self.config.port,
             username=self.config.username,
             password=self.config.password,
-            client_id=self.config.client_id,
+            client_id=self.config.client_id+'_qc',
             topic="qc-obs/fmi/+/#",
             qos=1,
             batch_handler=self._handle_batch,

@@ -128,6 +128,11 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
         for col in df.columns:
             if col in ignore_cols:
                 continue
+            
+            # TODO: Replace hardcoded _qc suffix check with proper metadata column detection
+            # This requires passing IngestionMetadata through DataSetAvailableEvent or using a column registry
+            if col.endswith("_qc"):
+                continue
 
             # Identify canonical variable (skip non-canonical cols)
             try:
@@ -168,6 +173,15 @@ class ODBProjectionService(BaseHandler[DataSetAvailableEvent, None]):
                 part["varno@body"] = varno
                 # TODO - work out how dtype should be handled here - do we need to cast to float? ionbeam default is double unless overridden by ingestion-map
                 part["obsvalue@body"] = pd.Series(converted, index=part.index).astype(float)
+                
+                # Check for corresponding QC column and add quality if present
+                qc_col = f"{col}_qc"
+                if qc_col in df.columns:
+                    qc_values = pd.to_numeric(df[qc_col], errors="coerce")
+                    # Only include QC values for rows that have valid data (using the mask)
+                    part["quality@body"] = qc_values.loc[mask].fillna(0).astype(int)
+                    self.logger.debug("Added quality column", column=col, qc_column=qc_col)
+                
                 odb_frames.append(part)
 
         if not odb_frames:
@@ -224,6 +238,7 @@ if __name__ == "__main__":
             "lat": 49.2282,
             "lon": 8.779,
             "air_temperature__degC__2.0__point__PT0S": 15.4,
+            "air_temperature__degC__2.0__point__PT0S_qc": 1,  # Good quality
             "relative_humidity__1__2.0__point__PT0S": 80,
             "surface_air_pressure__hPa__2.0__point__PT0S": 1022.2,
             "wind_from_direction__deg__2.0__mean__PT5M": None,
@@ -236,6 +251,7 @@ if __name__ == "__main__":
             "lat": 55.8518,
             "lon": 9.8376,
             "air_temperature__degC__2.0__point__PT0S": 16.7,
+            "air_temperature__degC__2.0__point__PT0S_qc": 1,  # Good quality
             "relative_humidity__1__2.0__point__PT0S": 61,
             "surface_air_pressure__hPa__2.0__point__PT0S": 1027.3,
             "wind_from_direction__deg__2.0__mean__PT5M": None,
@@ -248,6 +264,7 @@ if __name__ == "__main__":
             "lat": 45.5873,
             "lon": 5.3144,
             "air_temperature__degC__2.0__point__PT0S": None,
+            "air_temperature__degC__2.0__point__PT0S_qc": None,  # No data, no QC
             "relative_humidity__1__2.0__point__PT0S": None,
             "surface_air_pressure__hPa__2.0__point__PT0S": 1045.4,
             "wind_from_direction__deg__2.0__mean__PT5M": None,
@@ -260,6 +277,7 @@ if __name__ == "__main__":
             "lat": 48.5217,
             "lon": 10.8081,
             "air_temperature__degC__2.0__point__PT0S": 14.3,
+            "air_temperature__degC__2.0__point__PT0S_qc": 2,  # Questionable quality
             "relative_humidity__1__2.0__point__PT0S": 97,
             "surface_air_pressure__hPa__2.0__point__PT0S": 1023.5,
             "wind_from_direction__deg__2.0__mean__PT5M": None,
@@ -272,6 +290,7 @@ if __name__ == "__main__":
             "lat": 62.1723,
             "lon": 27.8604,
             "air_temperature__degC__2.0__point__PT0S": 10.3,
+            "air_temperature__degC__2.0__point__PT0S_qc": 1,  # Good quality
             "relative_humidity__1__2.0__point__PT0S": 90,
             "surface_air_pressure__hPa__2.0__point__PT0S": 1029.9,
             "wind_from_direction__deg__2.0__mean__PT5M": None,
