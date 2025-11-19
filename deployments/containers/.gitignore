@@ -1,0 +1,12 @@
+# Data directories
+data/
+*.parquet
+*.arrow
+
+# Logs
+*.log
+logs/
+
+# Environment files with secrets
+config/*.yaml
+docker-compose.override.yaml

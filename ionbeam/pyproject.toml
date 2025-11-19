@@ -1,0 +1,37 @@
+[project]
+name = "ionbeam"
+version = "0.1.0"
+description = "Event-driven IoT data ingestion and aggregation platform"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ionbeam-client",
+    "click>=8.0.0",
+    "dependency-injector[yaml]>=4.48.1",
+    "faststream[cli,prometheus,rabbit]==0.5.48",
+    "influxdb-client[async]>=1.49.0",
+    "isodate>=0.7.2",
+    "numpy>=2.3.2",
+    "pandas>=2.3.0",
+    "pyarrow>=21.0.0",
+    "pydantic>=2.11.7",
+    "redis>=6.4.0",
+    "structlog>=25.4.0",
+    "uvicorn>=0.37.0",
+]
+
+[project.scripts]
+ionbeam = "ionbeam:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.uv.sources]
+ionbeam-client = { workspace = true }
+
+
+[project.entry-points."ionbeam.cli_plugins"]
+ionbeam = "ionbeam.__main__:cli"

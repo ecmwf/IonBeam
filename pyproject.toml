@@ -10,7 +10,7 @@ members = [
     "ionbeam-cli",
     "ionbeam-client",
     "ionbeam",
-    "legacy-api",
+    "ionbeam-legacy-api",
     "data-sources/*",
     "exporters/*"
 ]
