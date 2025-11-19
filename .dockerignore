@@ -1,0 +1,11 @@
+.git
+**/__pycache__
+**/.venv
+**/.pytest_cache
+**/.mypy_cache
+dist
+build
+*.egg-info
+.gitignore
+.python-version
+deployment/

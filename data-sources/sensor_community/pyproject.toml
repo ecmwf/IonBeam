@@ -1,0 +1,24 @@
+[project]
+name = "sensor-community"
+version = "0.1.0"
+description = "Sensor.community data source for Ionbeam"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ionbeam-client",
+    "pyyaml>=6.0.3",
+    "httpx>=0.28.1",
+    "httpx-retries>=0.2.0",
+    "pandas>=2.2.3",
+    "numpy>=2.2.1",
+    "aiostream>=0.6.3",
+    "beautifulsoup4>=4.12.3",
+    "lxml>=5.3.0",
+    "click>=8.1.0",
+]
+
+[tool.uv.sources]
+ionbeam-client = { workspace = true }
+
+[project.scripts]
+sensor-community = "sensor_community:main"

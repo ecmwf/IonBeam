@@ -1,0 +1,20 @@
+source_name: "ioncannon"
+
+ionbeam:
+  amqp_url: "amqp://guest:guest@localhost:5672/"
+
+ioncannon:
+  # Number of synthetic stations to generate
+  num_stations: 1000
+  
+  # Measurement frequency in minutes
+  measurement_frequency_minutes: 5
+  
+  # Geographic bounds for station placement (Central Europe by default)
+  min_lat: 47.0
+  max_lat: 55.0
+  min_lon: 5.0
+  max_lon: 15.0
+  
+  # Cardinality control for metadata variables
+  metadata_cardinality: 10

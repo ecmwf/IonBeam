@@ -1,64 +1,44 @@
 [project]
-name = "ionbeam"
+name = "ionbeam-monorepo"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "Ionbeam monorepo workspace"
 requires-python = ">=3.12"
-dependencies = [
-    "aio-pika>=9.5.7",
-    "aiomqtt>=2.4.0",
-    "aiostream>=0.7.0",
-    "beautifulsoup4>=4.13.4",
-    "brotlipy>=0.7.0",
-    "cf-units>=3.3.0",
-    "click>=8.0.0",
-    "deepdiff>=8.6.1",
-    "dependency-injector[yaml]>=4.48.1",
-    "duckdb>=1.4.1",
-    "eccodes>=2.42.0",
-    "fastapi[standard]>=0.119.1",
-    "faststream[cli,prometheus,rabbit]==0.5.48",
-    "geojson>=3.2.0",
-    "geopandas>=1.1.1",
-    "httpx>=0.28.1",
-    "httpx-retries>=0.4.0",
-    "influxdb-client[async]>=1.49.0",
-    "influxdb3-python>=0.16.0",
-    "isodate>=0.7.2",
-    "lxml>=6.0.1",
-    "numpy>=2.3.2",
-    "pandas>=2.3.0",
-    "pyarrow>=21.0.0",
-    "pydantic>=2.11.7",
-    "pyodc>=1.5.0",
-    "pyyaml>=6.0.2",
-    "redis>=6.4.0",
-    "shapely>=2.1.1",
-    "structlog>=25.4.0",
-    "uvicorn>=0.37.0",
+dependencies = []
+
+[tool.uv.workspace]
+members = [
+    "ionbeam-cli",
+    "ionbeam-client",
+    "ionbeam",
+    "legacy-api",
+    "data-sources/*",
+    "exporters/*"
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.uv]
+constraint-dependencies = [
+    "click>=8.1.0",
+    "pydantic>=2.11.0",
+    "pandas>=2.2.3",
+    "numpy>=2.2.0",
+    "pyarrow>=19.0.0",
+    "httpx>=0.28.0",
+    "pyyaml>=6.0.3",
+    "structlog>=25.4.0",
+]
 
-[tool.hatch.build]
-include = ["ionbeam/"]
+[tool.pytest.ini_options]
+testpaths = [
+    "ionbeam/tests",
+    "ionbeam-client/tests",
+    "exporters/ecmwf/tests",
+]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [dependency-groups]
 dev = [
-    "mypy>=1.17.1",
-    "pandas-stubs>=2.3.0.250703",
-    "pytest>=8.4.1",
-    "pytest-asyncio>=1.1.0",
-    "ruff>=0.12.9",
+    "ruff>=0.14.5",
+    "sphinx>=8.2.3",
+    "sphinxcontrib-mermaid>=1.0.0",
 ]
-
-[tool.ruff]
-line-length = 150
-
-[tool.pytest.ini_options]
-log_cli = true
-log_cli_level = "INFO"
-log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
-log_cli_date_format = "%Y-%m-%d %H:%M:%S"

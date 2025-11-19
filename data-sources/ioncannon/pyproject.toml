@@ -1,0 +1,19 @@
+[project]
+name = "ioncannon"
+version = "0.1.0"
+description = "IonCannon synthetic data generator for Ionbeam load testing"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ionbeam-client",
+    "pyyaml>=6.0.3",
+    "pandas>=2.2.3",
+    "numpy>=2.2.1",
+    "click>=8.1.0",
+]
+
+[tool.uv.sources]
+ionbeam-client = { workspace = true }
+
+[project.scripts]
+ioncannon = "ioncannon:main"

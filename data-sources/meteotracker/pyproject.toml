@@ -1,0 +1,18 @@
+[project]
+name = "meteotracker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ionbeam-client",
+    "pyyaml>=6.0.3",
+    "httpx>=0.28.1",
+    "click>=8.1.0",
+]
+
+[tool.uv.sources]
+ionbeam-client = { workspace = true }
+
+[project.scripts]
+meteotracker = "meteotracker:main"

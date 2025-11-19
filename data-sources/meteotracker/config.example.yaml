@@ -1,0 +1,8 @@
+source_name: "meteotracker"
+
+ionbeam:
+  amqp_url: "amqp://guest:guest@localhost:5672/"
+
+meteotracker:
+  username: "your-username-here"
+  password: "your-password-here"
