@@ -1,0 +1,79 @@
+exporter_name: "odb"
+
+dataset_filter:
+  - "netatmo"
+  - "netatmo_mqtt"
+
+ionbeam:
+  amqp_url: "amqp://guest:guest@localhost:5672/"
+  connection_timeout: 30
+  write_batch_size: 65536
+
+odb_exporter:
+  output_path: "./data/odb"
+  
+  # Mapping of ODB varno to canonical variables
+  # See: https://confluence.ecmwf.int/display/UDOC/ODB+variable+numbers
+  variable_map:
+    - varno: 107
+      mapped_from:
+        - standard_name: "surface_air_pressure"
+          level: 2.0
+          method: "point"
+          period: "PT0S"
+    
+    - varno: 108
+      mapped_from:
+        - standard_name: "air_pressure_at_mean_sea_level"
+          level: 2.0
+          method: "mean"
+          period: "PT1H"
+    
+    - varno: 39
+      mapped_from:
+        - standard_name: "air_temperature"
+          level: 2.0
+          method: "point"
+          period: "PT0S"
+    
+    - varno: 40
+      mapped_from:
+        - standard_name: "dew_point_temperature"
+          level: 2.0
+          method: "point"
+          period: "PT0S"
+    
+    - varno: 58
+      mapped_from:
+        - standard_name: "relative_humidity"
+          level: 2.0
+          method: "point"
+          period: "PT0S"
+    
+    - varno: 62
+      mapped_from:
+        - standard_name: "visibility_in_air"
+          level: 2.0
+          method: "point"
+          period: "PT0S"
+    
+    - varno: 111
+      mapped_from:
+        - standard_name: "wind_from_direction"
+          level: 10.0
+          method: "mean"
+          period: "PT5M"
+    
+    - varno: 112
+      mapped_from:
+        - standard_name: "wind_speed"
+          level: 10.0
+          method: "mean"
+          period: "PT5M"
+    
+    - varno: 261
+      mapped_from:
+        - standard_name: "wind_speed_of_gust"
+          level: 10.0
+          method: "mean"
+          period: "PT5M"

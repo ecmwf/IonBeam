@@ -1,0 +1,14 @@
+exporter_name: "pygeoapi"
+
+dataset_filter:
+  - "netatmo"
+  - "sensor_community"
+
+ionbeam:
+  amqp_url: "amqp://guest:guest@localhost:5672/"
+  connection_timeout: 30
+  write_batch_size: 65536
+
+pygeoapi_exporter:
+  output_path: "./data/pygeoapi"
+  config_path: "./pygeoapi.yaml"
