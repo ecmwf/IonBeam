@@ -35,3 +35,5 @@ data-raw/
 /config.yaml
 /pygeoapi.yaml
 /docker-compose.yaml
+
+/scratch/

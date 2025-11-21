@@ -11,6 +11,11 @@
 # See: https://sphinx-autoapi.readthedocs.io/en/stable/reference/directives.html
 
 import datetime
+import sys
+from pathlib import Path
+
+# Add ionbeam-client to Python path for autodoc
+sys.path.insert(0, str(Path(__file__).parent.parent / "ionbeam-client"))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
@@ -26,7 +31,22 @@ version = "local-dev"
 
 extensions = [
     "sphinxcontrib.mermaid",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
 ]
+
+# -- Autodoc configuration ---------------------------------------------------
+autodoc_default_options = {
+    "members": True,
+    "member-order": "bysource",
+    "special-members": "__init__",
+    "undoc-members": True,
+    "exclude-members": "__weakref__",
+}
+
+autodoc_typehints = "description"
+autodoc_typehints_description_target = "documented"
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]

@@ -18,12 +18,42 @@ from .amqp import (
     get_trigger_queue_name,
 )
 from .arrow_tools import schema_from_ingestion_map
-from .config import IonbeamClientConfig, _ARROW_STORE_PATH, _INGESTION_EXCHANGE, _INGESTION_ROUTING_KEY
+from .config import (
+    _ARROW_STORE_PATH,
+    _INGESTION_EXCHANGE,
+    _INGESTION_ROUTING_KEY,
+    IonbeamClientConfig,
+)
 from .models import IngestDataCommand, IngestionMetadata
 from .transfer import ArrowStore, LocalFileSystemStore
 
 
 class IonbeamClient:
+    """Client for ingesting observations into Ionbeam and exporting processed datasets.
+
+    The IonbeamClient abstracts message queuing, data serialization, and Arrow stream
+    handling, allowing focus on source-specific collection and export logic. It uses
+    streaming ingestion with Apache Arrow batches for efficient processing of large
+    datasets with predictable memory overhead.
+
+    Args:
+        config: Configuration for AMQP connection and client behavior.
+
+    Example:
+        Basic usage with context manager::
+
+            from ionbeam_client import IonbeamClient, IonbeamClientConfig
+
+            config = IonbeamClientConfig()
+            
+            async with IonbeamClient(config) as client:
+                await client.ingest(
+                    batch_stream=generate_batches(),
+                    metadata=metadata,
+                    start_time=start,
+                    end_time=end
+                )
+    """
     def __init__(self, config: IonbeamClientConfig):
         self.config = config or IonbeamClientConfig()
         self.logger = structlog.get_logger(__name__)
@@ -157,6 +187,54 @@ class IonbeamClient:
         *,
         ingestion_id: Optional[UUID] = None,
     ) -> IngestDataCommand:
+        """Ingest observation data into Ionbeam using streaming Arrow batches.
+
+        This method streams Apache Arrow RecordBatches incrementally, allowing efficient
+        processing of large datasets without loading everything into memory. The batch
+        stream is written to storage and an ingestion command is published to the message
+        broker for processing by Ionbeam Core.
+
+        Args:
+            batch_stream: Async iterator yielding Apache Arrow RecordBatches containing
+                observations. Each batch should conform to the schema defined by the
+                ingestion metadata.
+            metadata: Dataset metadata and column mapping definitions that describe the
+                data structure and canonical variable mappings.
+            start_time: Start of the time window covered by this ingestion.
+            end_time: End of the time window covered by this ingestion.
+            ingestion_id: Optional UUID to identify this ingestion. If not provided,
+                one will be generated automatically.
+
+        Returns:
+            IngestDataCommand containing the ingestion details and payload location.
+
+        Raises:
+            RuntimeError: If client is not connected. Use async context manager or call
+                connect() first.
+            ValueError: If the batch stream is empty.
+
+        Example:
+            Basic ingestion::
+
+                from ionbeam_client.arrow_tools import schema_from_ingestion_map
+                import pyarrow as pa
+
+                schema = schema_from_ingestion_map(metadata.ingestion_map)
+
+                async def generate_batches():
+                    for session in await fetch_sessions(start, end):
+                        data = await fetch_observations(session)
+                        if data:
+                            yield pa.RecordBatch.from_pydict(data, schema=schema)
+
+                async with IonbeamClient(config) as client:
+                    await client.ingest(
+                        batch_stream=generate_batches(),
+                        metadata=metadata,
+                        start_time=datetime(2024, 1, 1),
+                        end_time=datetime(2024, 1, 2)
+                    )
+        """
         if not self._connected:
             raise RuntimeError(
                 "Client not connected. Use async context manager or call connect() first."
@@ -245,6 +323,43 @@ class IonbeamClient:
         source_name: str,
         handler: TriggerHandler,
     ) -> None:
+        """Register a handler to respond to scheduler trigger commands.
+
+        The Ionbeam scheduler can trigger data sources on demand for backfills,
+        reingestion, or scheduled collection. This method registers a handler that
+        will be called when the scheduler sends a trigger command with a time window.
+
+        Args:
+            source_name: Name identifying this data source. Used to generate the
+                AMQP queue name.
+            handler: Async function that will be called with (start_time, end_time)
+                when triggered by the scheduler.
+
+        Raises:
+            RuntimeError: If called after the client is already connected. Must be
+                called before connect() or entering the async context manager.
+
+        Example::
+
+            client = IonbeamClient(config)
+
+            async def handle_trigger(start_time: datetime, end_time: datetime):
+                async def generate_batches():
+                    # Fetch data for the requested time window
+                    yield pa.RecordBatch.from_pydict({...})
+                
+                await client.ingest(
+                    batch_stream=generate_batches(),
+                    metadata=metadata,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+
+            client.register_trigger_handler("meteotracker", handle_trigger)
+
+            async with client:
+                await asyncio.Event().wait()  # Wait for triggers
+        """
         if self._connected:
             raise RuntimeError(
                 "Cannot register trigger handler after connecting. Call this before connect()."
@@ -281,6 +396,49 @@ class IonbeamClient:
         dataset_filter: Optional[Set[str]] = None,
         batch_size: Optional[int] = None,
     ) -> None:
+        """Register a handler to export completed datasets.
+
+        Export handlers subscribe to the event stream of completed datasets from
+        Ionbeam Core. When a dataset aggregation completes, your handler receives a
+        DataSetAvailableEvent with streaming access to the aggregated data as Arrow
+        batches.
+
+        Args:
+            exporter_name: Name identifying this exporter. Used to generate the
+                AMQP queue name.
+            handler: Async function called with (event, batch_stream) for each
+                completed dataset.
+            dataset_filter: Optional set of dataset names to process. If None,
+                all datasets are processed.
+            batch_size: Optional batch size for reading record batches. If None,
+                uses config.write_batch_size.
+
+        Raises:
+            RuntimeError: If called after the client is already connected. Must be
+                called before connect() or entering the async context manager.
+
+        Example:
+            Basic export handler::
+
+                from ionbeam_client.models import DataSetAvailableEvent
+
+                async def export_handler(event: DataSetAvailableEvent, batch_stream):
+                    print(f"Exporting {event.metadata.name}")
+                    print(f"Window: {event.start_time} to {event.end_time}")
+                    
+                    async for batch in batch_stream:
+                        await write_to_target_system(batch)
+
+                client.register_export_handler("ecmwf_exporter", export_handler)
+
+            Filtered export::
+
+                client.register_export_handler(
+                    exporter_name="filtered_exporter",
+                    handler=export_handler,
+                    dataset_filter={"netatmo", "meteotracker"}
+                )
+        """
         if self._connected:
             raise RuntimeError(
                 "Cannot register export handler after connecting. Call this before connect()."
@@ -329,6 +487,39 @@ async def ingest(
     end_time: datetime,
     config: IonbeamClientConfig,
 ) -> IngestDataCommand:
+    """Convenience function for standalone ingestion without managing client lifecycle.
+
+    This function creates an IonbeamClient, ingests data, and automatically handles
+    connection management. Use this for one-off ingestions. For repeated ingestions
+    or when registering handlers, use the IonbeamClient class directly.
+
+    Args:
+        batch_stream: Async iterator yielding Apache Arrow RecordBatches.
+        metadata: Dataset metadata and column mapping definitions.
+        start_time: Start of the time window covered by this ingestion.
+        end_time: End of the time window covered by this ingestion.
+        config: Client configuration for AMQP connection.
+
+    Returns:
+        IngestDataCommand containing the ingestion details.
+
+    Example::
+
+        from ionbeam_client import ingest, IonbeamClientConfig
+
+        config = IonbeamClientConfig()
+        
+        async def generate_batches():
+            yield pa.RecordBatch.from_pydict({...})
+
+        await ingest(
+            batch_stream=generate_batches(),
+            metadata=metadata,
+            start_time=datetime(2024, 1, 1),
+            end_time=datetime(2024, 1, 2),
+            config=config
+        )
+    """
     async with IonbeamClient(config) as client:
         return await client.ingest(
             batch_stream=batch_stream,

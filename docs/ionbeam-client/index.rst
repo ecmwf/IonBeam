@@ -1,25 +1,35 @@
 Ionbeam Client
 ==============
 
-Python client for ingesting observations into Ionbeam and exporting processed datasets.
+Python client library for ingesting observations into Ionbeam and exporting processed datasets.
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+Installation
+------------
 
-   installation
-   configuration
-   ingestion
-   export
+**Requirements:** Python 3.12 or later
 
-Overview
+.. code-block:: bash
+
+   uv pip install ionbeam-client
+
+Configuration
+-------------
+
+.. autoclass:: ionbeam_client.config.IonbeamClientConfig
+   :members:
+   :exclude-members: model_config, model_fields, model_computed_fields, amqp_url, connection_timeout, max_retries, retry_delay
+
+Client API
+----------
+
+.. autoclass:: ionbeam_client.client.IonbeamClient
+   :members:
+   :special-members: __init__, __aenter__, __aexit__
+
+.. autofunction:: ionbeam_client.client.ingest
+
+See Also
 --------
 
-The client provides:
-
-* **Data ingestion** - Publish observations from custom sources
-* **Scheduled collection** - Register handlers triggered by Ionbeam Core
-* **Dataset export** - Subscribe to processed dataset availability
-* **Streaming processing** - Apache Arrow for efficient memory usage
-
-The client abstracts message queuing and data serialization, allowing focus on source-specific collection and export logic.
+- :doc:`../messaging-interface` - Complete message contracts and metadata specifications
+- :doc:`../architecture` - System architecture and message flow

@@ -1,60 +1,15 @@
 Messaging Interface Specification
 ==================================
 
-Overview
---------
-
 This document specifies the messaging contracts between components in the ionbeam platform. The interface is transport-agnostic and message-oriented, using structured payloads serialized as JSON with binary data transferred via Apache Arrow IPC format.
 
 .. note::
 
+   For an overview of the system architecture and how these messages flow through the platform, see :doc:`architecture`. This document focuses on the technical contracts for implementing data sources and exporters.
+
+.. note::
+
    The **ionbeam-client** Python library provides a reference implementation of these contracts. While this specification is language-agnostic, the ionbeam-client demonstrates how to correctly implement data sources and exporters that conform to these messaging interfaces. See :doc:`ionbeam-client/ingestion` and :doc:`ionbeam-client/export` for implementation guides using the client library.
-
-Architecture
-------------
-
-System Components
-~~~~~~~~~~~~~~~~~
-
-The ionbeam platform consists of three primary component types:
-
-**Data Sources**
-  External data collectors that ingest observations from third-party systems and publish them to ionbeam core.
-
-**Ionbeam Core**
-  Central processing system that validates, aggregates, and builds time-windowed datasets from raw observations.
-
-**Exporters**
-  Downstream consumers that transform and export datasets to external systems and formats.
-
-Message Flow
-~~~~~~~~~~~~
-
-The platform uses asynchronous message-based communication with the following flow:
-
-.. mermaid::
-
-   flowchart TD
-       A[Data Source] -->|IngestDataCommand| B[Ingestion Handler]
-       B -->|DataAvailableEvent| C[Coordinator Handler]
-       C -->|internal scheduling| D[Builder Handler]
-       D -->|DataSetAvailableEvent| E[Exporter]
-       
-       style A fill:#e1f5ff
-       style B fill:#fff4e1
-       style C fill:#fff4e1
-       style D fill:#fff4e1
-       style E fill:#e7f5e1
-
-Optional trigger-based flow for data sources:
-
-.. mermaid::
-
-   flowchart TD
-       S[Scheduler] -->|StartSourceCommand| DS[Data Source]
-       
-       style S fill:#f0f0f0
-       style DS fill:#e1f5ff
 
 Message Contracts
 -----------------
@@ -573,7 +528,7 @@ Transport Protocol
 Message Broker
 ~~~~~~~~~~~~~~
 
-The reference implementation uses AMQP 0.9.1 with the following topology:
+The reference implementation uses AMQP with the following topology:
 
 **Queues:**
 
