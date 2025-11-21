@@ -1,15 +1,15 @@
 Messaging Interface Specification
 ==================================
 
-This document specifies the messaging contracts between components in the ionbeam platform. The interface is transport-agnostic and message-oriented, using structured payloads serialized as JSON with binary data transferred as Apache Arrow IPC format via an Object store.
+This document specifies the messaging contracts between components in the ionbeam platform. The interface is transport-agnostic and message-oriented, using structured payloads serialized as JSON with binary data transferred via object storage.
 
 .. note::
 
-   For an overview of the system architecture and how these messages flow through the platform, see :doc:`architecture`. This document focuses on the technical contracts for implementing data sources and exporters.
+   For an overview of the system architecture and how these messages flow through the platform, see :ref:`architecture:Architecture`. This document focuses on the technical contracts for implementing data sources and exporters.
 
 .. note::
 
-   The **ionbeam-client** Python library provides a reference implementation of these contracts. While this specification is language-agnostic, the ionbeam-client demonstrates how to correctly implement data sources and exporters that conform to these messaging interfaces. See :doc:`ionbeam-client/index` for the client library documentation.
+   The **ionbeam-client** Python library provides a reference implementation of these contracts. While this specification is language-agnostic, the ionbeam-client demonstrates how to correctly implement data sources and exporters that conform to these messaging interfaces. See :ref:`ionbeam-client/index:Ionbeam Client` for the client library documentation.
 
 Message Contracts
 -----------------
@@ -38,7 +38,7 @@ IngestDataCommand
      - Complete metadata describing dataset and variable mappings (see below)
    * - ``payload_location``
      - String
-     - Object storage URI where Arrow IPC data is stored
+     - Object storage URI for the observation data
    * - ``start_time``
      - ISO 8601 DateTime
      - Start of the temporal range covered by this data (UTC)
@@ -106,7 +106,7 @@ IngestDataCommand
 **Constraints:**
 
 - ``id`` must be unique across all ingestion operations
-- ``payload_location`` must reference valid Arrow IPC data in object storage
+- ``payload_location`` must reference valid observation data in object storage
 - ``start_time`` and ``end_time`` must be valid UTC timestamps
 - ``metadata.version`` must match the supported version (currently 1)
 
@@ -176,7 +176,7 @@ DataSetAvailableEvent
      - Dataset-level metadata (subset of IngestionMetadata)
    * - ``dataset_location``
      - String
-     - Object storage URI where the dataset file is stored
+     - Object storage URI for the dataset
    * - ``start_time``
      - ISO 8601 DateTime
      - Start of the dataset temporal window (UTC)
@@ -205,7 +205,7 @@ DataSetAvailableEvent
 
 **Constraints:**
 
-- ``dataset_location`` references an Arrow IPC file in object storage
+- ``dataset_location`` references dataset data in object storage
 - Time window ``[start_time, end_time)`` aligns to ``metadata.aggregation_span`` boundaries
 - Multiple exporters may receive the same event (fanout pattern)
 
@@ -261,16 +261,11 @@ Data Payload Format
 Observation Data
 ~~~~~~~~~~~~~~~~
 
-Raw observation data referenced by ``IngestDataCommand.payload_location`` must be stored as Apache Arrow IPC files. **The Arrow schema must align with the column names specified in the ingestion map metadata.**
+Raw observation data referenced by ``IngestDataCommand.payload_location`` is retrieved from object storage as a stream of Apache Arrow RecordBatches. Column names in the data must match the ``from_col`` values defined in the ``IngestionMetadata.ingestion_map``:
 
-Schema Alignment Rules
-^^^^^^^^^^^^^^^^^^^^^^
-
-The Arrow IPC column names must match the ``from_col`` values defined in the ``IngestionMetadata.ingestion_map``:
-
-1. **Time Column**: Must match ``ingestion_map.datetime.from_col`` (or use default ``"timestamp"`` if ``from_col`` is ``null``)
-2. **Latitude Column**: Must match ``ingestion_map.lat.from_col`` (or use default ``"latitude"`` if ``from_col`` is ``null``)
-3. **Longitude Column**: Must match ``ingestion_map.lon.from_col`` (or use default ``"longitude"`` if ``from_col`` is ``null``)
+1. **Time Column**: Must match ``ingestion_map.datetime.from_col`` (defaults to ``"timestamp"`` if ``from_col`` is ``null``)
+2. **Latitude Column**: Must match ``ingestion_map.lat.from_col`` (defaults to ``"latitude"`` if ``from_col`` is ``null``)
+3. **Longitude Column**: Must match ``ingestion_map.lon.from_col`` (defaults to ``"longitude"`` if ``from_col`` is ``null``)
 4. **Canonical Variables**: Must match the ``column`` field for each entry in ``ingestion_map.canonical_variables``
 5. **Metadata Variables**: Must match the ``column`` field for each entry in ``ingestion_map.metadata_variables``
 
@@ -309,9 +304,9 @@ The Arrow IPC column names must match the ``from_col`` values defined in the ``I
      - String or numeric (as specified by ``dtype``)
      - Tag/identifier columns - names as they appear in source data
 
-**Example: Source Data to Ingestion Map Alignment**
+**Example:**
 
-Source Arrow IPC schema::
+Source data schema::
 
     obs_time: timestamp[ns, tz=UTC]
     lat: double
@@ -360,12 +355,10 @@ After ingestion, data is stored in InfluxDB with canonical column names::
     relative_humidity__percent__2.0__point__PT0S: double
     station: utf8
 
-**Requirement**: The column names in your Arrow IPC file must exactly match the ``from_col`` and ``column`` values in your ingestion map. Mismatches will result in ingestion failures with missing column errors.
-
 Dataset Data
 ~~~~~~~~~~~~
 
-Processed datasets referenced by ``DataSetAvailableEvent.dataset_location`` use Arrow IPC format with a standardized schema:
+Processed datasets referenced by ``DataSetAvailableEvent.dataset_location`` are retrieved from object storage with a standardized schema:
 
 **Fixed Columns:**
 
@@ -582,14 +575,18 @@ Binary data payloads use an S3-compatible object storage interface:
 
 **Operations:**
 
-- ``PUT``: Store Arrow IPC stream (used by data sources and builders)
-- ``GET``: Retrieve Arrow IPC stream (used by ingestion handlers and exporters)
+- ``PUT``: Write observation/dataset data
+- ``GET``: Retrieve observation/dataset data
 
 **Key Patterns:**
 
 - Raw data: ``raw/{dataset_name}/{start}_{end}_{ingestion_time}``
 - Datasets: ``{dataset_name}/{window_start}_{aggregation}_{content_hash}``
 
+**Implementation Details:**
+
+Data is transferred as Apache Arrow RecordBatch streams and stored internally as Parquet files for efficient columnar storage. The Parquet format is an implementation detail—clients interact with Arrow RecordBatch streams via the object storage interface.
+
 **Related Documentation:**
 
-- :doc:`ionbeam-client/index` - Client library documentation
+- :ref:`ionbeam-client/index:Ionbeam Client` - Client library documentation

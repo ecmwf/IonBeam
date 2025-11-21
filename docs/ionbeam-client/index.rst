@@ -31,5 +31,6 @@ Client API
 See Also
 --------
 
-- :doc:`../messaging-interface` - Complete message contracts and metadata specifications
-- :doc:`../architecture` - System architecture and message flow
+- :ref:`messaging-interface:Messaging Interface Specification` - Message contracts
+- :ref:`messaging-interface:IngestionMetadata` - Metadata structure details
+- :ref:`architecture:Architecture` - System architecture and message flow

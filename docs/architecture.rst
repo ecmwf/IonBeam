@@ -18,15 +18,15 @@ Message Flow
 
 Data flows through three sequential stages, each triggered by messages published from the previous stage:
 
-1. **Ingestion**: Data sources publish ``IngestDataCommand`` messages containing references to raw observation data in object storage. The ingestion handler validates, normalizes, and writes this data to InfluxDB, then publishes ``DataAvailableEvent`` messages.
+1. **Ingestion**: Data sources publish :ref:`messaging-interface:IngestDataCommand` messages containing references to raw observation data in object storage. The ingestion handler validates, normalizes, and writes this data to InfluxDB, then publishes :ref:`messaging-interface:DataAvailableEvent` messages.
 
-2. **Coordination**: The coordinator handler receives ``DataAvailableEvent`` messages and tracks which time windows have received new data. It maintains an audit trail of ingestion events in Redis and enqueues windows for rebuilding when their content changes.
+2. **Coordination**: The coordinator handler receives :ref:`messaging-interface:DataAvailableEvent` messages and tracks which time windows have received new data. It maintains an audit trail of ingestion events in Redis and enqueues windows for rebuilding when their content changes.
 
-3. **Dataset Building**: The builder handler processes queued windows by querying InfluxDB, generating Arrow IPC files in object storage, and publishing ``DataSetAvailableEvent`` messages that fan out to all registered exporters.
+3. **Dataset Building**: The builder handler processes queued windows by querying InfluxDB, generating Arrow IPC files in object storage, and publishing :ref:`messaging-interface:DataSetAvailableEvent` messages that fan out to all registered exporters.
 
 Design Benefits
 ---------------
 
-This staged pipeline separates write concerns (ingestion into the time-series database) from read concerns (generating export formats). Exporters operate independently by reading Arrow IPC streams from object storage and transforming them into their target formats (ODB, GeoParquet, REST APIs, etc.). Multiple exporters can process the same dataset concurrently without impacting ingestion throughput.
+This staged pipeline separates write concerns (ingestion into the time-series database) from read concerns (generating export formats). Exporters operate independently by reading :ref:`messaging-interface:Dataset Data` in Arrow IPC format from object storage and transforming them into their target formats (ODB, GeoParquet, REST APIs, etc.). Multiple exporters can process the same dataset concurrently without impacting ingestion throughput.
 
-The architecture enables safe evolution: new data sources register by publishing to the ingestion queue, new exporters subscribe to the dataset fanout exchange, and the Redis-backed audit trail ensures dataset rebuilds reflect exactly which ingestion events contributed to each time window.
+The architecture enables safe evolution: new data sources register by publishing to the ingestion queue, new exporters subscribe to the dataset fanout exchange (see :ref:`messaging-interface:Message Broker` for topology).
