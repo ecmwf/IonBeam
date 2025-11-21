@@ -9,7 +9,7 @@ This document specifies the messaging contracts between components in the ionbea
 
 .. note::
 
-   The **ionbeam-client** Python library provides a reference implementation of these contracts. While this specification is language-agnostic, the ionbeam-client demonstrates how to correctly implement data sources and exporters that conform to these messaging interfaces. See :doc:`ionbeam-client/ingestion` and :doc:`ionbeam-client/export` for implementation guides using the client library.
+   The **ionbeam-client** Python library provides a reference implementation of these contracts. While this specification is language-agnostic, the ionbeam-client demonstrates how to correctly implement data sources and exporters that conform to these messaging interfaces. See :doc:`ionbeam-client/index` for the client library documentation.
 
 Message Contracts
 -----------------
@@ -620,6 +620,4 @@ Error Handling
 
 **Related Documentation:**
 
-- :doc:`ionbeam-client/ingestion` - Implementing data sources
-- :doc:`ionbeam-client/export` - Implementing exporters
-- :doc:`ionbeam-client/configuration` - Configuration reference
+- :doc:`ionbeam-client/index` - Client library documentation
