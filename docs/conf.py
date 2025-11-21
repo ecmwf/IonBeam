@@ -5,6 +5,7 @@
 import datetime
 import sys
 from pathlib import Path
+from typing import Dict, List
 
 # Add ionbeam-client to Python path for autodoc
 sys.path.insert(0, str(Path(__file__).parent.parent / "ionbeam-client"))
@@ -17,6 +18,7 @@ project = "Ionbeam"
 copyright = f"{datetime.datetime.today().year}, ECMWF"
 author = "ECMWF"
 version = "local-dev"
+release = "local-dev"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -46,6 +48,27 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = "alabaster"
-html_static_path = ["_static"]
-release = "local-dev"
+html_theme = "pydata_sphinx_theme"
+# Do not show source link on each page
+html_sidebars: Dict[str, List[str]] = {
+    "**": [],
+}
+
+html_theme_options = {
+    "navbar_align": "left",
+    "navbar_start": ["navbar-logo"],
+    "navbar_center": ["navbar-nav"],
+    "navbar_end": ["navbar-icon-links", "theme-switcher", "version-switcher"],
+    "navbar_persistent": ["search-button"],
+    "primary_sidebar_end": [],
+    # On local builds no version.json is present
+    "check_switcher": False
+}
+
+html_context = {
+    # Enable auto detection of light/dark mode
+   "default_mode": "auto"
+}
+
+# -- autosectionlabel configuration ------------------------------------------
+autosectionlabel_prefix_document = True

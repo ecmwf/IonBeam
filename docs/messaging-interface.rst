@@ -1,7 +1,7 @@
 Messaging Interface Specification
 ==================================
 
-This document specifies the messaging contracts between components in the ionbeam platform. The interface is transport-agnostic and message-oriented, using structured payloads serialized as JSON with binary data transferred via Apache Arrow IPC format.
+This document specifies the messaging contracts between components in the ionbeam platform. The interface is transport-agnostic and message-oriented, using structured payloads serialized as JSON with binary data transferred as Apache Arrow IPC format via an Object store.
 
 .. note::
 
@@ -589,34 +589,6 @@ Binary data payloads use an S3-compatible object storage interface:
 
 - Raw data: ``raw/{dataset_name}/{start}_{end}_{ingestion_time}``
 - Datasets: ``{dataset_name}/{window_start}_{aggregation}_{content_hash}``
-
-Quality of Service
-------------------
-
-Message Delivery
-~~~~~~~~~~~~~~~~
-
-- **At-least-once delivery**: Messages may be redelivered on failure
-- **Idempotency required**: Consumers must handle duplicate messages
-- **Ordering**: No guaranteed order between independent messages
-- **Acknowledgment**: Consumers must explicitly acknowledge successful processing
-
-Error Handling
-~~~~~~~~~~~~~~
-
-**Message Processing Failures:**
-
-1. Handler raises exception
-2. Message is **not acknowledged**
-3. Message returns to queue after timeout
-4. Retry with exponential backoff
-5. After max retries, route to dead-letter queue (if configured)
-
-**Connection Failures:**
-
-1. Automatic reconnection with exponential backoff
-2. Queue subscriptions automatically restored
-3. Unacknowledged messages redelivered
 
 **Related Documentation:**
 
