@@ -212,6 +212,8 @@ class IonbeamClient:
             RuntimeError: If client is not connected. Use async context manager or call
                 connect() first.
             ValueError: If the batch stream is empty.
+            Exception: If writing to the arrow store fails (e.g., PyArrow errors, disk
+                I/O errors) or if publishing the ingestion command to AMQP fails.
 
         Example:
             Basic ingestion::
@@ -502,6 +504,12 @@ async def ingest(
 
     Returns:
         IngestDataCommand containing the ingestion details.
+
+    Raises:
+        RuntimeError: If client connection fails.
+        ValueError: If the batch stream is empty.
+        Exception: If writing to the arrow store fails (e.g., PyArrow errors, disk
+            I/O errors) or if publishing the ingestion command to AMQP fails.
 
     Example::
 
