@@ -1,0 +1,73 @@
+name: Publish Documentation
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  push:
+    branches:
+      - 'develop'
+      - 'main'
+      - 'next'
+    tags:
+      - '**'
+jobs:
+  build-docs:
+    if: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' || github.event_name == 'push'}}
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload-doc.outputs.artifact-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Build doc
+        run: |
+            uv sync --group docs
+            uv run sphinx-build -b html docs/ docs_out/
+      - name: Archive documentation
+        id: upload-doc
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-ionbeam
+          path: docs_out/sphinx
+  preview-publish-docs:
+    if: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' }}
+    needs: build-docs
+    uses: ecmwf/reusable-workflows/.github/workflows/pr-preview-publish.yml@main
+    with:
+      artifact-id: ${{ needs.build-docs.outputs.artifact-id }}
+      space: docs
+      name: dev-section
+      path: ionbeam/pull-requests
+      link-tag: PREVIEW-PUBLISH-IONBEAM
+      link-text: 🌈🌦️📖🚧 Documentation Ionbeam 🚧📖🌦️🌈
+    secrets:
+      sites-token: ${{ secrets.ECMWF_SITES_DOCS_DEV_SECTION_TOKEN }}
+  preview-unpublish-docs:
+    if: ${{ github.event_name == 'pull_request' && github.event.action == 'closed' }}
+    uses: ecmwf/reusable-workflows/.github/workflows/pr-preview-unpublish.yml@main
+    with:
+      space: docs
+      name: dev-section
+      path: ionbeam/pull-requests
+    secrets:
+      sites-token: ${{ secrets.ECMWF_SITES_DOCS_DEV_SECTION_TOKEN }}
+#   publish:
+#     if: >-
+#       ${{ github.event_name == 'push' && (
+#         github.ref_name == 'develop' ||
+#         github.ref_name == 'master'  ||
+#         github.ref_type == 'tag'
+#       ) }}
+#     needs: build-docs
+#     uses: ecmwf/reusable-workflows/.github/workflows/docs-publish.yml@main
+#     with:
+#       artifact-id: ${{ needs.build-z3fdb.outputs.artifact-id }}
+#       space: docs
+#       name: dev-section
+#       path: ionbeam
+#       id: ${{ github.ref_name }}
+#       softlink: ${{ github.ref_name == 'main'   && 'stable'
+#                  || github.ref_name == 'develop' && 'latest' }}
+#     secrets:
+#       sites-token: ${{ secrets.ECMWF_SITES_DOCS_DEV_SECTION_TOKEN }}
