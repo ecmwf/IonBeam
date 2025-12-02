@@ -3,10 +3,38 @@ Domain Concepts
 
 This document explains the core domain concepts and processing logic in Ionbeam. For an overview of the system architecture and message flow, see :ref:`architecture:Architecture`.
 
+Dataset Configuration
+---------------------
+
+Each dataset is configured through metadata provided by data sources in every :ref:`messaging-interface:IngestDataCommand` message. The :ref:`messaging-interface:DatasetMetadata` structure defines how the system processes observations for that dataset:
+
+.. code-block:: json
+
+    {
+      "metadata": {
+        "dataset": {
+          "name": "weather_stations",
+          "aggregation_span": "PT1H",
+          "subject_to_change_window": "PT6H",
+          "description": "Ground weather station observations",
+          "source_links": [],
+          "keywords": ["weather", "temperature"]
+        }
+      }
+    }
+
+**Key Configuration Parameters:**
+
+- ``aggregation_span``: Time window duration for dataset aggregation (ISO 8601 duration, e.g., "PT1H" for 1 hour)
+- ``subject_to_change_window``: Grace period after window close during which late data is accepted (ISO 8601 duration)
+- ``name``: Unique dataset identifier used for organizing storage and routing
+
+These parameters control the temporal partitioning, late-arrival handling, and export behavior described in the following sections.
+
 Time Windows
 ------------
 
-Observations are partitioned into fixed-duration time windows based on each dataset's ``aggregation_span`` configuration. This determines the temporal granularity at which data is aggregated and exported.
+Observations are partitioned into fixed-duration time windows based on each dataset's ``aggregation_span`` parameter. This determines the temporal granularity at which data is aggregated and exported.
 
 Window Alignment
 ~~~~~~~~~~~~~~~~
@@ -22,16 +50,7 @@ For a dataset with ``aggregation_span: PT1H`` (1 hour), an observation at ``2024
 Late-Arriving Data
 ~~~~~~~~~~~~~~~~~~
 
-The ``subject_to_change_window`` dataset configuration parameter controls how long after a window closes the system will accept new data. This accommodates data sources with processing delays or backfill operations.
-
-**Configuration:**
-
-.. code-block:: yaml
-
-    metadata:
-      dataset:
-        aggregation_span: "PT1H"
-        subject_to_change_window: "PT6H"
+The ``subject_to_change_window`` parameter controls how long after a window closes the system will accept new data. This accommodates data sources with processing delays or backfill operations.
 
 **Behavior:**
 
@@ -40,7 +59,7 @@ For a window ``[2024-01-15T13:00:00Z, 2024-01-15T14:00:00Z)``:
 - Data arriving before ``2024-01-15T20:00:00Z`` (window end + 6 hours) triggers a rebuild
 - Data arriving after ``2024-01-15T20:00:00Z`` is ignored (window finalized)
 
-Set ``subject_to_change_window: PT0S`` for real-time sources that never deliver late data.
+Set ``subject_to_change_window: "PT0S"`` for real-time sources that never deliver late data.
 
 Out-of-Order Processing
 ------------------------
