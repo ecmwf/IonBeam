@@ -1,0 +1,34 @@
+%%{init: {'theme':'base', 'themeVariables': {'primaryColor':'#3A7CA5','primaryTextColor':'#FFFFFF','primaryBorderColor':'#245E7A','lineColor':'#5C677D','secondaryColor':'#5C677D','tertiaryColor':'#B08900','noteBkgColor':'#E0E0E0','noteTextColor':'#000000','noteBorderColor':'#9AA0A6','actorBkg':'#3A7CA5','actorBorder':'#245E7A','actorTextColor':'#FFFFFF','actorLineColor':'#5C677D','signalColor':'#5C677D','signalTextColor':'#5C677D','labelBoxBkgColor':'#E0E0E0','labelBoxBorderColor':'#9AA0A6','labelTextColor':'#000000','loopTextColor':'#5C677D','activationBorderColor':'#245E7A','activationBkgColor':'#3A7CA5','sequenceNumberColor':'#FFFFFF'}}}%%
+sequenceDiagram
+    participant DS as Data Source
+    participant OS as Object Store
+    participant IH as Ingestion Handler
+    participant DB as InfluxDB
+    participant CH as Coordinator Handler
+    participant R as Redis
+    participant BH as Builder Handler
+    participant E as Exporters
+
+    DS->>OS: Write Arrow batches
+    DS->>IH: IngestDataCommand
+    IH->>OS: Read batches
+    IH->>DB: Write observations
+    IH->>CH: DataAvailableEvent
+    
+    CH->>R: Save ingestion record
+    CH->>R: Update window desired events
+    alt Window needs rebuild
+        CH->>R: Enqueue window
+    end
+    
+    BH->>R: Dequeue window
+    BH->>R: Check desired vs observed hash
+    alt Hashes differ
+        BH->>DB: Query window observations
+        BH->>OS: Write Arrow dataset
+        BH->>E: DataSetAvailableEvent (fanout)
+        BH->>R: Update observed hash
+    end
+    
+    E->>OS: Read Arrow dataset
+    E->>E: Transform to target format

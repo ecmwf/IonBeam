@@ -7,8 +7,19 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
+# Add monorepo root to Python path for version import
+sys.path.insert(0, str(Path(__file__).parent.parent))
 # Add ionbeam-client to Python path for autodoc
 sys.path.insert(0, str(Path(__file__).parent.parent / "ionbeam-client"))
+
+# Import shared version
+try:
+    from _version import __version__
+    version = __version__
+    release = __version__
+except ImportError:
+    version = "local-dev"
+    release = "local-dev"
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
@@ -17,8 +28,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "ionbeam-client"))
 project = "Ionbeam"
 copyright = f"{datetime.datetime.today().year}, ECMWF"
 author = "ECMWF"
-version = "local-dev"
-release = "local-dev"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

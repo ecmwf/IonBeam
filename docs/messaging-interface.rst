@@ -1,15 +1,15 @@
 Messaging Interface Specification
 ==================================
 
-This document specifies the messaging contracts between components in the ionbeam platform. The interface is transport-agnostic and message-oriented, using structured payloads serialized as JSON with binary data transferred via object storage.
+This document specifies the messaging contracts for implementing data sources and exporters in the ionbeam platform. The interface is transport-agnostic and message-oriented, using structured payloads serialized as JSON with binary data transferred via object storage.
 
 .. note::
 
-   For an overview of the system architecture and how these messages flow through the platform, see :ref:`architecture:Architecture`. This document focuses on the technical contracts for implementing data sources and exporters.
+   For system architecture and message flow, see :ref:`architecture:Architecture`. For processing logic and domain concepts, see :ref:`domain:Domain Concepts`.
 
 .. note::
 
-   The **ionbeam-client** Python library provides a reference implementation of these contracts. While this specification is language-agnostic, the ionbeam-client demonstrates how to correctly implement data sources and exporters that conform to these messaging interfaces. See :ref:`ionbeam-client/index:Ionbeam Client` for the client library documentation.
+   The **ionbeam-client** Python library provides a reference implementation of these contracts. See :ref:`ionbeam-client/index:Ionbeam Client` for the client library documentation.
 
 Message Contracts
 -----------------
@@ -515,61 +515,8 @@ Mapping for an observed quantity following CF conventions.
      - String
      - Data type: "float64", "int64", etc. (default: "float64")
 
-Transport Protocol
-------------------
-
-Message Broker
-~~~~~~~~~~~~~~
-
-The reference implementation uses AMQP with the following topology:
-
-**Queues:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 35 20 45
-
-   * - Queue Name
-     - Message Type
-     - Consumer
-   * - ``ionbeam.ingestion``
-     - IngestDataCommand
-     - Ionbeam Core (Ingestion Handler)
-   * - ``ionbeam.source.{source_name}.start``
-     - StartSourceCommand
-     - Data Source (matching source_name)
-   * - ``ionbeam.dataset.available.{exporter_name}``
-     - DataSetAvailableEvent
-     - Exporter (matching exporter_name)
-
-**Exchanges:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 20 50
-
-   * - Exchange Name
-     - Type
-     - Purpose
-   * - ``ionbeam.ingestion``
-     - Direct
-     - Routes ingestion commands from data sources to handler
-   * - ``ionbeam.data.available``
-     - Fanout
-     - Internal: broadcasts validated data events (Ingestion → Coordinator)
-   * - ``ionbeam.dataset.available``
-     - Fanout
-     - Broadcast dataset events to all exporters
-
-**Properties:**
-
-- All queues are **durable** (survive broker restart)
-- All messages are **persistent** (delivery_mode=2)
-- Manual acknowledgment after successful processing
-- Prefetch count of 1 (one message at a time)
-
-Object Storage
-~~~~~~~~~~~~~~
+Object Storage Interface
+------------------------
 
 Binary data payloads use an S3-compatible object storage interface:
 

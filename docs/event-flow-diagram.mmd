@@ -1,0 +1,60 @@
+%%{init: {'theme':'base', 'themeVariables': {'primaryColor':'#3A7CA5','primaryTextColor':'#FFFFFF','primaryBorderColor':'#245E7A','lineColor':'#5C677D','secondaryColor':'#5C677D','tertiaryColor':'#B08900','noteBkgColor':'#E0E0E0','noteTextColor':'#000000','noteBorderColor':'#9AA0A6','actorBkg':'#3A7CA5','actorBorder':'#245E7A','actorTextColor':'#FFFFFF','actorLineColor':'#5C677D','signalColor':'#5C677D','signalTextColor':'#5C677D','labelBoxBkgColor':'#E0E0E0','labelBoxBorderColor':'#9AA0A6','labelTextColor':'#000000','loopTextColor':'#5C677D','activationBorderColor':'#245E7A','activationBkgColor':'#3A7CA5','sequenceNumberColor':'#FFFFFF'}}}%%
+sequenceDiagram
+    participant DS as Data Source
+    participant OS as Object Store
+    participant IH as Ingestion Handler
+    participant DB as InfluxDB
+    participant CH as Coordinator Handler
+    participant R as Redis
+    participant BH as Builder Handler
+    participant E as Exporters
+
+    Note over DS,E: Window: [12:00-13:00), aggregation_span=PT1H
+
+    DS->>OS: Write Arrow batches (Event A [12:00-12:30])
+    DS->>IH: IngestDataCommand A
+    IH->>OS: Read batches
+    IH->>DB: Write observations
+    IH->>CH: DataAvailableEvent A
+    CH->>R: Save ingestion record A
+    CH->>R: desired_events = [A], desired_hash = hash([A])
+    Note over CH: Window incomplete (gap 12:30-13:00)<br/>Skip enqueue (not ready)
+    
+    DS->>OS: Write Arrow batches (Event B [12:30-13:00])
+    DS->>IH: IngestDataCommand B
+    IH->>OS: Read batches
+    IH->>DB: Write observations
+    IH->>CH: DataAvailableEvent B
+    CH->>R: Save ingestion record B
+    CH->>R: desired_events = [A, B], desired_hash = hash([A, B])
+    Note over CH: Window complete, past STC cutoff
+    CH->>R: Enqueue window (priority=-1705320000)
+    
+    BH->>R: Dequeue window [12:00-13:00)
+    BH->>R: Check: observed_hash=null, desired_hash=hash([A,B])
+    Note over BH: Hash mismatch → build
+    BH->>DB: Query observations [12:00-13:00)
+    BH->>OS: Write Arrow dataset
+    BH->>E: DataSetAvailableEvent (fanout)
+    BH->>R: observed_hash = hash([A, B])
+    E->>OS: Read Arrow dataset
+    
+    DS->>OS: Write Arrow batches (Event C [12:45-13:15])
+    DS->>IH: IngestDataCommand C
+    IH->>OS: Read batches
+    IH->>DB: Write observations
+    IH->>CH: DataAvailableEvent C
+    CH->>R: Save ingestion record C
+    CH->>R: desired_events = [A, B, C], desired_hash = hash([A, B, C])
+    Note over CH: hash([A,B,C]) != hash([A,B])
+    CH->>R: Enqueue window [12:00-13:00) for rebuild
+
+    BH->>R: Dequeue window [12:00-13:00)
+    BH->>R: Check: observed_hash=hash([A,B]), desired_hash=hash([A,B,C])
+    Note over BH: Hash mismatch → rebuild
+    BH->>DB: Query observations [12:00-13:00)
+    Note over BH: Now includes data from Event C
+    BH->>OS: Write updated Arrow dataset
+    BH->>E: DataSetAvailableEvent (fanout)
+    BH->>R: observed_hash = hash([A, B, C])
+    E->>OS: Read updated Arrow dataset

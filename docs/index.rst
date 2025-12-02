@@ -17,5 +17,7 @@ Built on event-sourcing principles, Ionbeam captures incoming observations as im
    :caption: Contents:
 
    architecture
+   domain
    messaging-interface
+   dataset-schema
    ionbeam-client/index
