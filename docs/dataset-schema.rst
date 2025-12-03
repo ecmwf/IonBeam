@@ -1,6 +1,10 @@
 Dataset Schema
 ==============
 
+.. warning::
+   
+   This schema is currently under active development and may change significantly in future versions. Do not rely on this as a stable interface yet.
+
 Datasets produced by IonBeam are stored in object storage with an Arrow RecordBatch interface (implemented as Parquet internally). Each dataset represents a single time window of aggregated observations following a canonical schema.
 
 Arrow Schema

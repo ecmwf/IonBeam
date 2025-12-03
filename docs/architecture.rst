@@ -41,23 +41,17 @@ Data flows through four sequential stages, each triggered by messages published 
 Event Flow Example
 ------------------
 
-This example shows how multiple ingestion events covering different parts of a single aggregation window trigger incremental dataset rebuilds:
+This example shows how multiple ingestion events covering different parts of a single aggregation window trigger dataset rebuilds:
 
 .. mermaid:: event-flow-diagram.mmd
    :zoom:
-
-The three core messages flowing through the system are:
-
-- :ref:`messaging-interface:IngestDataCommand` - Data Source → Ingestion Handler
-- :ref:`messaging-interface:DataAvailableEvent` - Ingestion Handler → Coordinator Handler (internal)
-- :ref:`messaging-interface:DataSetAvailableEvent` - Builder Handler → Exporters
 
 For the window management logic and hash computation details, see :ref:`domain:Out-of-Order Processing`.
 
 Message Broker Topology
 ------------------------
 
-The reference implementation uses AMQP with the following topology:
+The current implementation uses AMQP with the following topology:
 
 **Queues:**
 
@@ -97,11 +91,8 @@ The reference implementation uses AMQP with the following topology:
      - Fanout
      - Broadcast dataset events to all exporters
 
-**Properties:**
-
 - All queues are **durable** (survive broker restart)
 - All messages are **persistent** (delivery_mode=2)
-- Manual acknowledgment after successful processing
 - Prefetch count of 1 (one message at a time)
 
 Rationale

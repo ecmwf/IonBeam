@@ -1,4 +1,4 @@
-Domain Concepts
+Domain
 ===============
 
 This document explains the core domain concepts and processing logic in Ionbeam. For an overview of the system architecture and message flow, see :ref:`architecture:Architecture`.
@@ -36,6 +36,13 @@ Time Windows
 
 Observations are partitioned into fixed-duration time windows based on each dataset's ``aggregation_span`` parameter. This determines the temporal granularity at which data is aggregated and exported.
 
+**Terminology:**
+
+- **Observation Time**: The timestamp when the measurement was recorded (e.g., when a weather station recorded temperature at ``2024-01-15T13:30:00Z``). This determines which aggregation window the data belongs to.
+- **Arrival Time**: The timestamp when Ionbeam receives and ingests the data. This may be seconds, minutes, or hours after the observation time due to network delays, processing, or backfilling.
+
+The system uses observation time to assign data to windows, but uses arrival time to determine whether the window should be built or continue waiting for additional data.
+
 Window Alignment
 ~~~~~~~~~~~~~~~~
 
@@ -50,16 +57,16 @@ For a dataset with ``aggregation_span: PT1H`` (1 hour), an observation at ``2024
 Late-Arriving Data
 ~~~~~~~~~~~~~~~~~~
 
-The ``subject_to_change_window`` parameter controls how long after a window closes the system will accept new data. This accommodates data sources with processing delays or backfill operations.
+The ``subject_to_change_window`` parameter controls how long after a window closes the system will accept new data and delay window builds. This accommodates data sources with processing delays or backfill operations.
 
-**Behavior:**
+For a window ``[2024-01-15T13:00:00Z, 2024-01-15T14:00:00Z)`` with ``subject_to_change_window: "PT6H"``:
 
-For a window ``[2024-01-15T13:00:00Z, 2024-01-15T14:00:00Z)``:
-
-- Data arriving before ``2024-01-15T20:00:00Z`` (window end + 6 hours) triggers a rebuild
+- Observations with timestamps in ``[13:00, 14:00)`` can arrive (be ingested) up until ``2024-01-15T20:00:00Z`` (window end + 6 hours)
+- The window will not be built until after ``2024-01-15T20:00:00Z`` (current time must exceed window end + STC window)
+- Data arriving before ``2024-01-15T20:00:00Z`` triggers a rebuild if the window was already built
 - Data arriving after ``2024-01-15T20:00:00Z`` is ignored (window finalized)
 
-Set ``subject_to_change_window: "PT0S"`` for real-time sources that never deliver late data.
+Set ``subject_to_change_window: "PT0S"`` for real-time sources that never deliver late data and should build immediately after the window closes.
 
 Out-of-Order Processing
 ------------------------
@@ -116,28 +123,22 @@ By default, the coordinator only enqueues windows for building when they meet co
       dataset_coordinator:
         allow_incomplete_windows: true
 
-This is useful for:
-
-- Testing with partial data
-- Backfilling historical windows without waiting for the STC window
-- Forcing builds of windows with known gaps
-
 **Default:** ``false`` (validation enabled)
 
 Dataset Builder
 ---------------
 
-The builder runs as a background worker that dequeues windows from a Redis-backed priority queue and materializes them as Arrow datasets.
+The builders runs as worker that dequeues windows from a shared priority queue and materializes them as Arrow datasets.
 
 Build Priority
 ~~~~~~~~~~~~~~
 
-Windows are prioritized by age—oldest windows build first. Priority is computed as ``-int(window.end.timestamp())``, so:
+Windows are prioritized by age—oldest windows build first. Priority is set as ``-int(window.end.timestamp())``, so:
 
 - Window ending ``2024-01-15T12:00:00Z`` gets priority ``-1705320000``
 - Window ending ``2024-01-15T13:00:00Z`` gets priority ``-1705323600``
 
-The queue pops highest priority (numerically largest, most negative = oldest timestamp) first. This ensures historical backlogs are processed before recent windows, maintaining temporal ordering of exports.
+The queue pops highest priority first. This ensures historical backlogs are processed before recent windows.
 
 Build Process
 ~~~~~~~~~~~~~

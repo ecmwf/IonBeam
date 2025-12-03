@@ -1,15 +1,19 @@
 Messaging Interface Specification
 ==================================
 
+.. warning::
+   
+   This messaging interface is currently under active development and may change significantly in future versions. Do not rely on this as a stable interface yet.
+
 This document specifies the messaging contracts for implementing data sources and exporters in the ionbeam platform. The interface is transport-agnostic and message-oriented, using structured payloads serialized as JSON with binary data transferred via object storage.
 
 .. note::
 
-   For system architecture and message flow, see :ref:`architecture:Architecture`. For processing logic and domain concepts, see :ref:`domain:Domain Concepts`.
+   For system architecture and message flow, see :ref:`architecture:Architecture`. For processing logic and domain concepts, see :ref:`domain:Domain`.
 
 .. note::
 
-   The **ionbeam-client** Python library provides a reference implementation of these contracts. See :ref:`ionbeam-client/index:Ionbeam Client` for the client library documentation.
+   The **ionbeam-client** Python library implements these contracts and provides a simplified way to interact with Ionbeam. See :ref:`ionbeam-client/index:Ionbeam Client` for the client library documentation.
 
 Message Contracts
 -----------------
