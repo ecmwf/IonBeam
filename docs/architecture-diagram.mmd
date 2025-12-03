@@ -21,8 +21,9 @@ subgraph CORE[Ionbeam]
   %% Ionbeam Core Services
   subgraph PIPELINE[Ionbeam Core]
     direction TB
-    ING["Ingestion<br/>Service"]
-    AGG["Dataset<br/>Aggregator"]
+    ING["Ingestion<br/>Handler"]
+    COORD["Coordinator<br/>Handler"]
+    BUILD["Builder<br/>Handler"]
   end
 
   %% Exporters
@@ -64,14 +65,15 @@ SCOMM -.->|Stream Arrow record batches| FILES
 FILES -.->|Read Arrow record batches| ING
 ING -.->|Write Data Points| INFLUX
 
-ING -->|DataAvailableEvent| AGG
-AGG -->|DataSetAvailableEvent| ODB
-AGG -->|DataSetAvailableEvent| PYGEO
-AGG -->|DataSetAvailableEvent| LEGACY
+ING -->|DataAvailableEvent| COORD
+COORD <-.->|Track Events & Enqueue Windows| REDIS
+BUILD -->|DataSetAvailableEvent| ODB
+BUILD -->|DataSetAvailableEvent| PYGEO
+BUILD -->|DataSetAvailableEvent| LEGACY
 
-INFLUX -.->|Query Data| AGG
-AGG <-.->|Track Events| REDIS
-AGG -.->|Write Canonicalised Arrow Dataset| CANFILES
+REDIS -.->|Dequeue Windows| BUILD
+INFLUX -.->|Query Data| BUILD
+BUILD -.->|Write Canonicalised Arrow Dataset| CANFILES
 CANFILES -.->|Read Arrow Dataset| ODB
 CANFILES -.->|Read Arrow Dataset| PYGEO
 
@@ -85,7 +87,7 @@ classDef storage fill:#5C677D,stroke:#3F4657,stroke-width:2px,color:#FFFFFF;
 classDef external fill:#B08900,stroke:#7A6200,stroke-width:2px,color:#FFFFFF;
 classDef output fill:#2F7D32,stroke:#1F5322,stroke-width:2px,color:#FFFFFF;
 
-class METEO,NETATMO,SCOMM,ING,AGG,ODB,PYGEO,LEGACY service
+class METEO,NETATMO,SCOMM,ING,COORD,BUILD,ODB,PYGEO,LEGACY service
 class INFLUX,REDIS,FILES,CANFILES storage
 class EXTNODE external
 class ODBF,PYGEOF,LEGACYF output

@@ -46,7 +46,7 @@ This example shows how multiple ingestion events covering different parts of a s
 .. mermaid:: event-flow-diagram.mmd
    :zoom:
 
-For the window management logic and hash computation details, see :ref:`domain:Out-of-Order Processing`.
+For more detail around window management and event consolidation, see :ref:`domain:Out-of-Order Processing`.
 
 Message Broker Topology
 ------------------------
