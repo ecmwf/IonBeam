@@ -1,6 +1,11 @@
 Ionbeam Client
 ==============
 
+.. warning::
+   
+   This library is currently under active development and may change significantly in future versions. Do not rely on this as a stable interface yet.
+
+
 Python client library for ingesting observations into Ionbeam and exporting processed datasets.
 
 Installation
