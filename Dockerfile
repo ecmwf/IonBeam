@@ -220,13 +220,13 @@ FROM uv-base AS legacy-api-deps
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_PROJECT_ENVIRONMENT=/venvs/legacy-api \
-    uv sync --frozen --no-install-project --no-dev --package legacy-api
+    uv sync --frozen --no-install-project --no-dev --package ionbeam-legacy-api
 
 FROM legacy-api-deps AS legacy-api-build
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_PROJECT_ENVIRONMENT=/venvs/legacy-api \
-    uv sync --frozen --no-dev --no-editable --package legacy-api
+    uv sync --frozen --no-dev --no-editable --package ionbeam-legacy-api
 
 FROM python-base AS legacy-api
 
@@ -234,4 +234,4 @@ WORKDIR /app
 ENV PATH="/venvs/legacy-api/bin:${PATH}"
 COPY --from=legacy-api-build /venvs/legacy-api /venvs/legacy-api
 EXPOSE 8080
-CMD ["legacy-api"]
+CMD ["ionbeam-legacy-api"]
