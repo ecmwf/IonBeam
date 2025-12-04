@@ -6,9 +6,6 @@ Overview
 
 Ionbeam uses message-driven architecture to decouple data ingestion, aggregation, and export. The platform consists of three primary component types that communicate through asynchronous message passing:
 
-.. mermaid:: architecture-diagram.mmd
-  :zoom:
-
 **Data Sources**
   Services that collect observations from external APIs. Each source type (MeteoTracker, NetAtmo, Sensor.Community, etc.) runs independently and publishes ingestion commands when new data is available.
 
@@ -21,6 +18,9 @@ Ionbeam uses message-driven architecture to decouple data ingestion, aggregation
 
 **Exporters**
   Services that consume processed datasets and write to external systems. Each exporter (ECMWF/ODB, PyGeoAPI, Legacy API, etc.) runs independently and receives all dataset events.
+
+.. mermaid:: architecture-diagram.mmd
+  :zoom:
 
 Message Flow
 ------------
