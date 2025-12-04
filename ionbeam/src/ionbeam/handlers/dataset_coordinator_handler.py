@@ -79,7 +79,6 @@ class WindowStateManager:
 
     async def set_desired_events(self, window: Window, events: EventSet) -> None:
         await self.record_store.set_desired_event_ids(window, sorted(events.ids))
-
     async def get_observed_hash(self, window: Window) -> str | None:
         state = await self.record_store.get_window_state(window)
         return state.event_ids_hash if state else None

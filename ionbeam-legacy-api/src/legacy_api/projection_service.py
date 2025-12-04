@@ -61,37 +61,34 @@ class IonbeamLegacyProjectionService:
         pa.field("lon", pa.float64()),
     ]
 
-    LEGACY_METEOTRACKER_SCHEMA = pa.schema(
-        LEGACY_COMMON_FIELDS
-        + [
-            pa.field("relative_humidity_near_surface", pa.float64()),
-            pa.field("solar_radiation_index", pa.float64()),
-            pa.field("air_pressure_near_surface", pa.float64()),
-            pa.field("altitude", pa.float64()),
-            pa.field("vertical_temperature_gradient", pa.float64()),
-            pa.field("air_temperature_near_surface", pa.float64()),
-            pa.field("bluetooth_RSSI", pa.float64()),
-            pa.field("dew_point_temperature", pa.float64()),
-            pa.field("potential_temperature", pa.float64()),
-            pa.field("humidity_index", pa.float64()),
-            pa.field("carbon_monoxide", pa.float64()),
-            pa.field("ozone", pa.float64()),
-            pa.field("particulate_matter_1", pa.float64()),
-            pa.field("particulate_matter_2_5", pa.float64()),
-            pa.field("particulate_matter_4", pa.float64()),
-            pa.field("particulate_matter_particle_number_0_5", pa.float64()),
-            pa.field("particulate_matter_particle_number_1", pa.float64()),
-            pa.field("particulate_matter_particle_number_2_5", pa.float64()),
-            pa.field("particulate_matter_particle_number_4", pa.float64()),
-            pa.field("carbon_dioxide", pa.float64()),
-            pa.field("EPA_Air_Quality", pa.float64()),
-            pa.field("Fast_Air_Quality", pa.float64()),
-            pa.field("sulphur_dioxide", pa.float64()),
-            pa.field("particulate_matter_10", pa.float64()),
-            pa.field("particulate_matter_particle_number_10", pa.float64()),
-            pa.field("living_lab", pa.string()),
-        ]
-    )
+    LEGACY_METEOTRACKER_SCHEMA = pa.schema(LEGACY_COMMON_FIELDS + [
+        pa.field("relative_humidity_near_surface", pa.float64()),
+        pa.field("solar_radiation_index", pa.float64()),
+        pa.field("air_pressure_near_surface", pa.float64()),
+        pa.field("altitude", pa.float64()),
+        pa.field("vertical_temperature_gradient", pa.float64()),
+        pa.field("air_temperature_near_surface", pa.float64()),
+        pa.field("bluetooth_RSSI", pa.float64()),
+        pa.field("dew_point_temperature", pa.float64()),
+        pa.field("potential_temperature", pa.float64()),
+        pa.field("humidity_index", pa.float64()),
+        pa.field("carbon_monoxide", pa.float64()),
+        pa.field("ozone", pa.float64()),
+        pa.field("particulate_matter_1", pa.float64()),
+        pa.field("particulate_matter_2_5", pa.float64()),
+        pa.field("particulate_matter_4", pa.float64()),
+        pa.field("particulate_matter_particle_number_0_5", pa.float64()),
+        pa.field("particulate_matter_particle_number_1", pa.float64()),
+        pa.field("particulate_matter_particle_number_2_5", pa.float64()),
+        pa.field("particulate_matter_particle_number_4", pa.float64()),
+        pa.field("carbon_dioxide", pa.float64()),
+        pa.field("EPA_Air_Quality", pa.float64()),
+        pa.field("Fast_Air_Quality", pa.float64()),
+        pa.field("sulphur_dioxide", pa.float64()),
+        pa.field("particulate_matter_10", pa.float64()),
+        pa.field("particulate_matter_particle_number_10", pa.float64()),
+        pa.field("living_lab", pa.string()),
+    ])
 
     LEGACY_ACRONET_SCHEMA = pa.schema(
         LEGACY_COMMON_FIELDS

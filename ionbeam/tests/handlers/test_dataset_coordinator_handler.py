@@ -10,8 +10,12 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
-from isodate import duration_isoformat
-
+from ionbeam.handlers.dataset_coordinator_handler import (
+    DatasetCoordinatorConfig,
+    DatasetCoordinatorHandler,
+)
+from ionbeam.models.service_models import IngestionRecord, Window, WindowBuildState
+from ionbeam.observability.protocols import CoordinatorMetricsProtocol
 from ionbeam_client.models import (
     CanonicalVariable,
     DataAvailableEvent,
@@ -23,12 +27,7 @@ from ionbeam_client.models import (
     MetadataVariable,
     TimeAxis,
 )
-from ionbeam.handlers.dataset_coordinator_handler import (
-    DatasetCoordinatorConfig,
-    DatasetCoordinatorHandler,
-)
-from ionbeam.models.service_models import IngestionRecord, Window, WindowBuildState
-from ionbeam.observability.protocols import CoordinatorMetricsProtocol
+from isodate import duration_isoformat
 
 
 @pytest.fixture
