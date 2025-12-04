@@ -1,0 +1,29 @@
+[project]
+name = "pygeoapi"
+version = "0.1.0"
+description = "PyGeoAPI GeoParquet Exporter for Ionbeam"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ionbeam-client",
+    "pyyaml>=6.0.3",
+    "pandas>=2.2.3",
+    "pyarrow>=19.0.0",
+    "geopandas>=1.0.0",
+    "click>=8.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.uv.sources]
+ionbeam-client = { workspace = true }
+
+[project.scripts]
+pygeoapi-exporter = "pygeoapi:main"
+
+[project.entry-points."ionbeam.cli_plugins"]
+pygeoapi = "pygeoapi.app:main"

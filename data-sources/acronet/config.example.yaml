@@ -1,0 +1,16 @@
+source_name: "acronet"
+
+ionbeam:
+  amqp_url: "amqp://guest:guest@localhost:5672/"
+
+acronet:
+  base_url: "https://webdrops.cimafoundation.org/app/"
+  token_endpoint: "https://testauth.cimafoundation.org/auth/realms/webdrops/protocol/openid-connect/token"
+  username: "your_username"
+  password: "your_password"
+  client_id: "webdrops"
+  client_secret: "your_client_secret"
+  timeout_seconds: 30.0
+  max_retries: 3
+  aggregation_minutes: 60
+  station_group: "ComuneLive%IChange"

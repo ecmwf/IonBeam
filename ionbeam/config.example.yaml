@@ -1,0 +1,85 @@
+# Ionbeam Core Configuration Example
+
+# RabbitMQ Broker Configuration
+broker:
+  url: "amqp://guest:guest@localhost:5672/"
+
+# Redis Configuration (for coordination and queuing)
+redis:
+  redis_url: "redis://localhost:6379/0"
+
+# InfluxDB Configuration (for timeseries storage)
+influxdb_common:
+  influxdb_url: "http://localhost:8086"
+  influxdb_token: "your-influxdb-token"
+  influxdb_org: "ionbeam"
+  influxdb_bucket: "ionbeam"
+
+# Arrow Store Configuration (for raw data storage)
+arrow_store:
+  type: "local_filesystem"
+  data_path: "./data/"
+
+# Dataset Aggregator Configuration
+dataset_aggregator:
+  queue_key: "ionbeam:dataset:build_queue"
+  polling_interval_seconds: 5
+  max_batch_size: 10
+
+# Dataset Coordinator Configuration
+dataset_coordinator:
+  # Add coordinator-specific settings here if needed
+  enabled: true
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  log_dir: "./logs"
+  log_name: "ionbeam.log"
+
+# Source Scheduler Configuration
+scheduler:
+  enabled: true
+  windows:
+    # Example: Fetch ioncannon test data every 5 minutes for the last 1 hour
+    - source_name: "ioncannon"
+      window_size: "PT1H"  # 1 hour window (ISO 8601 duration)
+      trigger_interval: "PT5M"  # Trigger every 5 minutes
+      window_lag: "PT0S"  # No lag (fetch up to now)
+    
+    # Example: Fetch acronet data every 15 minutes for the last 1 hour, with 10 minute lag
+    - source_name: "acronet"
+      window_size: "PT1H"
+      trigger_interval: "PT15M"
+      window_lag: "PT10M"  # 10 minute lag to ensure data is available
+    
+    # Example: Fetch meteotracker data daily for the previous day
+    - source_name: "meteotracker"
+      window_size: "P1D"  # 1 day window
+      trigger_interval: "P1D"  # Trigger once per day
+      window_lag: "PT0S"
+    
+    # Example: Fetch sensor_community data every hour for the last 2 hours
+    - source_name: "sensor_community"
+      window_size: "PT2H"
+      trigger_interval: "PT1H"
+      window_lag: "PT5M"  # Small lag for data availability
+
+# Notes on scheduler configuration:
+# - source_name: Must match the name registered by the data source's trigger handler
+# - window_size: ISO 8601 duration for how much historical data to fetch
+# - trigger_interval: ISO 8601 duration for how often to trigger
+# - window_lag: ISO 8601 duration for the lag before the window end (helps ensure data availability)
+# 
+# ISO 8601 Duration Examples:
+# - PT5M = 5 minutes
+# - PT1H = 1 hour
+# - PT30M = 30 minutes
+# - P1D = 1 day
+# - PT12H = 12 hours
+# - P7D = 7 days
+#
+# The scheduler aligns triggers to UTC wall-clock boundaries. For example:
+# - PT5M interval triggers at :00, :05, :10, :15, etc.
+# - PT1H interval triggers at :00 of each hour
+# - P1D interval triggers at midnight UTC

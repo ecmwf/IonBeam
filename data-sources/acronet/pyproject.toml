@@ -1,0 +1,21 @@
+[project]
+name = "acronet"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.1.0",
+    "httpx>=0.28.1",
+    "ionbeam-client",
+    "numpy>=2.3.4",
+    "pandas>=2.3.3",
+    "pyyaml>=6.0.3",
+    "structlog>=25.5.0",
+]
+
+[tool.uv.sources]
+ionbeam-client = { workspace = true }
+
+[project.scripts]
+acronet = "acronet:main"

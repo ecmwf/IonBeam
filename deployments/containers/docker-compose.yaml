@@ -1,0 +1,273 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: ionbeam-rabbitmq
+    ports:
+      - "5672:5672"      # AMQP port
+      - "15672:15672"    # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data2:/var/lib/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 5s
+      timeout: 30s
+      retries: 3
+    networks:
+      - ionbeam-network
+
+  influxdb:
+    image: influxdb:2
+    container_name: ionbeam-influxdb
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: adminadmin
+      DOCKER_INFLUXDB_INIT_ORG: ecmwf
+      DOCKER_INFLUXDB_INIT_BUCKET: ionbeam
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ionbeam-admin-token
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ionbeam-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ionbeam-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ionbeam-network
+
+  ionbeam-core:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: ionbeam
+    container_name: ionbeam-core
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - IONBEAM_CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./config/ionbeam.yaml:/app/config.yaml:ro
+      - ./data:/data
+      - ./logs:/app/logs
+    ports:
+      - "8000:8000"  # Metrics endpoint
+    networks:
+      - ionbeam-network
+    restart: unless-stopped
+
+  ioncannon:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: ioncannon
+    container_name: ioncannon-datasource
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      ionbeam-core:
+        condition: service_started
+    environment:
+      - IONCANNON_CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./config/ioncannon.yaml:/app/config.yaml:ro
+      - ./data:/data
+    networks:
+      - ionbeam-network
+    restart: unless-stopped
+
+  acronet:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: acronet
+    container_name: acronet-datasource
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      ionbeam-core:
+        condition: service_started
+    environment:
+      - ACRONET_CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./config/acronet.yaml:/app/config.yaml:ro
+      - ./data:/data
+    networks:
+      - ionbeam-network
+    restart: unless-stopped
+
+  eumetnet:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: eumetnet
+    container_name: eumetnet-datasource
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      ionbeam-core:
+        condition: service_started
+    environment:
+      - EUMETNET_CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./config/eumetnet.yaml:/app/config.yaml:ro
+      - ./data:/data
+    networks:
+      - ionbeam-network
+    restart: unless-stopped
+
+  meteotracker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: meteotracker
+    container_name: meteotracker-datasource
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      ionbeam-core:
+        condition: service_started
+    environment:
+      - METEOTRACKER_CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./config/meteotracker.yaml:/app/config.yaml:ro
+      - ./data:/data
+    networks:
+      - ionbeam-network
+    restart: unless-stopped
+
+  # Sensor Community Data Source
+  sensor-community:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: sensor-community
+    container_name: sensor-community-datasource
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      ionbeam-core:
+        condition: service_started
+    environment:
+      - SENSOR_COMMUNITY_CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./config/sensor_community.yaml:/app/config.yaml:ro
+      - ./data:/data
+    networks:
+      - ionbeam-network
+    restart: unless-stopped
+
+  # PyGeoAPI Exporter
+  pygeoapi-exporter:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: pygeoapi
+    container_name: pygeoapi-exporter
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      ionbeam-core:
+        condition: service_started
+    environment:
+      - PYGEOAPI_CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./config/pygeoapi-exporter.yaml:/app/config.yaml:ro
+      - ./config/pygeoapi-config.yaml:/data/pygeoapi-config.yaml
+      - ./data:/data
+    networks:
+      - ionbeam-network
+    restart: unless-stopped
+
+  # ECMWF ODB Exporter
+  ecmwf-exporter:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: ecmwf
+    container_name: ecmwf-exporter
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      ionbeam-core:
+        condition: service_started
+    environment:
+      - ECMWF_CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./config/ecmwf-exporter.yaml:/app/config.yaml:ro
+      - ./data:/data
+    networks:
+      - ionbeam-network
+    restart: unless-stopped
+
+  # Legacy API Service
+  legacy-api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: legacy-api
+    container_name: legacy-api
+    depends_on:
+      ionbeam-core:
+        condition: service_started
+    environment:
+      - LEGACY_API_CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./config/legacy-api.yaml:/app/config.yaml:ro
+      - ./data:/data
+    ports:
+      - "8080:8080"
+    networks:
+      - ionbeam-network
+    restart: unless-stopped
+
+  pygeoapi:
+    image: pygeoapi_fix
+    container_name: pygeoapi
+    depends_on:
+      ionbeam-core:
+        condition: service_started
+    volumes:
+      - ./data:/data
+      - ./config/pygeoapi-config.yaml:/pygeoapi/local.config.yml:ro
+    ports:
+      - "5000:80"
+    networks:
+      - ionbeam-network
+    restart: unless-stopped
+
+volumes:
+  rabbitmq-data2:
+  influxdb-data:
+  influxdb-config:
+  redis-data:
+
+networks:
+  ionbeam-network:
+    driver: bridge

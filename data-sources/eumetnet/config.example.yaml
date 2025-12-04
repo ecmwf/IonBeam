@@ -1,0 +1,18 @@
+ionbeam:
+  amqp_url: "amqp://guest:guest@localhost:5672/"
+  connection_timeout: 30
+  max_retries: 3
+  retry_delay: 1.0
+  write_batch_size: 65536
+
+netatmo_mqtt:
+  host: "mqtt.example.com"
+  port: 8883
+  username: "your_username"
+  password: "your_password"
+  client_id: "ionbeam_netatmo_client"
+  keepalive: 120
+  use_tls: true
+  flush_interval_seconds: 60
+  flush_max_records: 50000
+  max_buffer_size: 200000

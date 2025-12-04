@@ -1,0 +1,9 @@
+source_name: "sensor.community"
+
+ionbeam:
+  amqp_url: "amqp://guest:guest@localhost:5672/"
+
+sensor_community:
+  base_url: "https://archive.sensor.community"
+  timeout_seconds: 60
+  concurrency: 10

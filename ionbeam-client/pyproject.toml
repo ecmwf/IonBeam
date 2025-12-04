@@ -1,0 +1,27 @@
+[project]
+name = "ionbeam-client"
+version = "0.1.0"
+description = "Client library for ingesting data into ionbeam"
+readme = "README.md"
+authors = [
+    { name = "Joshua Harwood", email = "joshua.harwood@ecmwf.int" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aio-pika>=9.5.7",
+    "numpy>=2.3.4",
+    "pandas>=2.3.3",
+    "pyarrow>=22.0.0",
+    "pydantic>=2.12.4",
+    "structlog>=25.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.4,<0.10.0"]
+build-backend = "uv_build"
