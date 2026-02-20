@@ -1,0 +1,24 @@
+[project]
+name = "netatmo-to-odb"
+version = "0.1.0"
+description = "Standalone CLI to convert NetAtmo archive tar.gz files to ECMWF ODB format"
+requires-python = ">=3.12"
+dependencies = [
+    "eumetnet",
+    "ecmwf",
+    "ionbeam-client",
+    "click>=8.0.0",
+    "structlog>=25.4.0",
+]
+
+[project.scripts]
+netatmo-to-odb = "netatmo_to_odb.cli:main"
+
+[tool.uv.sources]
+eumetnet = { workspace = true }
+ecmwf = { workspace = true }
+ionbeam-client = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

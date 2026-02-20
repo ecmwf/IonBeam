@@ -12,7 +12,8 @@ members = [
     "ionbeam",
     "ionbeam-legacy-api",
     "data-sources/*",
-    "exporters/*"
+    "exporters/*",
+    "tools/*",
 ]
 
 [tool.uv]
