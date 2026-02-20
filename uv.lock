@@ -1017,7 +1017,7 @@ provides-extras = ["dev"]
 [[package]]
 name = "ionbeam-legacy-api"
 version = "0.1.0"
-source = { virtual = "ionbeam-legacy-api" }
+source = { editable = "ionbeam-legacy-api" }
 dependencies = [
     { name = "click" },
     { name = "duckdb" },
