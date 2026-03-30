@@ -43,10 +43,10 @@ Observations are partitioned into fixed-duration time windows based on each data
 
 The system uses observation time to assign data to windows, but uses arrival time to determine whether the window should be built or continue waiting for additional data.
 
-Window Alignment
-~~~~~~~~~~~~~~~~
+Window Boundaries
+~~~~~~~~~~~~~~~~~
 
-All windows align to Unix epoch (1970-01-01T00:00:00Z) to ensure consistency across different ingestion runs. Given an observation timestamp, the window boundaries are computed by:
+All windows are computed deterministically from the Unix epoch (1970-01-01T00:00:00Z) to ensure consistency across different ingestion runs. Given an observation timestamp, the window boundaries are computed by:
 
 1. Calculate seconds since epoch
 2. Truncate to the nearest ``aggregation_span`` boundary
@@ -97,12 +97,14 @@ Window Rebuild Logic
 
 For each affected window:
 
-1. Compute ``desired_events = {all ingestion IDs overlapping this window}``
+1. Compute ``desired_events = {all ingestion operation UUIDs overlapping this window}``
 2. Hash the sorted ID list: ``desired_hash = sha256(sorted(desired_events))``
 3. Retrieve ``observed_hash`` from Redis (hash when last built)
 4. If ``desired_hash != observed_hash``, enqueue window for rebuild
 
-This deduplicates redundant rebuilds when the same data arrives multiple times.
+The hash is computed over **ingestion event IDs**, not over the observation data itself. If a new ingestion event covers the same data as a previous event, the new event's UUID changes the hash and a rebuild is enqueued—observations are upserted into the InfluxDB cache and the dataset is regenerated. Since the build queue maintains at most one entry per window per dataset, multiple rebuild triggers for the same window are coalesced into a single build execution.
+
+Deduplication currently operates at the ingestion-event level rather than at the individual datum level.
 
 Window Readiness
 ~~~~~~~~~~~~~~~~
@@ -150,7 +152,7 @@ For each dequeued window:
 3. Query InfluxDB for all observations in ``[window.start, window.end)``
 4. Stream results in 15-minute slices to avoid buffering large windows
 5. Convert each slice to Arrow RecordBatches matching the canonical schema
-6. Write batches incrementally to object storage as Arrow IPC
+6. Write batches incrementally to object storage as Arrow RecordBatches
 7. Publish ``DataSetAvailableEvent`` with the dataset location
 8. Update ``observed_hash`` to mark this window as current
 

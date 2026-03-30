@@ -105,7 +105,7 @@ The ``CanonicalVariable`` model parses column names back into structured metadat
     var.cf_unit        # "degC"
     var.level          # 2.0
     var.method         # "point"
-    var.period         # timedelta(0)
+    var.period         # "PT0S"
 
 This enables exporters to:
 
@@ -122,13 +122,13 @@ CF units can be converted using the ``cf_units`` library:
 
     import cf_units
     from ionbeam_client.models import CanonicalVariable
-    
+
     col = "air_temperature__degC__2.0__point__PT0S"
     var = CanonicalVariable.from_canonical_name(col)
-    
+
     from_unit = cf_units.Unit(var.cf_unit)  # degC
     to_unit = cf_units.Unit("K")             # Kelvin
-    
+
     values_k = from_unit.convert(df[col].to_numpy(), to_unit)
 
 See the ECMWF exporter for a complete example of unit conversion to ODB format.

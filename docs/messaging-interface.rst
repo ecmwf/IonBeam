@@ -5,7 +5,7 @@ Messaging Interface Specification
    
    This messaging interface is currently under active development and may change significantly in future versions. Do not rely on this as a stable interface yet.
 
-This document specifies the messaging contracts for implementing data sources and exporters in the ionbeam platform. The interface is transport-agnostic and message-oriented, using structured payloads serialized as JSON with binary data transferred via object storage.
+This document specifies the messaging contracts for implementing data sources and exporters in the ionbeam platform. The interface is transport-agnostic and message-oriented. Message envelopes are serialized as JSON. Data payloads are exchanged as Apache Arrow RecordBatch streams via object storage.
 
 .. note::
 
@@ -21,9 +21,11 @@ Message Contracts
 IngestDataCommand
 ~~~~~~~~~~~~~~~~~
 
+**Type:** Command (inbound)
+
 **Direction:** Data Source → Ionbeam Core
 
-**Purpose:** Submit raw observation data for ingestion.
+**Purpose:** Sent by a data source to submit raw observation data for ingestion. This is the primary input contract for data source implementors.
 
 **Schema:**
 
@@ -117,9 +119,11 @@ IngestDataCommand
 DataAvailableEvent
 ~~~~~~~~~~~~~~~~~~
 
+**Type:** Event (internal)
+
 **Direction:** Ionbeam Core (Ingestion Handler) → Ionbeam Core (Coordinator Handler)
 
-**Purpose:** Signal that raw observations have been validated and stored in the time series database.
+**Purpose:** Internal event signalling that raw observations have been validated and stored in the time series database.
 
 **Schema:**
 
@@ -154,14 +158,14 @@ DataAvailableEvent
       "end_time": "2024-01-01T13:00:00Z"
     }
 
-**Note:** This is an internal message not visible to external data sources or exporters.
-
 DataSetAvailableEvent
 ~~~~~~~~~~~~~~~~~~~~~
 
+**Type:** Event (outbound)
+
 **Direction:** Ionbeam Core (Builder Handler) → Exporters
 
-**Purpose:** Notify exporters that a complete, aggregated dataset is ready for consumption.
+**Purpose:** Received by exporters when a complete, aggregated dataset is ready for consumption. This is the primary input contract for exporter implementors.
 
 **Schema:**
 
@@ -216,9 +220,11 @@ DataSetAvailableEvent
 StartSourceCommand
 ~~~~~~~~~~~~~~~~~~
 
+**Type:** Command (inbound)
+
 **Direction:** External Scheduler → Data Source
 
-**Purpose:** Trigger a data source to fetch and ingest data for a specific time range.
+**Purpose:** Received by a data source to trigger fetching and ingesting data for a specific time range.
 
 **Schema:**
 
@@ -531,8 +537,8 @@ Binary data payloads use an S3-compatible object storage interface:
 
 **Key Patterns:**
 
-- Raw data: ``raw/{dataset_name}/{start}_{end}_{ingestion_time}``
-- Datasets: ``{dataset_name}/{window_start}_{aggregation}_{content_hash}``
+- Raw data: ``raw/{dataset_name}/{start}-{end}_{ingestion_time}``
+- Datasets: ``{dataset_name}/{window_start}_{aggregation_span}_{content_hash}``
 
 **Implementation Details:**
 
