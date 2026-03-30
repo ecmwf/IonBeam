@@ -1,0 +1,101 @@
+flowchart TB
+
+%% ---------------- External APIs ----------------
+subgraph EXT[External APIs]
+  direction TB
+  EXTNODE["IoT APIs<br/>MeteoTracker<br/>NetAtmo<br/>Sensor.Community<br/>etc."]
+end
+
+%% ---------------- Ionbeam Core ----------------
+subgraph CORE[Ionbeam]
+  direction TB
+
+  %% Data Sources
+  subgraph SOURCES[Data Sources]
+    direction TB
+    METEO["Data Source<br/>MeteoTracker"]
+    NETATMO["Data Source<br/>NetAtmo"]
+    SCOMM["Data Source<br/>Sensor.Community"]
+  end
+
+  %% Ionbeam Core Services
+  subgraph PIPELINE[Ionbeam Core]
+    direction TB
+    ING["Ingestion<br/>Handler"]
+    COORD["Coordinator<br/>Handler"]
+    BUILD["Builder<br/>Handler"]
+  end
+
+  %% Exporters
+  subgraph EXPORTERS[Exporters]
+    direction TB
+    ODB["ECMWF<br/>Exporter"]
+    PYGEO["PyGeoApi<br/>Exporter"]
+    LEGACY["Legacy Ionbeam API<br/>Exporter"]
+  end
+
+  %% Storage
+  FILES["Object Store<br/>Raw Data"]
+  CANFILES["Object Store<br/>Canonicalised Data"]
+  INFLUX["InfluxDB<br/>TSDB"]
+  REDIS["Redis<br/>Event Store"]
+
+end
+
+%% ---------------- Outputs ----------------
+subgraph OUTPUTS[Outputs]
+  direction TB
+  ODBF["ODB<br/>Files"]
+  PYGEOF["PyGeoApi Config<br/>+ GeoParquet"]
+  LEGACYF["Legacy Ionbeam API<br/>Output"]
+end
+
+%% ---------------- Connections ----------------
+METEO -.->|HTTP Requests| EXTNODE
+NETATMO -.->|MQTT Stream| EXTNODE
+SCOMM -.->|HTTP Requests| EXTNODE
+
+METEO -->|IngestDataCommand| ING
+NETATMO -->|IngestDataCommand| ING
+SCOMM -->|IngestDataCommand| ING
+
+METEO -.->|Stream Arrow record batches| FILES
+NETATMO -.->|Stream Arrow record batches| FILES
+SCOMM -.->|Stream Arrow record batches| FILES
+FILES -.->|Read Arrow record batches| ING
+ING -.->|Write Data Points| INFLUX
+
+ING -->|DataAvailableEvent| COORD
+COORD <-.->|Track Events & Enqueue Windows| REDIS
+BUILD -->|DataSetAvailableEvent| ODB
+BUILD -->|DataSetAvailableEvent| PYGEO
+BUILD -->|DataSetAvailableEvent| LEGACY
+
+REDIS -.->|Dequeue Windows| BUILD
+INFLUX -.->|Query Data| BUILD
+BUILD -.->|Write Canonicalised Arrow Dataset| CANFILES
+CANFILES -.->|Read Arrow Dataset| ODB
+CANFILES -.->|Read Arrow Dataset| PYGEO
+
+ODB -.->|Generate| ODBF
+PYGEO -.->|Generate| PYGEOF
+LEGACY -.->|Expose API| LEGACYF
+
+%% ---------------- Styling ----------------
+classDef service fill:#3A7CA5,stroke:#245E7A,stroke-width:2px,color:#FFFFFF;
+classDef storage fill:#5C677D,stroke:#3F4657,stroke-width:2px,color:#FFFFFF;
+classDef external fill:#B08900,stroke:#7A6200,stroke-width:2px,color:#FFFFFF;
+classDef output fill:#2F7D32,stroke:#1F5322,stroke-width:2px,color:#FFFFFF;
+
+class METEO,NETATMO,SCOMM,ING,COORD,BUILD,ODB,PYGEO,LEGACY service
+class INFLUX,REDIS,FILES,CANFILES storage
+class EXTNODE external
+class ODBF,PYGEOF,LEGACYF output
+
+%% Subgraph styling (neutral, theme-agnostic)
+style EXT fill:#E0E0E0,stroke:#9AA0A6,stroke-width:1px
+style CORE fill:#E0E0E0,stroke:#9AA0A6,stroke-width:1px
+style SOURCES fill:#E0E0E0,stroke:#9AA0A6,stroke-width:1px
+style PIPELINE fill:#E0E0E0,stroke:#9AA0A6,stroke-width:1px
+style EXPORTERS fill:#E0E0E0,stroke:#9AA0A6,stroke-width:1px
+style OUTPUTS fill:#E0E0E0,stroke:#9AA0A6,stroke-width:1px

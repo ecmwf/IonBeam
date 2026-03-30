@@ -1,0 +1,68 @@
+name: Documentation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - main
+  release:
+    types: [published]
+
+jobs:
+  build-docs:
+    if: ${{ github.event.action != 'closed' }}
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload-doc.outputs.artifact-id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Build documentation
+        run: |
+          uv sync --frozen --group docs
+          uv run sphinx-build -b html docs/ docs_out/
+      - name: Archive documentation
+        id: upload-doc
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-ionbeam
+          path: docs_out/
+
+  preview-publish-docs:
+    if: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' }}
+    needs: build-docs
+    uses: ecmwf/reusable-workflows/.github/workflows/pr-preview-publish.yml@main
+    with:
+      artifact-id: ${{ needs.build-docs.outputs.artifact-id }}
+      space: docs
+      name: dev-section
+      path: ionbeam/pull-requests
+      link-tag: PREVIEW-PUBLISH-IONBEAM
+      link-text: Documentation Preview
+    secrets:
+      sites-token: ${{ secrets.ECMWF_SITES_DOCS_DEV_SECTION_TOKEN }}
+
+  preview-unpublish-docs:
+    if: ${{ github.event_name == 'pull_request' && github.event.action == 'closed' }}
+    uses: ecmwf/reusable-workflows/.github/workflows/pr-preview-unpublish.yml@main
+    with:
+      space: docs
+      name: dev-section
+      path: ionbeam/pull-requests
+    secrets:
+      sites-token: ${{ secrets.ECMWF_SITES_DOCS_DEV_SECTION_TOKEN }}
+
+  publish-docs:
+    if: ${{ github.event_name == 'release' }}
+    needs: build-docs
+    uses: ecmwf/reusable-workflows/.github/workflows/docs-publish.yml@main
+    with:
+      artifact-id: ${{ needs.build-docs.outputs.artifact-id }}
+      space: docs
+      name: dev-section
+      path: ionbeam
+      id: ${{ github.event.release.tag_name }}
+    secrets:
+      sites-token: ${{ secrets.ECMWF_SITES_DOCS_DEV_SECTION_TOKEN }}
