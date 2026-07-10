@@ -11,7 +11,7 @@ dependencies = [
     "aio-pika>=9.5.7",
     "numpy>=2.3.4",
     "pandas>=2.3.3",
-    "pyarrow>=22.0.0",
+    "pyarrow>=23.0.1",
     "pydantic>=2.12.4",
     "structlog>=25.5.0",
 ]
