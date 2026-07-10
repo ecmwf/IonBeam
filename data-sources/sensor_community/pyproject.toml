@@ -13,7 +13,7 @@ dependencies = [
     "numpy>=2.2.1",
     "aiostream>=0.6.3",
     "beautifulsoup4>=4.12.3",
-    "lxml>=5.3.0",
+    "lxml>=6.1.0",
     "click>=8.1.0",
 ]
 

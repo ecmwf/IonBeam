@@ -8,7 +8,7 @@ dependencies = [
     "ionbeam-client",
     "pyyaml>=6.0.3",
     "pandas>=2.2.3",
-    "pyarrow>=19.0.0",
+    "pyarrow>=23.0.1",
     "geopandas>=1.0.0",
     "click>=8.1.0",
 ]
