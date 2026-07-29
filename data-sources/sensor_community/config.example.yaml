@@ -1,0 +1,11 @@
+source_name: "sensor.community"
+
+ionbeam:
+  flight_url: "grpc://localhost:8815"
+
+sensor_community:
+  base_url: "https://archive.sensor.community"
+  live_url: "https://data.sensor.community/static/v1/data.json"
+  poll_interval_seconds: 60
+  timeout_seconds: 60
+  concurrency: 10
