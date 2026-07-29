@@ -33,7 +33,16 @@ def test_unconfigured_dataset_falls_back_to_defaults():
     assert fallback.aggregation_span == timedelta(hours=1)
     assert fallback.seal_delay(timedelta(days=7)) == timedelta(days=7, hours=1)
 
-def test_aggregation_span_must_be_positive():
-    DatasetProductionConfig(aggregation_span=timedelta(minutes=10))
-    with pytest.raises(ValidationError):
-        DatasetProductionConfig(aggregation_span=timedelta(0))
+def test_aggregation_span_must_nest_windows_within_a_day():
+    # epoch-aligned windows of a day-dividing span never cross midnight, so a
+    # build's ib_day partition holds exactly that day's rows
+    for span in (timedelta(minutes=10), timedelta(hours=6), timedelta(days=1)):
+        DatasetProductionConfig(aggregation_span=span)
+    for span in (
+        timedelta(0),
+        timedelta(hours=7),          # drifts across midnight
+        timedelta(days=2),           # wider than a partition
+        timedelta(seconds=1.5),      # not whole seconds
+    ):
+        with pytest.raises(ValidationError):
+            DatasetProductionConfig(aggregation_span=span)
