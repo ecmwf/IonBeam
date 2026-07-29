@@ -5,9 +5,15 @@
 
 from .canonicalize import CanonicalBatch, canonicalize
 from .ingestion_handler import IngestionHandler
+from .dataset_coordinator_handler import (
+    DatasetCoordinatorHandler,
+    DatasetCoordinatorConfig,
+)
 
 __all__ = [
     "CanonicalBatch",
     "canonicalize",
     "IngestionHandler",
+    "DatasetCoordinatorHandler",
+    "DatasetCoordinatorConfig",
 ]
