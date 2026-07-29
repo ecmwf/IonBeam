@@ -13,6 +13,7 @@ members = [
     "ionbeam",
     "ionbeam-client",
     "ionbeam-monorepo",
+    "ioncannon",
     "meteotracker",
     "sensor-community",
 ]
@@ -786,6 +787,7 @@ source = { virtual = "." }
 data-sources = [
     { name = "acronet" },
     { name = "eumetnet" },
+    { name = "ioncannon" },
     { name = "meteotracker" },
     { name = "sensor-community" },
 ]
@@ -805,6 +807,7 @@ dev = [
 data-sources = [
     { name = "acronet", editable = "data-sources/acronet" },
     { name = "eumetnet", editable = "data-sources/eumetnet" },
+    { name = "ioncannon", editable = "data-sources/ioncannon" },
     { name = "meteotracker", editable = "data-sources/meteotracker" },
     { name = "sensor-community", editable = "data-sources/sensor_community" },
 ]
@@ -816,6 +819,27 @@ dev = [
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
     { name = "ruff", specifier = ">=0.14.5" },
+]
+
+[[package]]
+name = "ioncannon"
+version = "0.1.0"
+source = { editable = "data-sources/ioncannon" }
+dependencies = [
+    { name = "click" },
+    { name = "ionbeam-client" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.1.0" },
+    { name = "ionbeam-client", editable = "ionbeam-client" },
+    { name = "numpy", specifier = ">=2.2.1" },
+    { name = "pandas", specifier = ">=2.2.3" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 
 [[package]]

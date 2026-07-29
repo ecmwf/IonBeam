@@ -47,6 +47,7 @@ dev = [
 data-sources = [
     "acronet",
     "eumetnet",
+    "ioncannon",
     "meteotracker",
     "sensor-community",
 ]
@@ -56,5 +57,6 @@ ionbeam = { workspace = true }
 ionbeam-client = { workspace = true }
 acronet = { workspace = true }
 eumetnet = { workspace = true }
+ioncannon = { workspace = true }
 meteotracker = { workspace = true }
 sensor-community = { workspace = true }
