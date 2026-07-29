@@ -1,0 +1,40 @@
+[project]
+name = "ionbeam"
+version = "0.1.0"
+description = "Event-driven IoT data ingestion and aggregation platform"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ionbeam-client",
+    # structural coordinate-unit validation at registration must be
+    # deterministic at the Flight edge (the client lib treats it as optional)
+    "cf-units>=3.3.0",
+    "click>=8.0.0",
+    "dependency-injector[yaml]>=4.48.1",
+    "influxdb3-python>=0.9.0",
+    "isodate>=0.7.2",
+    "numpy>=2.3.2",
+    "pandas>=2.3.0",
+    "prometheus-client>=0.20.0",
+    "pyarrow>=22.0.0",
+    "pydantic>=2.11.7",
+    "redis>=6.4.0",
+    "structlog>=25.4.0",
+]
+
+[project.scripts]
+ionbeam = "ionbeam.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "moto[s3,server]>=5.0.0",
+]
+
+[tool.uv.sources]
+ionbeam-client = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.9.4,<0.10.0"]
+build-backend = "uv_build"
