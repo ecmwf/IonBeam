@@ -1,0 +1,10 @@
+# Local development only — not part of the deployment process (yet).
+.DS_Store
+containers/
+demo/
+docker-compose/
+local/
+k8s-test/
+
+# The chart is deployed by hand and stays local for now.
+helm/
