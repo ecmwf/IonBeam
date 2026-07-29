@@ -46,6 +46,7 @@ dev = [
 # Contents of the data-sources image (Dockerfile).
 data-sources = [
     "acronet",
+    "eumetnet",
     "meteotracker",
     "sensor-community",
 ]
@@ -54,5 +55,6 @@ data-sources = [
 ionbeam = { workspace = true }
 ionbeam-client = { workspace = true }
 acronet = { workspace = true }
+eumetnet = { workspace = true }
 meteotracker = { workspace = true }
 sensor-community = { workspace = true }

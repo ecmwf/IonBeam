@@ -1,0 +1,19 @@
+ionbeam:
+  flight_url: "grpc://localhost:8815"
+  retry_delay: 1.0
+  write_batch_size: 65536
+
+netatmo_mqtt:
+  host: "mqtt.example.com"
+  port: 8883
+  client_id: "ionbeam_netatmo_client"
+  # Credentials come from MQTT_USERNAME / MQTT_PASSWORD env vars (a k8s
+  # Secret in deployment). A value set here overrides the env var — local
+  # runs only.
+  # username: ""
+  # password: ""
+  keepalive: 120
+  use_tls: true
+  flush_interval_seconds: 60
+  flush_max_records: 50000
+  max_buffer_size: 200000
