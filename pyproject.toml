@@ -1,0 +1,43 @@
+[project]
+name = "ionbeam-monorepo"
+version = "0.1.0"
+description = "Ionbeam monorepo workspace"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv.workspace]
+members = [
+    "ionbeam-client",
+]
+
+[tool.uv]
+constraint-dependencies = [
+    "click>=8.1.0",
+    "pydantic>=2.11.0",
+    "pandas>=2.2.3",
+    "numpy>=2.2.0",
+    "pyarrow>=19.0.0",
+    "httpx>=0.28.0",
+    "pyyaml>=6.0.3",
+    "structlog>=25.4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "ionbeam-client/tests",
+]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[dependency-groups]
+# The packages under test; uv installs no workspace member without a declared edge.
+dev = [
+    "cf-units>=3.3.0",  # the client's unit-validation tests exercise the optional checks
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.14.5",
+    "ionbeam-client",
+]
+
+[tool.uv.sources]
+ionbeam-client = { workspace = true }
