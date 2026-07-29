@@ -10,7 +10,10 @@ members = [
     "ionbeam-client",
     "ionbeam",
     "data-sources/*",
+    "exporters/*",
 ]
+# Not a package: the provider module Dockerfile.pygeoapi copies into the server image.
+exclude = ["exporters/pygeoapi"]
 
 [tool.uv]
 constraint-dependencies = [
@@ -28,6 +31,7 @@ constraint-dependencies = [
 testpaths = [
     "ionbeam-client/tests",
     "ionbeam/tests",
+    "exporters/ecmwf/tests",
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
@@ -42,6 +46,7 @@ dev = [
     "ruff>=0.14.5",
     "ionbeam",
     "ionbeam-client",
+    "ecmwf",
 ]
 # Contents of the data-sources image (Dockerfile).
 data-sources = [
@@ -60,3 +65,4 @@ eumetnet = { workspace = true }
 ioncannon = { workspace = true }
 meteotracker = { workspace = true }
 sensor-community = { workspace = true }
+ecmwf = { workspace = true }
