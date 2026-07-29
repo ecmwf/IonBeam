@@ -1,0 +1,19 @@
+source_name: "acronet"
+
+ionbeam:
+  flight_url: "grpc://localhost:8815"
+
+acronet:
+  base_url: "https://webdrops.cimafoundation.org/app/"
+  token_endpoint: "https://testauth.cimafoundation.org/auth/realms/webdrops/protocol/openid-connect/token"
+  client_id: "webdrops"
+  # Credentials come from ACRONET_USERNAME / ACRONET_PASSWORD /
+  # ACRONET_CLIENT_SECRET env vars (a k8s Secret in deployment). A value set
+  # here overrides the env var — local runs only.
+  # username: ""
+  # password: ""
+  # client_secret: ""
+  timeout_seconds: 30.0
+  max_retries: 3
+  aggregation_minutes: 60
+  station_group: "ComuneLive%IChange"

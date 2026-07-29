@@ -9,6 +9,7 @@ dependencies = []
 members = [
     "ionbeam-client",
     "ionbeam",
+    "data-sources/*",
 ]
 
 [tool.uv]
@@ -42,7 +43,12 @@ dev = [
     "ionbeam",
     "ionbeam-client",
 ]
+# Contents of the data-sources image (Dockerfile).
+data-sources = [
+    "acronet",
+]
 
 [tool.uv.sources]
 ionbeam = { workspace = true }
 ionbeam-client = { workspace = true }
+acronet = { workspace = true }
