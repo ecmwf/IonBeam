@@ -46,9 +46,11 @@ dev = [
 # Contents of the data-sources image (Dockerfile).
 data-sources = [
     "acronet",
+    "meteotracker",
 ]
 
 [tool.uv.sources]
 ionbeam = { workspace = true }
 ionbeam-client = { workspace = true }
 acronet = { workspace = true }
+meteotracker = { workspace = true }

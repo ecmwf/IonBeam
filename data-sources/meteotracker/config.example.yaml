@@ -1,0 +1,11 @@
+source_name: "meteotracker"
+
+ionbeam:
+  flight_url: "grpc://localhost:8815"
+
+meteotracker:
+  # Credentials come from METEOTRACKER_USERNAME / METEOTRACKER_PASSWORD env
+  # vars (a k8s Secret in deployment). A value set here overrides the env
+  # var — local runs only.
+  # username: ""
+  # password: ""
