@@ -1,0 +1,87 @@
+# Ionbeam configuration (single service: public Arrow Flight endpoint)
+# For a zero-dependency local run see config.local.yaml
+
+# Informational defaults; the CLI flags win.
+flight:
+  host: "0.0.0.0"
+  port: 8815
+
+metrics:
+  port: 8000
+
+storage:
+  timeseries:
+    adapter: influx  # Options: influx, memory
+  influx:
+    host: "http://influxdb3:8181"
+    database: "ionbeam"
+    token: ""
+
+# Built datasets, stored as Arrow RecordBatch streams keyed by window.
+arrow_store:
+  type: local_filesystem
+  data_path: "./data/datasets"
+
+coordination:
+  record_store:
+    adapter: redis  # Options: redis, memory
+  queue:
+    adapter: redis  # Options: redis, memory
+  redis:  # any Redis-protocol server; Valkey recommended (redis-py client)
+    url: "redis://redis:6379/0"
+
+messaging:
+  adapter: redis  # Options: redis, memory. redis = durable cross-replica event bus
+
+dataset_coordinator:
+
+# Server-side, per-dataset production config. A source declares only its name,
+# schema, and version at ingestion; how the output dataset is built, presented,
+# revised, and finalised is decided here, keyed by dataset name. Datasets not
+# listed fall back to `defaults`.
+#
+#   aggregation_span     window duration (ISO 8601, e.g. PT1H)
+#   rebuild_debounce     provisional-phase trailing debounce: each straggler
+#                        defers the revision by this, so a wave rebuilds once,
+#                        shortly after it ends. Default PT0S (no debounce).
+#   finalize_after       final floor: once now >= window.end + this, the window is
+#                        immutable and later stragglers are dropped. Unset ⇒ the
+#                        hot-store retention (a window cannot be rebuilt from data
+#                        that has aged out of the time-series DB anyway).
+#   dedup_capacity       expected distinct row-contents per window (raw rows plus
+#                        revisions like a QC pass); sizes the per-window
+#                        redelivery-dedup filter. Default 100000.
+#   dedup_ingestion      write only novel row content to the time-series store.
+#                        For sweep sources that re-fetch history (meteotracker:
+#                        ~90% re-deliveries) this keeps stored volume near the
+#                        true data volume; leave off (default) for push feeds
+#                        whose deliveries are mostly new.
+datasets:
+  defaults:
+    aggregation_span: PT1H
+    rebuild_debounce: PT0S
+    # finalize_after: PT168H   # unset ⇒ hot-store retention
+  registry: {}
+    # acronet:
+    #   description: "IoT observations from the CIMA Acronet network."
+    #   aggregation_span: P1D
+    #   keywords: ["acronet", "iot", "weather"]
+    #   rebuild_debounce: PT10M
+    #   finalize_after: PT48H
+
+dataset_builder:
+  poll_interval_seconds: 3.0
+  concurrency: 2
+
+scheduler:
+  enabled: true
+  windows:
+    - source_name: "ioncannon"
+      window_size: "PT1H"        # ISO 8601 duration
+      trigger_interval: "PT15M"
+      window_lag: "PT10M"        # lag before window end (data availability)
+
+logging:
+  level: "INFO"
+  log_dir: "./logs"
+  log_name: "ionbeam.log"

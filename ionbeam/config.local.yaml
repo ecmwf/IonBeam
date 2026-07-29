@@ -1,0 +1,41 @@
+# Ionbeam configuration (local: in-memory adapters, no external dependencies)
+
+flight:
+  host: "0.0.0.0"
+  port: 8815
+
+metrics:
+  port: 8000
+
+storage:
+  timeseries:
+    adapter: memory  # Options: influx, memory
+
+arrow_store:
+  type: local_filesystem
+  data_path: "./data/datasets"
+
+coordination:
+  record_store:
+    adapter: memory  # Options: redis, memory
+  queue:
+    adapter: memory  # Options: redis, memory
+  redis:  # any Redis-protocol server; Valkey recommended (redis-py client)
+    url: "redis://localhost:6379/0"
+
+messaging:
+  adapter: memory  # Options: redis, memory. redis = durable cross-replica event bus
+
+dataset_coordinator:
+
+dataset_builder:
+  poll_interval_seconds: 1.0
+  concurrency: 2
+
+scheduler:
+  enabled: false
+
+logging:
+  level: "INFO"
+  log_dir: "./logs"
+  log_name: "ionbeam-local.log"
