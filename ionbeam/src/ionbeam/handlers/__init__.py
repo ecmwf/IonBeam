@@ -9,6 +9,7 @@ from .dataset_coordinator_handler import (
     DatasetCoordinatorHandler,
     DatasetCoordinatorConfig,
 )
+from .dataset_builder_handler import DatasetBuilderHandler, DatasetBuilderConfig
 
 __all__ = [
     "CanonicalBatch",
@@ -16,4 +17,6 @@ __all__ = [
     "IngestionHandler",
     "DatasetCoordinatorHandler",
     "DatasetCoordinatorConfig",
+    "DatasetBuilderHandler",
+    "DatasetBuilderConfig",
 ]
