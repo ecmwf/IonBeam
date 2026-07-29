@@ -35,6 +35,7 @@ asyncio_default_fixture_loop_scope = "function"
 # The packages under test; uv installs no workspace member without a declared edge.
 dev = [
     "cf-units>=3.3.0",  # the client's unit-validation tests exercise the optional checks
+    "moto[server]>=5.0.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.14.5",
