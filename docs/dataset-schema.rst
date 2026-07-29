@@ -2,133 +2,116 @@ Dataset Schema
 ==============
 
 .. warning::
-   
-   This schema is currently under active development and may change significantly in future versions. Do not rely on this as a stable interface yet.
 
-Datasets produced by IonBeam are stored in object storage with an Arrow RecordBatch interface (implemented as Parquet internally). Each dataset represents a single time window of aggregated observations following a canonical schema.
+   This schema is under active development and may change significantly. Do not rely on it as a stable contract yet.
 
-Arrow Schema
-------------
+Datasets produced by IonBeam are streamed to exporters as Arrow RecordBatches over the Flight endpoint (see :ref:`flight-interface:Reading Datasets (GetFlightInfo / DoGet)`). Each dataset represents a single time window of aggregated observations. Column names are plain identifiers; everything a consumer needs to interpret a column travels as Arrow field metadata, so a batch is self-describing without access to the source's code.
 
-All datasets conform to a fixed schema with required columns and variable columns based on the dataset's ingestion metadata.
+Declaring a Schema
+------------------
 
-Required Columns
-~~~~~~~~~~~~~~~~
+A source declares its dataset with ``IngestionMetadata``: the dataset name, a version, and a ``DatasetSchema`` listing the time axis, coordinates, variables, and tags, all by canonical name. A source renames its feed's raw columns inside its own transform, before the frames reach the client library.
 
-Every dataset includes these spatial and temporal dimensions:
+The ``ib_`` prefix is the platform's namespace and no declared name may use it. The declared time column is the phenomenon time — the actual UTC instant each observation is about, never a nominal, receipt, or reference time — and it keeps its declared name end-to-end; consumers locate it by its ``role=time`` field metadata, exactly as latitude and longitude are located by their axis and CRS metadata. Geographic datasets additionally gain the synthesized ``ib_geometry`` and ``ib_id`` columns at build time. Any other name is free, including the plain words a source's own standard uses (``time``, ``year``, ``source``, …), so a feed's native schema can be described as closely as its standard allows.
+
+.. code-block:: python
+
+    from ionbeam_client.models import (
+        CfSemantics, DatasetSchema, IngestionMetadata, Tag,
+        TimeCoordinate, Variable, geographic_point_coordinates,
+    )
+
+    metadata = IngestionMetadata(
+        version=1,
+        name="weather",
+        dataset_schema=DatasetSchema(
+            time=TimeCoordinate(),
+            coordinates=geographic_point_coordinates(),
+            variables=[
+                Variable(
+                    name="air_temperature",
+                    semantics=CfSemantics(standard_name="air_temperature", level=2.0,
+                                          cell_method="point", period="PT0S"),
+                    unit="degC",
+                ),
+            ],
+            tags=[Tag(name="station_id")],
+        ),
+    )
+
+Semantics
+---------
+
+A variable's governed identity is its ``semantics``: a typed model discriminated on ``scheme``. Each scheme uses its own standard's vocabulary and validates its own shape at declaration time.
+
+``CfSemantics``
+   ``standard_name`` from the CF Standard Name Table, with optional ``level`` (sensor height in metres), ``cell_method`` (CF Conventions §7.3), and ``period`` (ISO-8601 duration).
+
+A variable with no semantics is an ungoverned named column: it is stored and served normally, and exporters that match on semantics skip it.
+
+Exporters match variables on the *quantity* a declaration denotes. The ODB exporter reduces semantics through ``ecmwf.varno_map.quantity``, which drops ``level``, ``period``, and the point-vs-mean distinction while keeping quantity-changing methods (``sum``, ``minimum``, ``maximum``), then looks the result up in its in-code varno map. The map therefore never mirrors any source's declaration flavour. The declared ``unit`` is a sibling field, converted to each target's expected unit with ``cf_units``.
+
+Coordinates: CRS and Units
+--------------------------
+
+IonBeam interprets geographic coordinates in ``EPSG:4326``/``CRS84`` only, and does not reproject; a source in another CRS reprojects before ingesting. Coordinates declared with x/y axes in any other CRS are stored and served untouched, but every geo product (the GeoParquet projection, EDR, ODB geolocation) skips them, and registration logs a warning saying so.
+
+Coordinates whose values IonBeam interprets are structural, the same tier as the time axis, and their units are enforced at registration: a geographic x/y coordinate must declare a unit convertible to degrees, and a z coordinate carrying ``CfSemantics(standard_name="altitude")`` one convertible to metres. Registration fails otherwise. Exporters convert from the declared unit to their target's expected unit (the ODB exporter writes ``lat@hdr``/``lon@hdr`` in degrees and ``stalt@hdr`` in metres), so an altitude declared in feet is legal and arrives converted. Units on all other coordinates are validated best-effort: a warning when they do not parse, never a rejection.
+
+Arrow Field Metadata
+--------------------
+
+``canonical_record_batches`` aligns a source's frames to the declared schema and stamps each Arrow field:
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 20 60
+   :widths: 30 70
 
-   * - Column
-     - Arrow Type
-     - Description
-   * - ``timestamp``
-     - timestamp[ns, tz=UTC]
-     - Observation timestamp
-   * - ``latitude``
-     - float64
-     - Decimal degrees, range [-90, 90]
-   * - ``longitude``
-     - float64
-     - Decimal degrees, range [-180, 180]
+   * - Key
+     - Content
+   * - ``ionbeam.role``
+     - ``time`` | ``coordinate`` | ``value`` | ``tag``
+   * - ``ionbeam.axis`` / ``ionbeam.crs``
+     - Spatial role (``x``/``y``/``z``) and CRS for coordinates
+   * - ``ionbeam.semantics``
+     - The semantics model as canonical JSON, e.g. ``{"scheme":"cf","standard_name":"air_temperature","level":2.0}``
+   * - ``ionbeam.unit``
+     - Declared unit (UDUNITS string)
+   * - ``ionbeam.ancillary_of``
+     - Names of the variables this column qualifies (QC flags)
 
-Variable Columns
-~~~~~~~~~~~~~~~~
-
-Variable columns follow the canonical naming convention defined during ingestion. Each column name encodes CF metadata:
-
-**Format**: ``{standard_name}__{cf_unit}__{level}__{method}__{period}``
-
-**Components**:
-
-- ``standard_name``: CF standard name (e.g., ``air_temperature``, ``wind_speed``)
-- ``cf_unit``: CF-compliant unit (e.g., ``degC``, ``m_s-1``, ``percent``)
-- ``level``: Measurement height/depth in meters (e.g., ``2.0``, ``10.0``)
-- ``method``: Aggregation method (``point``, ``mean``, ``sum``, ``min``, ``max``)
-- ``period``: Averaging period in ISO 8601 duration (e.g., ``PT0S`` for instantaneous, ``PT1H`` for 1-hour mean)
-
-**Examples**:
-
-- ``air_temperature__degC__2.0__point__PT0S``: Air temperature at 2m, instantaneous observation
-- ``wind_speed__m_s-1__10.0__mean__PT1H``: Wind speed at 10m, 1-hour mean
-- ``relative_humidity__percent__2.0__point__PT0S``: Relative humidity at 2m, instantaneous
-- ``precipitation_amount__mm__0.0__sum__PT1H``: Precipitation accumulation at surface, hourly sum
-
-Metadata Columns
-~~~~~~~~~~~~~~~~
-
-Datasets may include metadata columns (tags/identifiers) that do not follow the canonical naming:
-
-- ``station_id``: Station identifier (string)
-- ``sensor_id``: Sensor identifier (string)
-- Other source-specific metadata as defined in ``metadata_variables``
-
-These columns are preserved from ingestion but do not include CF metadata in their names.
+Schema-level metadata carries ``ionbeam.schema_hash`` (the declared contract's hash, as returned by registration) and, on built datasets, ``ionbeam.dataset``, the server-side production descriptor.
 
 Reading Datasets
 ----------------
 
-From Export Handler
-~~~~~~~~~~~~~~~~~~~
-
-Exporters registered via ``IonbeamClient.register_export_handler()`` receive datasets as streaming Arrow batches:
+Exporters registered via ``IonbeamClient.register_export_handler()`` receive datasets as streaming Arrow batches and read structure and semantics back through ``ionbeam_client.schema_meta``:
 
 .. code-block:: python
 
-    from ionbeam_client.models import DataSetAvailableEvent
-    
+    from ionbeam_client.models import CfSemantics, DataSetAvailableEvent
+    from ionbeam_client.schema_meta import (
+        find_coordinates, semantics, time_field, unit, value_fields,
+    )
+
     async def export_handler(event: DataSetAvailableEvent, batch_stream):
-        # event.dataset_location: object storage key
-        # event.metadata.name: dataset name
-        # event.start_time / end_time: window bounds
-        
         async for batch in batch_stream:
-            # batch is pyarrow.RecordBatch
             schema = batch.schema
-            # schema.names: ['timestamp', 'latitude', 'longitude', 'air_temperature__degC__2.0__point__PT0S', ...]
-
-Parsing Column Names
---------------------
-
-The ``CanonicalVariable`` model parses column names back into structured metadata:
-
-.. code-block:: python
-
-    from ionbeam_client.models import CanonicalVariable
-    
-    col = "air_temperature__degC__2.0__point__PT0S"
-    var = CanonicalVariable.from_canonical_name(col)
-    
-    var.standard_name  # "air_temperature"
-    var.cf_unit        # "degC"
-    var.level          # 2.0
-    var.method         # "point"
-    var.period         # "PT0S"
-
-This enables exporters to:
-
-- Filter columns by variable type
-- Convert units using CF conventions
-- Map to target schema requirements (e.g., ODB varno)
+            t = time_field(schema)
+            lon = find_coordinates(schema, axis="x", crs_kind="geographic")
+            for field in value_fields(schema, primary_only=True):
+                sem = semantics(field)          # CfSemantics | None
+                declared_unit = unit(field)     # UDUNITS string
 
 Unit Conversion
 ---------------
 
-CF units can be converted using the ``cf_units`` library:
+Declared units convert with the ``cf_units`` library:
 
 .. code-block:: python
 
     import cf_units
-    from ionbeam_client.models import CanonicalVariable
 
-    col = "air_temperature__degC__2.0__point__PT0S"
-    var = CanonicalVariable.from_canonical_name(col)
-
-    from_unit = cf_units.Unit(var.cf_unit)  # degC
-    to_unit = cf_units.Unit("K")             # Kelvin
-
-    values_k = from_unit.convert(df[col].to_numpy(), to_unit)
+    values_k = cf_units.Unit("degC").convert(values, cf_units.Unit("K"))
 
 See the ECMWF exporter for a complete example of unit conversion to ODB format.

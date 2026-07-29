@@ -1,15 +1,14 @@
-Ionbeam
-=====================
+IonBeam
+=======
 
-**IonBeam** is an event-driven platform for **stream-based processing of IoT observations**. It provides real-time collection, transformation, and distribution of environmental monitoring data from diverse IoT sources.
-The platform implements a message-driven pipeline that:
+IonBeam is an orchestration system for bringing IoT and other unconventional observations into meteorological workflows. Behind a single Arrow Flight endpoint, the core service:
 
-* Ingests observational data from multiple sources such as REST APIs, MQTT brokers, and file servers
-* Transforms and validates observations using standardized data models aligned with CF (Climate and Forecast) conventions
-* Aggregates data into configurable time windows for efficient querying
-* Exports processed data to multiple formats and systems simultaneously (e.g., ODB, GeoParquet)
+* Schedules data sources and ingests the observation streams they push
+* Validates and normalises observations into a canonical, self-describing schema; variables optionally carry typed semantics from a governed vocabulary, such as CF (Climate and Forecast) standard names
+* Builds time-windowed datasets and rebuilds them as late data arrives
+* Publishes built datasets as canonical GeoParquet, pushing availability events to subscribed exporters and streaming the data back to them over Flight
 
-Built on event-sourcing principles, IonBeam captures incoming observations as immutable events. These events are processed into specialized, query-optimized read models tailored to downstream use cases. This architecture decouples ingestion from export concerns, enabling independent scaling and evolution of each component.
+Data sources and exporters run as separate Flight clients built on a shared client library, so new ones are added without changing the core. Every component runs with any number of replicas (:ref:`architecture:Scaling`).
 
 .. toctree::
    :maxdepth: 2
@@ -17,6 +16,6 @@ Built on event-sourcing principles, IonBeam captures incoming observations as im
 
    architecture
    domain
-   messaging-interface
+   flight-interface
    dataset-schema
    ionbeam-client/index

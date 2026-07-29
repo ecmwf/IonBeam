@@ -50,6 +50,12 @@ dev = [
     "ionbeam-client",
     "ecmwf",
 ]
+docs = [
+    "sphinx>=8.2.3",
+    "sphinxcontrib-mermaid>=1.1.0",
+    "pydata-sphinx-theme>=0.16.1",
+    "ionbeam-client",
+]
 # Contents of the data-sources image (Dockerfile).
 data-sources = [
     "acronet",
