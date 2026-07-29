@@ -32,6 +32,7 @@ testpaths = [
     "ionbeam-client/tests",
     "ionbeam/tests",
     "exporters/ecmwf/tests",
+    "exporters/pygeoapi/tests",
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

@@ -1,0 +1,20 @@
+# Allowlist: the images build from the workspace manifests and member sources
+# only — everything else stays out of the build context.
+*
+!pyproject.toml
+!uv.lock
+!ionbeam
+!ionbeam-client
+!ionbeam-legacy-api
+!data-sources
+!exporters
+
+# Junk inside the allowed trees.
+**/node_modules
+**/__pycache__
+**/.venv
+**/.pytest_cache
+**/.mypy_cache
+**/*.egg-info
+**/dist
+**/build

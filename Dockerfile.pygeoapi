@@ -1,0 +1,29 @@
+# pygeoapi web server for ionbeam: the upstream image plus geopandas/pyarrow/s3fs
+# so its Parquet provider can read the canonical GeoParquet dataset windows
+# straight from the object store (or a mounted volume). gunicorn goes in the venv
+# so the entrypoint resolves it there and sees both the system pygeoapi install
+# and the extra packages.
+FROM geopython/pygeoapi:0.23.4
+
+# s3fs is floor-pinned: unconstrained, pip backtracks to a 2019-era s3fs that
+# is incompatible with the aiobotocore it resolves next to it.
+RUN python3 -m venv --system-site-packages /venv \
+    && /venv/bin/python3 -m pip install --no-cache-dir geopandas pyarrow "s3fs>=2024.10" gunicorn
+
+# Canonical-store provider: upstream's Parquet provider with the s3fs path
+# replaced by pyarrow-native S3 (SeaweedFS versioned buckets break s3fs's
+# file/dir detection).
+COPY exporters/pygeoapi/ionbeam_parquet.py /venv/lib/python3.12/site-packages/ionbeam_parquet.py
+
+ENV PATH="/venv/bin:${PATH}"
+
+# The upstream default is gevent workers, whose monkey-patching breaks the
+# s3fs/fsspec event-loop machinery the Parquet provider relies on ("Calling
+# sync() from within a running loop"). Plain sync workers read S3 fine.
+ENV WSGI_WORKER_CLASS=sync
+
+# Collections whose dataset has no built windows yet fail provider init; skip
+# them in the startup OpenAPI generation instead of refusing to boot — they
+# serve as soon as their first window lands.
+ENV PYGEOAPI_OPENAPI_GENERATE_FAIL_ON_INVALID_COLLECTION=false
+
