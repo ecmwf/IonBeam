@@ -16,7 +16,7 @@ from ionbeam.builds import (
     stored_builds,
     superseded,
 )
-from ionbeam.models import Window, WindowBuildState
+from ionbeam.provenance import Window, WindowBuildState
 from ionbeam.storage.arrow_store import LocalFileSystemStore, StoredObject
 
 WINDOW = Window("acronet", datetime(2024, 1, 1, 10, tzinfo=timezone.utc), timedelta(hours=1))
@@ -37,10 +37,10 @@ def _stored(
 
 def test_a_build_is_one_file_under_its_windows_day():
     assert build_file_key(WINDOW, 3, HASH) == (
-        "acronet/20240101/20240101T100000_PT1H-v3-3f9c2a1b"
+        "acronet/ib_year=2024/ib_month=01/ib_day=01/20240101T100000_PT1H-v3-3f9c2a1b"
     )
     assert build_file_key(DAY, 1, HASH) == (
-        "acronet/20240101/20240101T000000_P1D-v1-3f9c2a1b"
+        "acronet/ib_year=2024/ib_month=01/ib_day=01/20240101T000000_P1D-v1-3f9c2a1b"
     )
     assert manifest_key(WINDOW) == "acronet/_manifests/20240101T100000_PT1H.json"
 
@@ -50,14 +50,6 @@ def test_parse_build_round_trips_and_rejects_foreign_keys():
     assert parse_build(key) == (("acronet", "20240101T000000_P1D"), 7)
     assert parse_build("acronet/_manifests/20240101T000000_P1D.json") is None
     assert parse_build("acronet/oddball") is None
-
-
-def test_parse_build_also_accepts_the_legacy_flat_layout():
-    # a build written before day-partitioning still parses to the same
-    # (dataset, window) identity, so its history and reaping keep working
-    # through the retention overlap.
-    flat = "acronet/20240101T000000_P1D-v7-3f9c2a1b"
-    assert parse_build(flat) == (("acronet", "20240101T000000_P1D"), 7)
 
 
 def test_next_version_advances_past_both_state_and_store():
@@ -148,10 +140,12 @@ async def test_current_build_keys_and_stored_builds_find_builds_by_day(tmp_path)
     }
 
 
-def test_builds_fan_out_across_day_directories():
-    # Every build sits under a <dataset>/<YYYYMMDD>/ directory, so a dataset's
-    # objects spread across day-dirs instead of one flat prefix an S3 lister
-    # short-pages — no directory grows unbounded with a week of hourly builds.
+def test_builds_fan_out_across_day_partitions():
+    # Every build sits under its start day's hive partition, so a dataset's
+    # objects spread across day directories instead of one flat prefix an S3
+    # lister short-pages — no directory grows unbounded with a week of hourly
+    # builds. The partition keys live in the reserved ib_ namespace, so no
+    # declared column can collide with them.
     import re
     from collections import Counter
 
@@ -166,5 +160,8 @@ def test_builds_fan_out_across_day_directories():
         for version in (1, 2, 3)
     ]
     directories = Counter(key.rsplit("/", 1)[0] for key in keys)
-    assert all(re.fullmatch(r"[^/]+/\d{8}", d) for d in directories)
+    assert all(
+        re.fullmatch(r"[^/]+/ib_year=\d{4}/ib_month=\d{2}/ib_day=\d{2}", d)
+        for d in directories
+    )
     assert max(directories.values()) <= 24 * 3

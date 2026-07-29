@@ -47,12 +47,15 @@ async def run_app(config_path: str):
 
     shutdown_event = asyncio.Event()
 
-    def signal_handler(signum, frame):
+    def request_shutdown(signum: int) -> None:
         logger.info("Received shutdown signal", signal=signum)
         shutdown_event.set()
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # loop-aware handlers: a raw signal.signal handler sets the event without
+    # waking the selector, stalling shutdown until the next dataset event
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, request_shutdown, sig)
 
     logger.info(
         "Starting ECMWF ODB exporter",

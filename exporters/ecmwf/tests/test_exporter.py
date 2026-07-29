@@ -17,7 +17,7 @@ import pyarrow.flight as flight
 import pyodc
 import pytest
 
-from ionbeam_client.arrow_tools import canonical_arrow_schema
+from ionbeam_client.canonical_stream import canonical_arrow_schema
 from ionbeam_client.models import (
     CfSemantics,
     Coordinate,
@@ -53,10 +53,10 @@ TEST_VARIABLE_MAP = [
 
 CYCLE = timedelta(hours=6)
 
-# <dataset>/<YYYYMMDD>/<start stamp>_<span>-v<version>-<hash>
+# <dataset>/ib_year=YYYY/ib_month=MM/ib_day=DD/<start stamp>_<span>-v<version>-<hash>
 _BUILD = re.compile(
-    r"^(?P<dataset>[^/]+)/(?:\d{8}/)?(?P<window>\d{8}T\d{6}_[^-/]+)"
-    r"-v(?P<version>\d+)-[0-9a-f]+$"
+    r"^(?P<dataset>[^/]+)/ib_year=\d{4}/ib_month=\d{2}/ib_day=\d{2}/"
+    r"(?P<window>\d{8}T\d{6}_[^-/]+)-v(?P<version>\d+)-[0-9a-f]+$"
 )
 
 
@@ -125,8 +125,8 @@ class FakeFlight:
 
 
 @pytest.fixture
-def connection(mock_arrow_store) -> FakeFlight:
-    return FakeFlight(mock_arrow_store)
+def connection(arrow_store) -> FakeFlight:
+    return FakeFlight(arrow_store)
 
 
 @pytest.fixture
@@ -197,7 +197,8 @@ def _sample_df() -> pd.DataFrame:
 
 def _build_key(start: datetime, *, dataset: str = "test", span: str = "PT1H",
                version: int = 1, digest: str = "deadbeef") -> str:
-    return f"{dataset}/{start:%Y%m%d}/{start:%Y%m%dT%H%M%S}_{span}-v{version}-{digest}"
+    return (f"{dataset}/{start:ib_year=%Y/ib_month=%m/ib_day=%d}/"
+            f"{start:%Y%m%dT%H%M%S}_{span}-v{version}-{digest}")
 
 
 @pytest.fixture
@@ -502,11 +503,10 @@ class TestODBExporter:
         write_build,
         temp_data_path: Path,
     ) -> None:
-        """The whole point: a replay delivers a cycle's windows out of order,
-        the cycle-closing window first. Because a build reads the cycle's current
-        builds from the store, every window reaches the delivered file regardless
-        of arrival order — the case the old index+finalize design silently
-        truncated."""
+        """A replay delivers a cycle's windows out of order, the cycle-closing
+        window first. Because a build reads the cycle's current builds from the
+        store, every window reaches the delivered file regardless of arrival
+        order."""
         for hour in range(6):
             await write_build(T0 + timedelta(hours=hour))
 
@@ -692,7 +692,7 @@ class TestODBExporter:
         odb_exporter: ODBExporter,
         connection: FakeFlight,
         sample_ingestion_metadata: IngestionMetadata,
-        mock_arrow_store,
+        arrow_store,
         temp_data_path: Path,
     ) -> None:
         """A window build spanning several batches encodes them in order; only a
@@ -728,7 +728,7 @@ class TestODBExporter:
             )
 
         # two batches under one window build: good (nonzero, not rejected) then poor
-        mock_arrow_store._storage[_build_key(T0)] = [batch(0, 1), batch(1, 3)]
+        arrow_store._storage[_build_key(T0)] = [batch(0, 1), batch(1, 3)]
         odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
 
         odb_df = pyodc.read_odb(_cycle_file(temp_data_path), single=True)

@@ -10,7 +10,7 @@ from uuid import UUID
 import pandas as pd
 import structlog
 from ionbeam_client import IonbeamClient
-from ionbeam_client.arrow_tools import canonical_record_batches
+from ionbeam_client.canonical_stream import canonical_record_batches
 from ionbeam_client.models import (
     DatasetSchema,
     IngestionMetadata,
@@ -34,10 +34,6 @@ class IonCannonSource:
         self.logger = structlog.get_logger(__name__)
 
         self.metadata: IngestionMetadata = IngestionMetadata(
-            # v2: typed semantics (CfSemantics) instead of the stringly
-            # scheme/standard_name/attrs trio.
-            # v3: relative_humidity unit corrected to % — the generator emits
-            # 0-100; the v2 label "1" was wrong for the same values.
             version=3,
             name="ioncannon",
             dataset_schema=DatasetSchema(
@@ -134,8 +130,7 @@ class IonCannonSource:
 
         async def dataframe_stream() -> AsyncIterator[pd.DataFrame]:
             async for df in self.generate_data_chunk(start_time, end_time):
-                if df is not None and not df.empty:
-                    yield df
+                yield df
 
         batch_stream = canonical_record_batches(dataframe_stream(), self.metadata)
 

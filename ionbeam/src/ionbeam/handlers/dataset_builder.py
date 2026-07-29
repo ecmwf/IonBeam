@@ -11,10 +11,10 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import structlog
-from ionbeam_client.arrow_tools import canonical_arrow_schema
+from ionbeam_client.canonical_stream import canonical_arrow_schema
 from ionbeam_client.geo import geospatial_projection
 from ionbeam_client.models import DataSetAvailableEvent, IngestionMetadata
-from ionbeam_client.schema_meta import BUILD
+from ionbeam_client.schema_metadata import BUILD
 from pydantic import BaseModel, ValidationError
 
 from ionbeam import __version__
@@ -25,7 +25,7 @@ from ionbeam.builds import (
     stored_builds,
 )
 from ionbeam.datasets import DatasetRegistry
-from ionbeam.models import (
+from ionbeam.provenance import (
     ManifestBuild,
     ManifestRecord,
     RecordSet,
@@ -37,7 +37,7 @@ from ionbeam.models import (
 from ionbeam.observability import BuilderMetrics
 from ionbeam.storage.arrow_store import ArrowStore
 from ionbeam.storage.build_queue import BuildQueue
-from ionbeam.storage.ingestion_record_store import IngestionRecordStore
+from ionbeam.storage.coordination_store import CoordinationStore
 from ionbeam.storage.timeseries import RECORD_ID_COLUMN, TimeSeriesDatabase
 
 
@@ -96,20 +96,20 @@ class DatasetBuilderConfig(BaseModel):
     enabled: bool = True
     poll_interval_seconds: float = 3.0
     concurrency: int = 1
-    retention: timedelta = timedelta(days=7)  # default final floor when a dataset sets none
-    # A failing build (usually a timed-out/overloaded query) re-enqueues with an
-    # exponential backoff so it stops hammering a struggling DB, and is dropped
-    # after max_build_attempts so one poisoned window can't retry forever.
-    max_build_attempts: int = 5
+    retention: timedelta = timedelta(days=7)  # the hot-store horizon and final floor
+    # A failing build re-enqueues with exponential backoff, then parks on the
+    # dead-letter set after max_build_attempts. The budget must ride out a
+    # multi-hour store outage: 12 attempts at a 600s cap spans ~3.5h.
+    max_build_attempts: int = 12
     retry_backoff_base_seconds: float = 5.0
-    retry_backoff_max_seconds: float = 300.0
+    retry_backoff_max_seconds: float = 600.0
 
 
-class DatasetBuilderHandler:
+class DatasetBuilder:
     def __init__(
         self,
         config: DatasetBuilderConfig,
-        record_store: IngestionRecordStore,
+        record_store: CoordinationStore,
         queue: BuildQueue,
         timeseries_db: TimeSeriesDatabase,
         builder_metrics: BuilderMetrics,
@@ -133,10 +133,10 @@ class DatasetBuilderHandler:
         self.logger = structlog.get_logger(__name__)
 
     def _is_final(self, window: Window) -> bool:
-        """A window is final once its finalize delay has passed — after which its
-        build is immutable and no further revisions will be published."""
-        delay = self._registry.get(window.dataset).finalize_delay(self.config.retention)
-        return datetime.now(timezone.utc) >= window.end + delay
+        """A window is final once the hot-store retention has passed — after
+        which its build is immutable and no further revisions will be
+        published."""
+        return datetime.now(timezone.utc) >= window.end + self.config.retention
 
     def _next_claim_floor(self, window: Window) -> datetime:
         return datetime.now(timezone.utc) + self._registry.get(
@@ -164,8 +164,8 @@ class DatasetBuilderHandler:
                 return
 
             if not desired.ids:
-                # a finalize pass can force-schedule a window no record
-                # delivered rows into; there is nothing to publish
+                # a queued window can outlive its desired set's TTL; there is
+                # nothing left to publish
                 self.logger.info("No records for window", window=window.dataset_key)
                 await self._settle(window)
                 return
@@ -183,7 +183,7 @@ class DatasetBuilderHandler:
             version = next_version(
                 state, await stored_builds(self.arrow_store, window)
             )
-            dataset_event, dataset_locations, total_rows = await self._build_dataset_files(
+            dataset_event, total_rows = await self._build_dataset_files(
                 window, records, metadata, desired, is_final, version
             )
 
@@ -196,7 +196,6 @@ class DatasetBuilderHandler:
                     record_ids_hash=desired.hash,
                     version=version,
                     timestamp=datetime.now(timezone.utc),
-                    dataset_locations=dataset_locations,
                     total_rows=total_rows,
                 ),
             )
@@ -232,20 +231,19 @@ class DatasetBuilderHandler:
         await self._defer_window(window, "exception")
 
     async def _defer_window(self, window: Window, reason: str) -> None:
-        """Back off and re-enqueue a window that couldn't build now — a struggling DB
-        or a transient missing-metadata gap — so it isn't hammered; drop it after
-        ``max_build_attempts`` so one poisoned window can't retry forever. The backoff
-        holds this worker slot, throttling the builder globally while things recover."""
+        """Release the lease and reschedule with exponential backoff. The queue
+        holds the delay, so a failing window never blocks a worker slot; drop it
+        after ``max_build_attempts`` so one poisoned window can't retry forever."""
         key = window.dataset_key
         attempts = self._attempts.get(key, 0) + 1
         self._attempts[key] = attempts
 
         if attempts >= self.config.max_build_attempts:
             self._attempts.pop(key, None)
-            await self.queue.complete(window, self._next_claim_floor(window))
-            self._metrics.requeued(window.dataset, "dropped")
+            await self.queue.park(window, self._next_claim_floor(window))
+            self._metrics.requeued(window.dataset, "parked")
             self.logger.error(
-                "Dropping window after repeated failures",
+                "Parking window after repeated failures",
                 window=key,
                 reason=reason,
                 attempts=attempts,
@@ -256,12 +254,9 @@ class DatasetBuilderHandler:
             self.config.retry_backoff_max_seconds,
             self.config.retry_backoff_base_seconds * (2 ** (attempts - 1)),
         )
-        # wake early on shutdown so a long backoff never holds stop() hostage
-        try:
-            await asyncio.wait_for(self._stop.wait(), timeout=backoff)
-        except asyncio.TimeoutError:
-            pass
-        await self.queue.requeue(window, datetime.now(timezone.utc))
+        await self.queue.requeue(
+            window, datetime.now(timezone.utc) + timedelta(seconds=backoff)
+        )
         self._metrics.requeued(window.dataset, reason)
 
     def _record_precedence(
@@ -284,7 +279,7 @@ class DatasetBuilderHandler:
         desired: RecordSet,
         is_final: bool,
         version: int,
-    ) -> tuple[DataSetAvailableEvent, list[str], int]:
+    ) -> tuple[DataSetAvailableEvent, int]:
         desired_hash = desired.hash
         dataset_metadata = self._registry.get(window.dataset).output_metadata(window.dataset)
 
@@ -387,7 +382,6 @@ class DatasetBuilderHandler:
             built_at=datetime.now(timezone.utc),
             record_ids_hash=desired_hash,
             schema_hash=metadata.schema_hash(),
-            source="record_set",
             total_rows=total_rows,
             is_final=is_final,
             ionbeam_version=__version__,
@@ -435,25 +429,24 @@ class DatasetBuilderHandler:
             end_time=window.end,
             is_final=is_final,
         )
-        return event, locations, int(total_rows)
+        return event, int(total_rows)
 
     @staticmethod
     def _manifest_records(
         records: list[IngestionRecord], desired: RecordSet
     ) -> list[ManifestRecord]:
+        # every desired id resolved: _record_precedence already deferred the
+        # build if any registration had expired
         by_id = {str(record.id): record for record in records}
-        manifest_records = []
-        for record_id in sorted(desired.ids):
-            record = by_id.get(record_id)
-            manifest_records.append(
-                ManifestRecord(
-                    id=record_id,
-                    start_time=record.start_time if record else None,
-                    end_time=record.end_time if record else None,
-                    arrived_at=record.arrived_at if record else None,
-                )
+        return [
+            ManifestRecord(
+                id=record_id,
+                start_time=by_id[record_id].start_time,
+                end_time=by_id[record_id].end_time,
+                arrived_at=by_id[record_id].arrived_at,
             )
-        return manifest_records
+            for record_id in sorted(desired.ids)
+        ]
 
     async def _write_manifest(
         self, window: Window, metadata: IngestionMetadata, build: ManifestBuild

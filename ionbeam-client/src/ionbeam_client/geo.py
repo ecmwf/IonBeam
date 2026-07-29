@@ -25,7 +25,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from .schema_meta import find_coordinates, tag_fields, time_field
+from .schema_metadata import find_coordinates, tag_fields, time_field
 
 GEOMETRY_FIELD = "ib_geometry"
 ID_FIELD = "ib_id"
@@ -105,11 +105,11 @@ def _wkb_points(x: np.ndarray, y: np.ndarray) -> pa.Array:
 
 
 def _row_ids(batch: pa.RecordBatch, time_name: str, identity_names: list[str]) -> pa.Array:
-    # Arrow-native join of the identity columns (no pandas, no per-row axis=1 loop);
-    # the sha1 stays per-row but over an Arrow-joined string.
     parts = [batch.column(name).cast(pa.string()) for name in identity_names]
+    # \x00 cannot occur in a canonical string value, so a null identity column
+    # never collides with an empty one.
     joined = pc.binary_join_element_wise(
-        *parts, "\x1f", null_handling="replace", null_replacement=""
+        *parts, "\x1f", null_handling="replace", null_replacement="\x00"
     )
     hashes = pa.array(
         [hashlib.sha1(value.encode()).hexdigest()[:16] for value in joined.to_pylist()],
@@ -132,7 +132,7 @@ def geospatial_projection(schema: pa.Schema):
     For a geographic dataset the schema gains ``geometry``/``id`` fields plus the
     GeoParquet ``geo`` metadata, and ``transform`` appends those two columns to
     each record batch. For a non-geographic dataset the schema is returned
-    unchanged and ``transform`` is ``None`` (the profile gate)."""
+    unchanged and ``transform`` is ``None``."""
     axes = geographic_axes(schema)
     if axes is None:
         return schema, None

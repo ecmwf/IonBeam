@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
 # SPDX-License-Identifier: Apache-2.0
 
-from . import arrow_tools, models, schema_meta, schemes
-from .arrow_tools import canonical_record_batches
+from . import canonical_stream, models, schema_metadata, schemes
+from .canonical_stream import canonical_record_batches
 from .client import ExportHandler, IngestRejected, IonbeamClient, TriggerHandler
 from .config import IonbeamClientConfig
-from .dataframe_tools import align_to_schema, coerce_types
+from .alignment import align_to_schema, coerce_types
 from .models import (
     CfSemantics,
     Coordinate,
@@ -45,7 +45,7 @@ __all__ = [
     "Variable",
     "geographic_point_coordinates",
     "models",
-    "arrow_tools",
-    "schema_meta",
+    "canonical_stream",
+    "schema_metadata",
     "schemes",
 ]

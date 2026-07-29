@@ -10,7 +10,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, model_validator
 
-FeatureType = Literal["point", "timeSeries", "trajectory", "profile", "grid", "custom"]
 
 # "datetime" permits secondary time columns (forecast reference time, QC-processing
 # time) as ordinary coordinates/variables; DatasetSchema.time remains the single
@@ -64,9 +63,9 @@ class DeclaredColumn(BaseModel):
 
     A source's raw column names never reach this contract: whatever a feed calls
     its columns is renamed inside the source's own transform, and frames arrive
-    at the client edge already canonical. Unknown fields are rejected so a stale
-    declaration (e.g. the pre-union ``standard_name``/``attrs``) fails loudly
-    instead of silently carrying no semantics."""
+    at the client edge already canonical. Unknown fields are rejected so a
+    declaration in an outdated shape fails loudly instead of silently carrying
+    no semantics."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -213,17 +212,9 @@ class DatasetMetadata(BaseModel):
 
     name: str
     description: str = ""
-    feature_type: FeatureType = "timeSeries"
     aggregation_span: timedelta = timedelta(days=1)
     source_links: list[Link] = []
     keywords: list[str] = []
-    max_rows_per_window: Optional[int] = None  # required when feature_type == "grid"
-
-    @model_validator(mode="after")
-    def _grid_budget(self) -> "DatasetMetadata":
-        if self.feature_type == "grid" and self.max_rows_per_window is None:
-            raise ValueError("feature_type='grid' requires max_rows_per_window")
-        return self
 
 
 class IngestionMetadata(BaseModel):

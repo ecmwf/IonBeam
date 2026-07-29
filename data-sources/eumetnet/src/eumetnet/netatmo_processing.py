@@ -10,8 +10,8 @@ import pandas as pd
 import pyarrow as pa
 import structlog
 
-from ionbeam_client.arrow_tools import canonical_record_batches
-from ionbeam_client.dataframe_tools import drop_undeclared_columns
+from ionbeam_client.canonical_stream import canonical_record_batches
+from ionbeam_client.alignment import drop_undeclared_columns
 
 from .netatmo_metadata import PARAMETER_COLUMNS
 from ionbeam_client.models import IngestionMetadata

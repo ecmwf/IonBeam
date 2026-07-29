@@ -20,8 +20,8 @@ from aiostream import stream
 from bs4 import BeautifulSoup
 from httpx_retries import Retry, RetryTransport
 from ionbeam_client import IonbeamClient
-from ionbeam_client.arrow_tools import canonical_record_batches
-from ionbeam_client.dataframe_tools import drop_undeclared_columns
+from ionbeam_client.canonical_stream import canonical_record_batches
+from ionbeam_client.alignment import drop_undeclared_columns
 from ionbeam_client.models import (
     DatasetSchema,
     IngestionMetadata,
@@ -110,10 +110,6 @@ class SensorCommunitySource:
         self._config = config
         self.logger = structlog.get_logger(__name__)
         self.metadata: IngestionMetadata = IngestionMetadata(
-            # v2: typed semantics (CfSemantics) instead of the stringly
-            # scheme/standard_name/attrs trio.
-            # v3: relative_humidity unit corrected to % — the API delivers
-            # percent; the v2 label "1" was wrong for the same values.
             version=3,
             name="sensor.community",
             dataset_schema=DatasetSchema(

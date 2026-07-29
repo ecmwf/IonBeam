@@ -4,19 +4,19 @@
 """Domain handlers for ionbeam."""
 
 from .canonicalize import CanonicalBatch, canonicalize
-from .ingestion_handler import IngestionHandler
-from .dataset_coordinator_handler import (
-    DatasetCoordinatorHandler,
+from .ingestion import Ingestion
+from .dataset_coordinator import (
+    DatasetCoordinator,
     DatasetCoordinatorConfig,
 )
-from .dataset_builder_handler import DatasetBuilderHandler, DatasetBuilderConfig
+from .dataset_builder import DatasetBuilder, DatasetBuilderConfig
 
 __all__ = [
     "CanonicalBatch",
     "canonicalize",
-    "IngestionHandler",
-    "DatasetCoordinatorHandler",
+    "Ingestion",
+    "DatasetCoordinator",
     "DatasetCoordinatorConfig",
-    "DatasetBuilderHandler",
+    "DatasetBuilder",
     "DatasetBuilderConfig",
 ]

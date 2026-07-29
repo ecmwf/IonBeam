@@ -9,6 +9,7 @@ dependencies = [
     "pydantic-settings>=2.14",
     "pyyaml>=6.0.3",
     "httpx>=0.28.1",
+    "httpx-retries>=0.2.0",
     "click>=8.1.0",
 ]
 

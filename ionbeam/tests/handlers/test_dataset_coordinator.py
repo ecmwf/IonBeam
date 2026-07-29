@@ -6,9 +6,9 @@ build, defers, or leaves alone. Single-shot decisions are table-driven
 scenarios; the stateful behaviours (build lifecycle, measured-lateness settle,
 rebuild debounce, sealing) are individual flows.
 
-The aggregation span and the finaliser thresholds are server-side production config
-now (see :class:`DatasetRegistry`), not part of the metadata a source declares — so
-the windowing scenarios pin them through ``_registry`` rather than the event."""
+The aggregation span and the finaliser thresholds are server-side production
+config (see :class:`DatasetRegistry`), so the windowing scenarios pin them
+through ``_registry`` rather than the event."""
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -16,11 +16,11 @@ from uuid import uuid4
 
 import pytest
 from ionbeam.datasets import DatasetProductionConfig, DatasetRegistry
-from ionbeam.handlers.dataset_coordinator_handler import (
+from ionbeam.handlers.dataset_coordinator import (
     DatasetCoordinatorConfig,
-    DatasetCoordinatorHandler,
+    DatasetCoordinator,
 )
-from ionbeam.models import (
+from ionbeam.provenance import (
     CoverageClaim,
     RecordSet,
     Window,
@@ -42,10 +42,10 @@ from ionbeam_client.models import (
 
 T0 = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
 
-# Windows at T0 are years old, so a real finalize delay would seal them and the
-# finaliser would bypass the coverage gates the windowing scenarios exercise. A far
-# delay keeps every window provisional, isolating the windowing decision under test.
-_NEVER_FINAL = timedelta(days=3650)
+# Windows at T0 are years old, so a real retention would seal them before the
+# coverage gates the windowing scenarios exercise. A far horizon keeps every
+# window provisional, isolating the windowing decision under test.
+_NEVER_FINAL_HOURS = 24 * 3650
 
 
 def at(hours: int, minutes: int = 0) -> datetime:
@@ -72,14 +72,12 @@ def _metadata() -> IngestionMetadata:
 
 def _registry(
     span: timedelta = timedelta(hours=1),
-    finalize_after: timedelta = _NEVER_FINAL,
     debounce: timedelta = timedelta(0),
 ) -> DatasetRegistry:
     return DatasetRegistry(
         {
             "test_dataset": DatasetProductionConfig(
                 aggregation_span=span,
-                finalize_after=finalize_after,
                 rebuild_debounce=debounce,
             )
         }
@@ -109,8 +107,9 @@ def _event(
     )
 
 
-def _handler(store, queue, metrics, registry=None, **config) -> DatasetCoordinatorHandler:
-    return DatasetCoordinatorHandler(
+def _handler(store, queue, metrics, registry=None, **config) -> DatasetCoordinator:
+    config.setdefault("lateness_retention_hours", _NEVER_FINAL_HOURS)
+    return DatasetCoordinator(
         DatasetCoordinatorConfig(**config), store, queue, metrics, registry or _registry()
     )
 
@@ -162,10 +161,10 @@ SCENARIOS = [
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.id)
 async def test_window_decisions(
-    scenario, mock_ingestion_record_store, build_queue, coordinator_metrics
+    scenario, coordination_store, build_queue, coordinator_metrics
 ):
     handler = _handler(
-        mock_ingestion_record_store,
+        coordination_store,
         build_queue,
         coordinator_metrics,
         registry=_registry(span=scenario.span),
@@ -173,7 +172,7 @@ async def test_window_decisions(
     metadata = _metadata()
 
     for start, end in scenario.claims:
-        await mock_ingestion_record_store.save_coverage_claim(
+        await coordination_store.save_coverage_claim(
             "test_dataset",
             CoverageClaim(id=uuid4(), start_time=start, end_time=end, arrived_at=end),
         )
@@ -201,7 +200,7 @@ async def test_window_decisions(
     for start in starts:
         window = Window("test_dataset", start, scenario.span)
         ids = set(
-            await mock_ingestion_record_store.get_desired_record_ids(window)
+            await coordination_store.get_desired_record_ids(window)
         )
         delivered = {
             str(record.id)
@@ -213,11 +212,11 @@ async def test_window_decisions(
 
 
 async def test_window_build_lifecycle(
-    mock_ingestion_record_store, build_queue, coordinator_metrics
+    coordination_store, build_queue, coordinator_metrics
 ):
     """A gap holds the window back; backfill completes and schedules it; once built,
     a replayed event leaves it alone and a genuinely new event rebuilds it."""
-    handler = _handler(mock_ingestion_record_store, build_queue, coordinator_metrics)
+    handler = _handler(coordination_store, build_queue, coordinator_metrics)
     metadata = _metadata()
     window = Window("test_dataset", at(10), timedelta(hours=1))
 
@@ -230,18 +229,18 @@ async def test_window_build_lifecycle(
     for event in (b, c):
         await handler.handle(event)
     assert build_queue.get_queue_dict() == {}
-    ids = await mock_ingestion_record_store.get_desired_record_ids(window)
+    ids = await coordination_store.get_desired_record_ids(window)
     assert set(ids) == delivered(b, c)
 
     # backfill fills the gap: the window becomes complete and is scheduled
     a = _event(at(10), at(10, 20), metadata)
     await handler.handle(a)
     assert list(build_queue.get_queue_dict()) == [window.dataset_key]
-    ids = await mock_ingestion_record_store.get_desired_record_ids(window)
+    ids = await coordination_store.get_desired_record_ids(window)
     assert set(ids) == delivered(a, b, c)
 
     # the builder builds exactly the desired set and drains the queue
-    await mock_ingestion_record_store.set_window_state(
+    await coordination_store.set_window_state(
         window,
         WindowBuildState(
             record_ids_hash=RecordSet.from_list(ids).hash, timestamp=at(10)
@@ -258,12 +257,12 @@ async def test_window_build_lifecycle(
     d = _event(at(10), at(11), metadata)
     await handler.handle(d)
     assert list(build_queue.get_queue_dict()) == [window.dataset_key]
-    ids = await mock_ingestion_record_store.get_desired_record_ids(window)
+    ids = await coordination_store.get_desired_record_ids(window)
     assert set(ids) == delivered(a, b, c, d)
 
 
 async def test_measured_lateness_defers_eligibility(
-    mock_ingestion_record_store, build_queue, coordinator_metrics
+    coordination_store, build_queue, coordinator_metrics
 ):
     """The settle delay is driven by the source's observed arrival lateness: once
     the histogram says data settles ~6h late, a window whose data could still be
@@ -271,7 +270,7 @@ async def test_measured_lateness_defers_eligibility(
     time is claimed immediately."""
     span = timedelta(hours=1)
     handler = _handler(
-        mock_ingestion_record_store,
+        coordination_store,
         build_queue,
         coordinator_metrics,
         lateness_min_samples=3,
@@ -281,7 +280,7 @@ async def test_measured_lateness_defers_eligibility(
     # this source has historically arrived ~6h late (p95 ≈ 6h): 100 datums, each
     # bucketed at 6h, seeded straight into the histogram the ingestion path fills
     six_hours = bucket_for(timedelta(hours=6).total_seconds())
-    await mock_ingestion_record_store.record_lateness(
+    await coordination_store.record_lateness(
         "test_dataset", {six_hours: 100}, 168
     )
 
@@ -306,13 +305,13 @@ async def test_measured_lateness_defers_eligibility(
 
 
 async def test_rebuild_is_debounced(
-    mock_ingestion_record_store, build_queue, coordinator_metrics
+    coordination_store, build_queue, coordinator_metrics
 ):
-    """A straggler against a built provisional window schedules the revision a
-    debounce after its arrival; each further straggler slides it later."""
+    """A late arrival against a built provisional window schedules the revision a
+    debounce after its arrival; each further arrival slides it later."""
     debounce = timedelta(minutes=10)
     handler = _handler(
-        mock_ingestion_record_store,
+        coordination_store,
         build_queue,
         coordinator_metrics,
         registry=_registry(debounce=debounce),
@@ -322,7 +321,7 @@ async def test_rebuild_is_debounced(
 
     first = _event(at(10), at(11), metadata)
     await handler.handle(first)
-    await mock_ingestion_record_store.set_window_state(
+    await coordination_store.set_window_state(
         window,
         WindowBuildState(
             record_ids_hash=RecordSet.from_list(
@@ -342,20 +341,20 @@ async def test_rebuild_is_debounced(
     assert build_queue.get_queue_dict()[window.dataset_key] >= eligible
 
 
-async def test_sealed_window_drops_stragglers_but_unbuilt_gets_a_final_build(
-    mock_ingestion_record_store, build_queue, coordinator_metrics
+async def test_sealed_window_drops_late_arrivals(
+    coordination_store, build_queue, coordinator_metrics
 ):
-    """Past the final floor a built window is sealed — a straggler does not
-    reschedule it — while a never-built window still earns one immediate build."""
+    """Past the retention floor a window is sealed — its records expire with the
+    hot store, so a late arrival cannot schedule any build, built or not."""
     handler = _handler(
-        mock_ingestion_record_store,
+        coordination_store,
         build_queue,
         coordinator_metrics,
-        registry=_registry(finalize_after=timedelta(hours=1)),
+        lateness_retention_hours=1,
     )
     metadata = _metadata()
     built = Window("test_dataset", at(10), timedelta(hours=1))
-    await mock_ingestion_record_store.set_window_state(
+    await coordination_store.set_window_state(
         built,
         WindowBuildState(record_ids_hash="stale", timestamp=at(11)),
     )
@@ -363,7 +362,5 @@ async def test_sealed_window_drops_stragglers_but_unbuilt_gets_a_final_build(
     await handler.handle(_event(at(10), at(11), metadata))
     assert built.dataset_key not in build_queue.get_queue_dict()
 
-    unbuilt = Window("test_dataset", at(12), timedelta(hours=1))
     await handler.handle(_event(at(12), at(13), metadata))
-    assert await build_queue.claim_due() is not None
-    assert unbuilt.dataset_key not in build_queue.get_queue_dict()
+    assert build_queue.get_queue_dict() == {}

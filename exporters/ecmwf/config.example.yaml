@@ -5,7 +5,6 @@ dataset_filter:
 
 ionbeam:
   flight_url: "grpc://localhost:8815"
-  write_batch_size: 65536
 
 odb_exporter:
   # A local directory or an S3 prefix; cycles encode via a local temp file and

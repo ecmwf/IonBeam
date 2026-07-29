@@ -6,14 +6,6 @@ from prometheus_client import Counter, Histogram, CollectorRegistry
 
 class IngestionMetrics:
     def __init__(self, registry: CollectorRegistry) -> None:
-        self._data_points = Histogram(
-            name="ionbeam_ingestion_data_points_per_operation",
-            documentation="Data points (observations) ingested per operation",
-            labelnames=["dataset"],
-            buckets=[10, 100, 1_000, 10_000, 100_000, 1_000_000],
-            registry=registry,
-        )
-
         self._data_points_total = Counter(
             name="ionbeam_ingestion_data_points_total",
             documentation="Total data points (observations) ingested successfully",
@@ -64,7 +56,6 @@ class IngestionMetrics:
         )
 
     def observe_data_points(self, dataset: str, count: int) -> None:
-        self._data_points.labels(dataset=dataset).observe(count)
         self._data_points_total.labels(dataset=dataset).inc(count)
 
     def observe_duration(self, dataset: str, seconds: float) -> None:

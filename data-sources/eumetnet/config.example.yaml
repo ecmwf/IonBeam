@@ -1,7 +1,6 @@
 ionbeam:
   flight_url: "grpc://localhost:8815"
   retry_delay: 1.0
-  write_batch_size: 65536
 
 netatmo_mqtt:
   host: "mqtt.example.com"

@@ -19,19 +19,12 @@ A data source declares only its dataset name and data schema at ingestion (see :
           description: "IoT observations from the CIMA Acronet network."
           aggregation_span: P1D
           rebuild_debounce: PT10M
-          finalize_after: PT48H
 
 ``aggregation_span``
   Duration of each aggregation window (ISO 8601 duration, e.g. ``PT1H``).
 
 ``rebuild_debounce``
-  Trailing debounce for rebuilding an already-built window when late data arrives: each straggler defers the rebuild by this, so a wave coalesces into one rebuild shortly after it ends.
-
-``finalize_after``
-  How long after a window closes it becomes immutable. When unset, the window stays revisable for as long as the time-series database retains its observations.
-
-``dedup_capacity``
-  Expected distinct row contents per window, sizing the per-window deduplication filter.
+  Trailing debounce for rebuilding an already-built window when late data arrives: each late arrival defers the rebuild by this, so a wave coalesces into one rebuild shortly after it ends.
 
 Time Windows
 ------------
@@ -60,11 +53,11 @@ A window passes through three phases, each governing how late-arriving data is h
 
 .. code-block:: text
 
-              window closes        first build eligible               finalize floor
+              window closes        first build eligible               retention floor
     ────────────────┬──────────────────────┬────────────────────────────────┬──────────▶ wall clock
       [12:00 … 13:00)                      │                                │
                     │◀──── settling ──────▶│◀───────── provisional ────────▶│   final
-                    │ wait for the p95     │ late data rebuilds the window, │ sealed: stragglers stay
+                    │ wait for the p95     │ late data rebuilds the window, │ sealed: late data stays
                     │ arrival lateness,    │ debounced by                   │ in InfluxDB, the dataset
                     │ measured per dataset │ rebuild_debounce               │ is never rewritten
 
@@ -72,12 +65,12 @@ Settling
   A freshly closed window waits before its first build for the *settle duration*: the measured 95th percentile of the dataset's arrival lateness. Ingestion records, for every datum, the gap between arrival time and observation time in a per-dataset histogram. The coordinator reads the percentile back and schedules the first build for ``window.end + settle``, so each source tunes its own wait. A dataset with no lateness history yet builds immediately and is revised during the provisional phase.
 
 Provisional
-  From its first build until the finalize floor, a window is revisable: late data folds in by rebuilding the window and re-publishing it to exporters. Rebuilds are debounced by ``rebuild_debounce``: each arriving record defers the rebuild, so a wave of stragglers or a backfill sweeping through historical windows coalesces into one rebuild shortly after the wave ends, rather than one per record.
+  From its first build until the retention floor, a window is revisable: late data folds in by rebuilding the window and re-publishing it to exporters. Rebuilds are debounced by ``rebuild_debounce``: each arriving record defers the rebuild, so a wave of late arrivals or a backfill sweeping through historical windows coalesces into one rebuild shortly after the wave ends, rather than one per record.
 
 Final
-  Once ``now >= window.end + finalize_after``, a built window is sealed and a straggler can no longer rewrite it. The straggler's observations stay in the time-series database; they are simply not folded into the immutable window. When ``finalize_after`` is unset, the floor falls to the time-series database's retention period, since a window cannot be rebuilt from data that has aged out of the hot store anyway. A window that was never built still earns one final build past the floor.
+  Once the hot-store retention has passed the window's end, the window is sealed and a late arrival can no longer rewrite it. Its observations stay in the time-series database until they age out; they are simply not folded into the immutable window. The floor is the retention because a window cannot be rebuilt from data the hot store has forgotten.
 
-Only rows whose full content is newly seen feed the lateness histogram: pull sources re-fetching an overlapping span deliver identical rows again, and counting those would inflate the percentile. Seen content is tracked in one Bloom filter per aggregation window, shared across replicas and expiring shortly after the window seals. The filter is keyed on a digest of the entire row, so a changed value, such as a QC update, counts as a genuine late arrival. Rows belonging to a window already past its finalize floor are skipped outright: they can no longer affect any build, so they must not push the settle estimate upward.
+The histogram counts what the store writes. A ``dedup_ingestion`` dataset suppresses redelivered content at the write, so a pull source re-fetching an overlapping span cannot inflate the percentile, while a changed value, such as a QC update, is novel content and counts as a genuine late arrival. Rows belonging to a window already past its retention floor are skipped outright: they can no longer affect any build, so they must not push the settle estimate upward.
 
 Coverage Claims
 ---------------
@@ -182,8 +175,6 @@ A window that passes is scheduled with an **eligibility time**, the moment it be
 
 A later claim that changes the window's desired set simply reschedules it; the queue keeps one entry per window. Because the delay lives in the queue rather than in a coordinator-side holding pen, a scheduled window builds when its time comes even if its source goes quiet. No later claim is needed to release it.
 
-A never-built window past its finalize floor skips the coverage gates and earns one final build, eligible immediately, from whatever data arrived.
-
 Duplicate and Corrected Observations
 ------------------------------------
 
@@ -211,7 +202,7 @@ Two mechanisms keep the volume feeding that fold proportionate:
      - Stored under the correcting record's tag; earlier deliveries kept
      - A revisable window rebuilds and the later-arrived record's row wins; a sealed window keeps its published values
 
-A correction reaches published datasets through the ordinary rebuild path: the ingestion operation that carried it publishes claims like any other, the fresh record ids change the desired hash of every window they landed rows in, and a revisable window rebuilds through the fold. A window past its finalize floor keeps its published values; the correction stays queryable in the time-series database but is not folded into the sealed dataset.
+A correction reaches published datasets through the ordinary rebuild path: the ingestion operation that carried it publishes claims like any other, the fresh record ids change the desired hash of every window they landed rows in, and a revisable window rebuilds through the fold. A window past its retention floor keeps its published values; the correction stays queryable in the time-series database but is not folded into the sealed dataset.
 
 Dataset Builder
 ---------------
@@ -234,7 +225,7 @@ For each leased window:
 4. Fold: collapse to one row per observation identity, the latest-arrived record winning
 5. Sort by time in the builder's own memory, convert to Arrow RecordBatches matching the canonical schema, and write to the arrow store under the window's deterministic key
 6. Append the build to the window's manifest (see :ref:`domain:Window Manifests`)
-7. Publish a ``DataSetAvailableEvent`` with the dataset location, marked final when the window is past its finalize floor
+7. Publish a ``DataSetAvailableEvent`` with the dataset location, marked final when the window is past its retention floor
 8. Update ``observed_hash`` and release the lease
 
 Every published build passes through the fold — there is no other path to the canonical store. A window with no desired records has nothing to build and settles without publishing.

@@ -33,7 +33,7 @@ def bucket_counts(seconds: np.ndarray) -> dict[int, int]:
     The per-element mapping is identical to ``bucket_for``; non-finite values are
     dropped. Recording every datum's lateness (not one sample per batch) is what
     lets the histogram see the late-arriving tail, so the p95 reflects when a
-    window's stragglers actually land rather than how fresh its newest point is."""
+    window's late tail actually lands rather than how fresh its newest point is."""
     arr = np.asarray(seconds, dtype=float)
     arr = arr[np.isfinite(arr)]
     if arr.size == 0:

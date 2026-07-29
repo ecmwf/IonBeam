@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "click>=8.1.0",
     "httpx>=0.28.1",
+    "httpx-retries>=0.2.0",
     "ionbeam-client",
     "numpy>=2.3.4",
     "pandas>=2.3.3",

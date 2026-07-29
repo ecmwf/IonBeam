@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from ionbeam.builds import build_file_key
-from ionbeam.models import Window
+from ionbeam.provenance import Window
 
 
 def _load_provider():
@@ -93,14 +93,15 @@ def test_windows_sharing_a_dataset_stay_distinct():
     assert picked == sorted([_file(first, 2, "bbbb2222"), _file(second, 1), _file(day, 1)])
 
 
-def test_a_flat_legacy_build_shares_its_windows_day_dir_identity():
-    # during the flat->day-directory retention overlap, a window's legacy flat
-    # v1 must not be served beside its day-dir v2
-    window = Window("netatmo", START, timedelta(hours=1))
-    flat_v1 = _file(window, 1, "aaaa1111").replace(f"{START:%Y%m%d}/", "")
-    day_v2 = _file(window, 2, "bbbb2222")
-    assert provider._latest_builds([flat_v1, day_v2]) == [day_v2]
-    assert provider._window_bounds(flat_v1) == (window.start, window.end)
+def test_an_unparseable_id_is_not_found_without_scanning():
+    instance = object.__new__(provider.IonbeamParquetProvider)
+    instance.time_field = "time"
+    # no ds/fs on the instance: any scan attempt would AttributeError,
+    # so raising not-found proves nothing was scanned
+    with pytest.raises(provider.ProviderItemNotFoundError):
+        instance.get("not-a-canonical-id")
+    with pytest.raises(provider.ProviderItemNotFoundError):
+        instance.get("20269999T990000-41c3100d85287e3d")
 
 
 def test_unparsed_keys_stay_their_own_window():
@@ -108,6 +109,63 @@ def test_unparsed_keys_stay_their_own_window():
         "netatmo/oddball.parquet"
     ]
     assert provider._window_bounds("netatmo/oddball.parquet") is None
+
+
+PREFIX = "ionbeam/datasets/netatmo"
+
+
+class _DirectoryFS:
+    """In-memory store listed one directory at a time, like the provider
+    reads S3: {directory: [(name, size)]}."""
+
+    def __init__(self, dirs):
+        self.dirs = dirs
+
+    def get_file_info(self, selector):
+        import pyarrow.fs as pafs
+
+        entries = self.dirs.get(selector.base_dir)
+        if entries is None:
+            if getattr(selector, "allow_not_found", False):
+                return []
+            raise FileNotFoundError(selector.base_dir)
+        return [
+            pafs.FileInfo(f"{selector.base_dir}/{name}",
+                          type=pafs.FileType.File, size=size)
+            for name, size in entries
+        ]
+
+
+def test_every_window_in_the_manifest_registry_is_served():
+    fs = _DirectoryFS({
+        PREFIX: [],
+        f"{PREFIX}/_manifests": [
+            ("20260728T120000_PT1H.json", 1),
+            ("20260729T060000_PT1H.json", 1),
+        ],
+        f"{PREFIX}/ib_year=2026/ib_month=07/ib_day=28": [
+            ("20260728T120000_PT1H-v1-aaaa1111.parquet", 1)],
+        f"{PREFIX}/ib_year=2026/ib_month=07/ib_day=29": [
+            ("20260729T060000_PT1H-v2-bbbb2222.parquet", 1)],
+    })
+
+    assert provider._list_build_files(fs, PREFIX) == [
+        f"{PREFIX}/ib_year=2026/ib_month=07/ib_day=28/20260728T120000_PT1H-v1-aaaa1111.parquet",
+        f"{PREFIX}/ib_year=2026/ib_month=07/ib_day=29/20260729T060000_PT1H-v2-bbbb2222.parquet",
+    ]
+
+
+def test_flat_legacy_files_and_empty_objects():
+    fs = _DirectoryFS({
+        PREFIX: [
+            ("20260724T200000_PT1H-v1-cccc3333.parquet", 1),  # pre-day-dir build
+            ("20260724T210000_PT1H-v1-dddd4444.parquet", 0),  # unfinished write
+        ],
+    })
+
+    assert provider._list_build_files(fs, PREFIX) == [
+        f"{PREFIX}/20260724T200000_PT1H-v1-cccc3333.parquet"
+    ]
 
 
 SCHEMA_NAMES = ["time", "lat", "lon", "air_temperature", "ib_geometry", "ib_id"]

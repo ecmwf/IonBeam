@@ -9,8 +9,8 @@ import pyarrow.parquet as pq
 import pytest
 from pydantic import ValidationError
 
-from ionbeam_client.arrow_tools import canonical_arrow_schema, canonical_record_batches
-from ionbeam_client.dataframe_tools import align_to_schema, coerce_types
+from ionbeam_client.canonical_stream import canonical_arrow_schema, canonical_record_batches
+from ionbeam_client.alignment import align_to_schema, coerce_types
 from ionbeam_client.models import (
     CfSemantics,
     Coordinate,
@@ -22,7 +22,7 @@ from ionbeam_client.models import (
     Variable,
     geographic_point_coordinates,
 )
-from ionbeam_client.schema_meta import (
+from ionbeam_client.schema_metadata import (
     ancillaries_of,
     dataset_metadata,
     find_coordinates,
@@ -102,11 +102,6 @@ def test_bad_dtype_rejected():
 def test_crs_without_axis_rejected():
     with pytest.raises(ValidationError, match="crs requires an axis role"):
         dataset_schema(coordinates=[Coordinate(name="lat", crs="EPSG:4326")])
-
-
-def test_grid_without_budget_rejected():
-    with pytest.raises(ValidationError, match="requires max_rows_per_window"):
-        DatasetMetadata(name="grid", description="Grid", feature_type="grid")
 
 
 def test_dangling_ancillary_reference_rejected():

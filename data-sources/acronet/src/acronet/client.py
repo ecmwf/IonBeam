@@ -3,18 +3,18 @@
 
 """Acronet data source client implementation."""
 
-import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Callable, Iterable, Optional
 from uuid import UUID
 
 import httpx
+from httpx_retries import Retry, RetryTransport
 import numpy as np
 import pandas as pd
 import structlog
 from ionbeam_client import IonbeamClient
-from ionbeam_client.arrow_tools import canonical_record_batches
+from ionbeam_client.canonical_stream import canonical_record_batches
 from ionbeam_client.models import (
     CfSemantics,
     DatasetSchema,
@@ -71,10 +71,9 @@ class AcronetSource:
         self.logger = structlog.get_logger(__name__)
 
         self.metadata = IngestionMetadata(
-            # v2: typed semantics. min/max temperature are CF air_temperature
-            # under a cell_method rather than invented standard names; station
-            # telemetry (battery, signal, indoor temperature, gust direction)
-            # carries no CF claim — those names are not in the CF table.
+            # min/max temperature are CF air_temperature under a cell_method;
+            # station telemetry (battery, signal, indoor temperature, gust
+            # direction) carries no CF claim — those names are not in the CF table.
             version=2,
             name="acronet",
             dataset_schema=DatasetSchema(
@@ -125,10 +124,15 @@ class AcronetSource:
         }
 
         self._access_token: str | None = None
-        self._refresh_token: str | None = None
-        self._token_expiry: datetime | None = None
-
-        self._auth_lock = asyncio.Lock()
+        self._http = httpx.AsyncClient(
+            timeout=config.timeout_seconds,
+            headers=config.headers or {},
+            follow_redirects=True,
+            verify=config.verify_ssl,
+            transport=RetryTransport(
+                retry=Retry(total=config.max_retries, backoff_factor=0.5)
+            ),
+        )
         self._sensors_by_id: dict[str, SensorCatalogEntry] = {}
         self._sensors_by_class: dict[str, list[SensorCatalogEntry]] = {}
         self._available_sensor_classes: set[str] = set()
@@ -334,7 +338,7 @@ class AcronetSource:
             self._unit_mismatches_logged.add(unit_key)
 
     async def _list_sensor_classes(self) -> list[str]:
-        response = await self._make_request("GET", "sensors/classes")
+        response = await self._get("sensors/classes")
         if not response.text or response.text.strip() == "":
             self.logger.warning("Empty response body from sensors/classes endpoint")
             return []
@@ -363,9 +367,7 @@ class AcronetSource:
             "geowin": ",".join(str(coord) for coord in self.config.geo_window),
         }
 
-        response = await self._make_request(
-            "GET", f"sensors/list/{sensor_class}", params=params
-        )
+        response = await self._get(f"sensors/list/{sensor_class}", params=params)
         payload = response.json()
         entries: list[SensorCatalogEntry] = []
 
@@ -407,9 +409,7 @@ class AcronetSource:
             "date_as_string": True,
         }
 
-        response = await self._make_request(
-            "GET", f"sensors/data/{sensor_class}/all", params=params
-        )
+        response = await self._get(f"sensors/data/{sensor_class}/all", params=params)
         payload = response.json()
         if isinstance(payload, list):
             return payload
@@ -432,217 +432,49 @@ class AcronetSource:
                 break
             current = chunk_end
 
-    async def _make_request(
-        self,
-        method: str,
-        path: str,
-        params: dict[str, Any] | None = None,
-        json_data: dict[str, Any] | None = None,
-        require_auth: bool = True,
+    async def _get(
+        self, path: str, params: dict[str, Any] | None = None
     ) -> httpx.Response:
-        url = (
-            path
-            if path.lower().startswith("http")
-            else f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
-        )
+        """One authenticated GET; transient failures retry in the transport.
+        A 401 re-authenticates once — a second 401 raises, and any other
+        failure raises so the trigger redelivers the whole fetch."""
+        url = f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
+        if not self._access_token:
+            await self._authenticate()
+        response = await self._http.get(url, params=params or {}, headers=self._auth)
+        if response.status_code == 401:
+            await self._authenticate()
+            response = await self._http.get(url, params=params or {}, headers=self._auth)
+        response.raise_for_status()
+        return response
 
-        if require_auth:
-            await self._ensure_access_token()
-            if not self._access_token:
-                raise RuntimeError(f"missing access token for {url}")
+    @property
+    def _auth(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._access_token}"}
 
-        for attempt in range(self.config.max_retries + 1):
-            headers = dict(self.config.headers or {})
-            if require_auth and self._access_token:
-                headers["Authorization"] = f"Bearer {self._access_token}"
-
-            try:
-                async with httpx.AsyncClient(
-                    timeout=self.config.timeout_seconds,
-                    headers=headers,
-                    follow_redirects=True,
-                    verify=self.config.verify_ssl,
-                ) as client:
-                    if method.upper() == "GET":
-                        response = await client.get(url, params=params or {})
-                    elif method.upper() == "POST":
-                        response = await client.post(
-                            url, params=params or {}, json=json_data
-                        )
-                    else:
-                        raise ValueError(f"Unsupported HTTP method: {method}")
-
-                    if (
-                        response.status_code == 401
-                        and require_auth
-                        and attempt < self.config.max_retries
-                    ):
-                        self.logger.info(
-                            "Received 401, attempting token refresh",
-                            url=url,
-                            attempt=attempt + 1,
-                        )
-                        if (
-                            await self._refresh_access_token()
-                            or await self._authenticate()
-                        ):
-                            continue
-                        raise RuntimeError(f"unable to refresh authentication for {url}")
-
-                    response.raise_for_status()
-                    return response
-
-            except httpx.TimeoutException:
-                self.logger.warning(
-                    "Request timeout",
-                    url=url,
-                    timeout_seconds=self.config.timeout_seconds,
-                    attempt=attempt + 1,
-                    max_retries=self.config.max_retries,
-                )
-                if attempt == self.config.max_retries:
-                    raise
-                await asyncio.sleep(min(2**attempt, 10))
-
-            except httpx.HTTPStatusError as exc:
-                self.logger.warning(
-                    "HTTP error during request",
-                    url=url,
-                    status=exc.response.status_code,
-                    attempt=attempt + 1,
-                    max_retries=self.config.max_retries,
-                )
-                if attempt == self.config.max_retries:
-                    raise
-                await asyncio.sleep(min(2**attempt, 10))
-
-            except httpx.RequestError as exc:
-                self.logger.warning(
-                    "Network error during request",
-                    url=url,
-                    error=str(exc),
-                    attempt=attempt + 1,
-                    max_retries=self.config.max_retries,
-                )
-                if attempt == self.config.max_retries:
-                    raise
-                await asyncio.sleep(min(2**attempt, 10))
-
-    async def _ensure_access_token(self) -> None:
-        now = datetime.now(timezone.utc)
+    async def _authenticate(self) -> None:
         if (
-            self._access_token
-            and self._token_expiry
-            and self._token_expiry > now + timedelta(seconds=30)
+            not self.config.username
+            or not self.config.password
+            or not self.config.client_id
         ):
-            return
+            raise RuntimeError("Acronet credentials are not fully configured")
 
-        if self._refresh_token:
-            refreshed = await self._refresh_access_token()
-            if refreshed:
-                return
-
-        await self._authenticate()
-
-    async def _authenticate(self) -> bool:
-        async with self._auth_lock:
-            if (
-                not self.config.username
-                or not self.config.password
-                or not self.config.client_id
-            ):
-                self.logger.error("Acronet credentials are not fully configured")
-                return False
-
-            data = {
+        response = await self._http.post(
+            self.config.token_endpoint,
+            data={
                 "grant_type": "password",
                 "username": self.config.username,
                 "password": self.config.password,
                 "client_id": self.config.client_id,
                 "client_secret": self.config.client_secret,
-            }
-
-            try:
-                async with httpx.AsyncClient(
-                    timeout=self.config.timeout_seconds, verify=self.config.verify_ssl
-                ) as client:
-                    response = await client.post(self.config.token_endpoint, data=data)
-                    response.raise_for_status()
-
-                    payload = response.json()
-                    self._access_token = payload.get("access_token")
-                    self._refresh_token = payload.get("refresh_token")
-
-                    expires_in = int(payload.get("expires_in", 0)) or 0
-                    self._token_expiry = datetime.now(timezone.utc) + timedelta(
-                        seconds=expires_in - 30
-                    )
-
-                    if not self._access_token:
-                        self.logger.error(
-                            "Authentication response missing access token"
-                        )
-                        return False
-
-                    return True
-
-            except Exception as exc:
-                self.logger.error(
-                    "Authentication failed",
-                    error=str(exc),
-                    error_type=type(exc).__name__,
-                )
-                self._access_token = None
-                self._refresh_token = None
-                self._token_expiry = None
-                return False
-
-    async def _refresh_access_token(self) -> bool:
-        async with self._auth_lock:
-            if not self._refresh_token or not self.config.client_id:
-                return False
-
-            data = {
-                "grant_type": "refresh_token",
-                "refresh_token": self._refresh_token,
-                "client_id": self.config.client_id,
-            }
-            if self.config.client_secret:
-                data["client_secret"] = self.config.client_secret
-
-            try:
-                async with httpx.AsyncClient(
-                    timeout=self.config.timeout_seconds, verify=self.config.verify_ssl
-                ) as client:
-                    response = await client.post(self.config.token_endpoint, data=data)
-                    response.raise_for_status()
-
-                    payload = response.json()
-                    self._access_token = payload.get("access_token")
-                    self._refresh_token = payload.get(
-                        "refresh_token", self._refresh_token
-                    )
-                    expires_in = int(payload.get("expires_in", 0)) or 0
-                    self._token_expiry = datetime.now(timezone.utc) + timedelta(
-                        seconds=expires_in - 30
-                    )
-
-                    if not self._access_token:
-                        self.logger.error("Token refresh response missing access token")
-                        return False
-
-                    return True
-
-            except Exception as exc:
-                self.logger.warning(
-                    "Token refresh failed",
-                    error=str(exc),
-                    error_type=type(exc).__name__,
-                )
-                self._access_token = None
-                self._refresh_token = None
-                self._token_expiry = None
-                return False
+            },
+        )
+        response.raise_for_status()
+        token = response.json().get("access_token")
+        if not token:
+            raise RuntimeError("authentication response missing access token")
+        self._access_token = token
 
     @staticmethod
     def _normalize_station_name(name: str) -> str:

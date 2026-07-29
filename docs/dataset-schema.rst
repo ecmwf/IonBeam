@@ -85,12 +85,12 @@ Schema-level metadata carries ``ionbeam.schema_hash`` (the declared contract's h
 Reading Datasets
 ----------------
 
-Exporters registered via ``IonbeamClient.register_export_handler()`` receive datasets as streaming Arrow batches and read structure and semantics back through ``ionbeam_client.schema_meta``:
+Exporters registered via ``IonbeamClient.register_export_handler()`` receive datasets as streaming Arrow batches and read structure and semantics back through ``ionbeam_client.schema_metadata``:
 
 .. code-block:: python
 
     from ionbeam_client.models import CfSemantics, DataSetAvailableEvent
-    from ionbeam_client.schema_meta import (
+    from ionbeam_client.schema_metadata import (
         find_coordinates, semantics, time_field, unit, value_fields,
     )
 

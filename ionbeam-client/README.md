@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 from ionbeam_client import IonbeamClient, IonbeamClientConfig
-from ionbeam_client.arrow_tools import canonical_record_batches
+from ionbeam_client.canonical_stream import canonical_record_batches
 
 start = datetime(2026, 1, 1, tzinfo=timezone.utc)
 end = datetime(2026, 1, 2, tzinfo=timezone.utc)
@@ -112,7 +112,7 @@ The `source_name` must match a `scheduler.windows` entry in the core config. A t
 
 ## Exporting
 
-An exporter subscribes to dataset availability. The handler receives the event and a live Flight connection to stream data with — either the event's own build files (`GetFlightInfo` with `op: "dataset"`) or, as the bundled ODB exporter does, the current build of every window in a range (`op: "dataset_range"`):
+An exporter subscribes to dataset availability. The handler receives the event and a live Flight connection, and streams the current builds for the range it cares about with `GetFlightInfo` (`op: "dataset_range"`) — the bundled ODB exporter rebuilds its whole analysis cycle this way on every event:
 
 ```python
 import json
@@ -126,7 +126,7 @@ def export_handler(connection: flight.FlightClient, event: DataSetAvailableEvent
     descriptor = flight.FlightDescriptor.for_command(
         json.dumps(
             {
-                "op": "dataset",
+                "op": "dataset_range",
                 "dataset": event.metadata.name,
                 "start": event.start_time.isoformat(),
                 "end": event.end_time.isoformat(),

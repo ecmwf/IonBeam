@@ -29,12 +29,12 @@ from pygeoapi.provider.base import BaseProvider
 LOGGER = logging.getLogger(__name__)
 
 # Build-file naming is owned by ionbeam.builds (build_file_key):
-#   <dataset>/<YYYYMMDD>/<window start stamp>_<span>-v<N>-<hash>.parquet
-# The day segment is optional, as in ionbeam.builds: a build written under the
-# old flat layout keeps the same (dataset, window) identity, so its superseded
-# versions are never served beside the current day-dir build.
+#   <dataset>/ib_year=YYYY/ib_month=MM/ib_day=DD/<start stamp>_<span>-v<N>-<hash>.parquet
+# The hive segments are inert here — the dataset is assembled from explicit
+# fragments, so they never surface as columns.
 _BUILD_FILE = re.compile(
-    r'^(?P<dataset>.+?)/(?:\d{8}/)?(?P<window>(?P<stamp>\d{8}T\d{6})_(?P<span>[^-/]+))'
+    r'^(?P<dataset>.+)/ib_year=\d{4}/ib_month=\d{2}/ib_day=\d{2}/'
+    r'(?P<window>(?P<stamp>\d{8}T\d{6})_(?P<span>[^-/]+))'
     r'-v(?P<version>\d+)-[0-9a-f]+\.parquet$')
 
 # The subset of ISO-8601 durations ionbeam writes into build keys
@@ -69,6 +69,32 @@ _ID_STAMP = re.compile(r'^(\d{8}T\d{6})-[0-9a-f]{16}$')
 # inherited provider selects, decodes, and null-fills a column literally named
 # 'geometry'; _read_parquet projects this one under that name.
 _GEOMETRY_COLUMN = 'ib_geometry'
+
+
+def _list_build_files(fs, prefix):
+    """Every build file under the prefix, found through the layout itself:
+    the ``_manifests`` registry names every window ever built, and a window's
+    files live under its start day's partition directory. Only single
+    directories are listed — never a recursive walk over the whole prefix,
+    which SeaweedFS can answer with silently truncated, stale results."""
+    infos = list(fs.get_file_info(pafs.FileSelector(prefix, recursive=False)))
+    manifests = fs.get_file_info(pafs.FileSelector(
+        f'{prefix}/_manifests', recursive=False, allow_not_found=True))
+    days = {
+        info.path.rsplit('/', 1)[-1][:8]
+        for info in manifests
+        if info.type == pafs.FileType.File
+    }
+    for day in sorted(days):
+        infos += fs.get_file_info(pafs.FileSelector(
+            f'{prefix}/ib_year={day[:4]}/ib_month={day[4:6]}/ib_day={day[6:8]}',
+            recursive=False, allow_not_found=True))
+    return sorted({
+        info.path for info in infos
+        if info.type == pafs.FileType.File
+        and info.path.endswith('.parquet')
+        and info.size > 0
+    })
 
 
 def _window_bounds(path):
@@ -106,18 +132,11 @@ class IonbeamParquetProvider(ParquetProvider):
                 endpoint_override=os.environ.get('AWS_ENDPOINT_URL_S3') or None,
                 region=os.environ.get('AWS_DEFAULT_REGION') or None,
             )
-            selector = pafs.FileSelector(prefix, recursive=True)
             try:
-                infos = self.fs.get_file_info(selector)
+                files = _latest_builds(_list_build_files(self.fs, prefix))
             except OSError as err:  # prefix absent: dataset not built yet
                 raise ProviderConnectionError(
                     f'no canonical data at {self.source}: {err}')
-            files = _latest_builds(
-                info.path for info in infos
-                if info.type == pafs.FileType.File
-                and info.path.endswith('.parquet')
-                and info.size > 0
-            )
             if not files:
                 raise ProviderConnectionError(
                     f'no canonical windows at {self.source} yet')
@@ -165,17 +184,21 @@ class IonbeamParquetProvider(ParquetProvider):
 
         A canonical id carries the row's time (see the ``_ID_STAMP`` pattern),
         which the window partition expressions turn into a one-window scan.
-        An id without a stamp — written before ids were self-locating — falls
-        back to the inherited full scan."""
-        match = _ID_STAMP.match(identifier)
-        if match is None or self.time_field is None:
+        Every stored id is stamped, so an id that does not parse cannot exist
+        and is rejected without a scan — ids are client input. Without a
+        configured time field there is nothing to prune by; the inherited
+        full scan serves the lookup."""
+        if self.time_field is None:
             return super().get(identifier, **kwargs)
 
+        match = _ID_STAMP.match(identifier)
+        if match is None:
+            raise ProviderItemNotFoundError(f'ID {identifier} not found')
         try:
             start = datetime.strptime(match.group(1), '%Y%m%dT%H%M%S').replace(
                 tzinfo=timezone.utc)
-        except ValueError:  # stamp-shaped but not a date; ids are client input
-            return super().get(identifier, **kwargs)
+        except ValueError:
+            raise ProviderItemNotFoundError(f'ID {identifier} not found')
         timefield = pc.field(self.time_field)
         second = (timefield >= pc.scalar(start)) & (
             timefield < pc.scalar(start + timedelta(seconds=1)))

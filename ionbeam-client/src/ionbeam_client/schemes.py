@@ -20,7 +20,7 @@ enforcement at the Flight edge is deterministic.
 from __future__ import annotations
 
 from .models import CfSemantics, Coordinate, DatasetSchema, Variable
-from .schema_meta import GEOGRAPHIC_CRS
+from .schema_metadata import GEOGRAPHIC_CRS
 
 
 def unit_warnings(column: Variable | Coordinate) -> list[str]:

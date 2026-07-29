@@ -18,27 +18,28 @@ from ionbeam_client.models import (
 
 from ionbeam.builds import current_build_keys, prune_superseded
 from ionbeam.handlers import (
-    DatasetBuilderHandler,
-    DatasetCoordinatorHandler,
-    IngestionHandler,
+    DatasetBuilder,
+    DatasetCoordinator,
+    Ingestion,
 )
 from ionbeam.messaging import EventBus, Subscription
-from ionbeam.models import RegisteredDatasetMetadata, Window, WindowBuildState
+from ionbeam.provenance import RegisteredDatasetMetadata
 from ionbeam.storage.arrow_store import ArrowStore
-from ionbeam.storage.ingestion_record_store import IngestionRecordStore
+from ionbeam.storage.coordination_store import CoordinationStore
 
 SWEEP_INTERVAL = timedelta(hours=1)
 
 
 class IonbeamCore:
-    """The ionbeam domain application — everything behind the Flight endpoint."""
+    """Dataset registration, observation ingestion, window coordination, and
+    dataset builds, under one lifecycle."""
 
     def __init__(
         self,
-        ingestion: IngestionHandler,
-        coordinator: DatasetCoordinatorHandler,
-        builder: DatasetBuilderHandler,
-        record_store: IngestionRecordStore,
+        ingestion: Ingestion,
+        coordinator: DatasetCoordinator,
+        builder: DatasetBuilder,
+        record_store: CoordinationStore,
         arrow_store: ArrowStore,
         event_bus: EventBus,
     ):
@@ -99,22 +100,13 @@ class IonbeamCore:
             on_data_available=self._coordinator.handle,
         )
 
-    async def built_dataset(
-        self, dataset: str, start: datetime, end: datetime
-    ) -> Optional[WindowBuildState]:
-        return await self._record_store.get_window_state(
-            Window(dataset, start, end - start)
-        )
-
     async def current_builds(
         self, dataset: str, start: datetime, end: datetime
     ) -> list[str]:
         return await current_build_keys(self._arrow_store, dataset, start, end)
 
-    def open_dataset(
-        self, location: str, batch_size: Optional[int] = None
-    ) -> AsyncIterator[pa.RecordBatch]:
-        return self._arrow_store.read_record_batches(location, batch_size=batch_size)
+    def open_dataset(self, location: str) -> AsyncIterator[pa.RecordBatch]:
+        return self._arrow_store.read_record_batches(location)
 
     def dataset_schema(self, location: str) -> pa.Schema:
         return self._arrow_store.read_schema(location)

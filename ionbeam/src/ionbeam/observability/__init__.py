@@ -6,7 +6,7 @@ from .recorders import (
     CoordinatorMetrics,
     BuilderMetrics,
 )
-from .utils import async_timer
+from .timing import async_timer
 
 __all__ = [
     "IngestionMetrics",

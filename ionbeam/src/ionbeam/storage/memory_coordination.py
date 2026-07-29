@@ -7,7 +7,7 @@ from typing import List, Optional
 
 import numpy as np
 
-from ..models import (
+from ..provenance import (
     CoverageClaim,
     IngestionRecord,
     RegisteredDatasetMetadata,
@@ -15,46 +15,14 @@ from ..models import (
     WindowBuildState,
 )
 from .build_queue import BuildQueue
-from .ingestion_record_store import IngestionRecordStore
+from .coordination_store import CoordinationStore
 from .lateness_histogram import percentile_seconds
 from .trigger_claims import TriggerClaims
 
 
-class WindowSeenSets:
-    """In-process mirror of the Redis per-window dedup filters: an exact set of
-    row fingerprints per (dataset, window start), forgotten once the window seals."""
-
-    def __init__(self) -> None:
-        self._windows: dict[tuple[str, int], tuple[datetime, set[bytes]]] = {}
-
-    def filter_unseen(
-        self,
-        dataset: str,
-        window_start: int,
-        fingerprints: list[bytes],
-        expire_at: datetime,
-        now: datetime,
-    ) -> np.ndarray:
-        self._windows = {
-            key: entry for key, entry in self._windows.items() if entry[0] > now
-        }
-        _, seen = self._windows.setdefault((dataset, window_start), (expire_at, set()))
-
-        # Check-and-add per row in order, matching BF.INSERT: a duplicate later
-        # in the same batch reads as already seen.
-        unseen = np.empty(len(fingerprints), dtype=bool)
-        for i, fingerprint in enumerate(fingerprints):
-            unseen[i] = fingerprint not in seen
-            seen.add(fingerprint)
-        return unseen
-
-
-class InMemoryRecordStore(IngestionRecordStore):
-    """In-memory storage for ingestion records and window state.
-
-    Stores all data in dictionaries. Implements TTL-based cleanup for records.
-    Suitable for single-process deployments.
-    """
+class InMemoryCoordinationStore(CoordinationStore):
+    """In-memory storage for ingestion records and window state, for tests and
+    single-process runs. Nothing expires: no local run lives long enough."""
 
     def __init__(self, retention: timedelta = timedelta(days=7)):
         self._records: dict[str, IngestionRecord] = {}
@@ -63,10 +31,7 @@ class InMemoryRecordStore(IngestionRecordStore):
         self._desired_records: dict[str, set[str]] = {}
         self._window_states: dict[str, WindowBuildState] = {}
         self._lateness: dict[str, dict[int, int]] = {}
-        self._seen = WindowSeenSets()
         self._stored: dict[tuple[str, int], set[bytes]] = {}
-        self._cleanup_tasks: dict[str, asyncio.Task] = {}
-        self._ttl = retention
 
     async def save_registered_metadata(self, record: RegisteredDatasetMetadata) -> None:
         self._registered_metadata[record.metadata.name] = record
@@ -75,13 +40,7 @@ class InMemoryRecordStore(IngestionRecordStore):
         return self._registered_metadata.get(dataset)
 
     async def save_ingestion_record(self, record: IngestionRecord) -> None:
-        key = f"ingestion_records:{record.metadata.name}:{record.id}"
-        self._records[key] = record
-
-        if key in self._cleanup_tasks:
-            self._cleanup_tasks[key].cancel()
-
-        self._cleanup_tasks[key] = asyncio.create_task(self._expire_record(key, self._ttl))
+        self._records[f"ingestion_records:{record.metadata.name}:{record.id}"] = record
 
     async def get_ingestion_records(self, dataset: str) -> List[IngestionRecord]:
         prefix = f"ingestion_records:{dataset}:"
@@ -124,19 +83,6 @@ class InMemoryRecordStore(IngestionRecordStore):
         )
         return timedelta(seconds=seconds) if seconds is not None else None
 
-    async def filter_unseen(
-        self,
-        dataset: str,
-        window_start: int,
-        fingerprints: list[bytes],
-        capacity: int,
-        expire_at: datetime,
-        now: datetime,
-    ) -> np.ndarray:
-        return self._seen.filter_unseen(
-            dataset, window_start, fingerprints, expire_at, now
-        )
-
     async def stored_content(
         self, dataset: str, window_start: int, fingerprints: list[bytes]
     ) -> np.ndarray:
@@ -151,11 +97,6 @@ class InMemoryRecordStore(IngestionRecordStore):
         expire_at: datetime,
     ) -> None:
         self._stored.setdefault((dataset, window_start), set()).update(fingerprints)
-
-    async def _expire_record(self, key: str, ttl: timedelta):
-        await asyncio.sleep(ttl.total_seconds())
-        self._records.pop(key, None)
-        self._cleanup_tasks.pop(key, None)
 
 
 class InMemoryTriggerClaims(TriggerClaims):
@@ -183,6 +124,7 @@ class InMemoryBuildQueue(BuildQueue):
     def __init__(self):
         self._scheduled: dict[str, datetime] = {}
         self._leased: set[str] = set()
+        self._dead: set[str] = set()
         self._lock = asyncio.Lock()
 
     async def schedule(self, window: Window, eligible_at: datetime) -> None:
@@ -211,7 +153,23 @@ class InMemoryBuildQueue(BuildQueue):
 
     async def complete(self, window: Window, next_claim_floor: datetime) -> None:
         async with self._lock:
-            self._leased.discard(window.dataset_key)
             key = window.dataset_key
+            self._leased.discard(key)
+            self._dead.discard(key)
             if key in self._scheduled and self._scheduled[key] < next_claim_floor:
                 self._scheduled[key] = next_claim_floor
+
+    async def park(self, window: Window, next_claim_floor: datetime) -> None:
+        async with self._lock:
+            key = window.dataset_key
+            self._leased.discard(key)
+            self._dead.add(key)
+            if key in self._scheduled and self._scheduled[key] < next_claim_floor:
+                self._scheduled[key] = next_claim_floor
+
+    async def dead_lettered(self) -> list[Window]:
+        async with self._lock:
+            return sorted(
+                (Window.from_dataset_key(key) for key in self._dead),
+                key=lambda window: window.dataset_key,
+            )

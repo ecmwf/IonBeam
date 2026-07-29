@@ -37,7 +37,7 @@ from pyarrow import flight
 from pydantic import BaseModel, field_validator
 
 from ionbeam_client.models import CfSemantics, DataSetAvailableEvent, Semantics
-from ionbeam_client.schema_meta import (
+from ionbeam_client.schema_metadata import (
     ancillaries_of,
     find_coordinates,
     semantics,

@@ -15,18 +15,18 @@ from ionbeam_client.models import DataAvailableEvent, IngestionMetadata, WindowR
 from ionbeam.datasets import DatasetProductionConfig, DatasetRegistry
 from ionbeam.handlers.canonicalize import CanonicalBatch, canonicalize
 from ionbeam.handlers.schema_contract import verify_stream_schema
-from ionbeam.models import align_to_aggregation
+from ionbeam.provenance import align_to_aggregation
 from ionbeam.observability import IngestionMetrics
-from ionbeam.observability.utils import async_timer
+from ionbeam.observability.timing import async_timer
 from ionbeam.storage.fingerprints import row_fingerprints
-from ionbeam.storage.ingestion_record_store import IngestionRecordStore
+from ionbeam.storage.coordination_store import CoordinationStore
 from ionbeam.storage.lateness_histogram import bucket_counts
 from ionbeam.storage.timeseries import RECORD_ID_COLUMN, TimeSeriesDatabase
 
 DataAvailablePublisher = Callable[[DataAvailableEvent], Awaitable[None]]
 
-# margin past a window's seal before its dedup filters are forgotten, so a row
-# deemed live against the seal never races a just-expired filter
+# margin past a window's seal before its stored-content set is forgotten, so a
+# row deemed live against the seal never races a just-expired set
 _FILTER_EXPIRY_MARGIN = timedelta(hours=1)
 
 
@@ -84,12 +84,12 @@ class CoverageCheckpoints:
         return start, end
 
 
-class IngestionHandler:
+class Ingestion:
     def __init__(
         self,
         timeseries_db: TimeSeriesDatabase,
         ingestion_metrics: IngestionMetrics,
-        record_store: IngestionRecordStore,
+        record_store: CoordinationStore,
         registry: DatasetRegistry,
         retention: timedelta = timedelta(days=7),
     ):
@@ -98,14 +98,17 @@ class IngestionHandler:
         self._record_store = record_store
         self._registry = registry
         self._retention = retention
-        self.logger = structlog.get_logger("IngestionHandler")
+        self.logger = structlog.get_logger("Ingestion")
 
-    async def _record_lateness(self, dataset: str, canonical: CanonicalBatch) -> None:
-        """Record every datum's arrival lateness (now minus its observation
-        time) — but only rows whose content is newly seen, since a re-fetched
-        span redelivers identical rows and would inflate the p95, and never
-        rows of an already-sealed window, which no build can use."""
-        times = canonical.table.column(canonical.timestamp_column).to_pandas()
+    async def _record_lateness(
+        self, dataset: str, written: pa.Table, suppressed: int, timestamp_column: str
+    ) -> None:
+        """Record each stored row's arrival lateness (now minus its observation
+        time). The rows a ``dedup_ingestion`` dataset suppresses never reach
+        the histogram, so a re-fetched span cannot inflate the p95; rows of an
+        already-sealed window are skipped — no build can use them, so they
+        must not push the settle gate."""
+        times = written.column(timestamp_column).to_pandas()
         now = pd.Timestamp.now(tz="UTC")
         lateness_s = (now - times).dt.total_seconds().to_numpy()
 
@@ -113,44 +116,20 @@ class IngestionHandler:
         span_s = int(production.aggregation_span.total_seconds())
         seal_delay_s = int(production.seal_delay(self._retention).total_seconds())
         window_start_s = times.astype("int64").to_numpy() // 1_000_000_000 // span_s * span_s
-        seal_s = window_start_s + seal_delay_s
-        live_idx = np.flatnonzero(seal_s > int(now.timestamp()))
+        live = window_start_s + seal_delay_s > int(now.timestamp())
 
-        unseen = np.zeros(0, dtype=bool)
-        if live_idx.size:
-            live_table = (
-                canonical.table
-                if live_idx.size == len(seal_s)
-                else canonical.table.take(pa.array(live_idx))
-            )
-            # fingerprinting is CPU-bound (a digest per row), so keep it off the
-            # event loop the Flight server is answering on
-            fingerprints = await asyncio.to_thread(row_fingerprints, live_table)
-            windows = window_start_s[live_idx]
-            unseen = np.zeros(live_idx.size, dtype=bool)
-            for ws in np.unique(windows):
-                rows = np.flatnonzero(windows == ws)
-                unseen[rows] = await self._record_store.filter_unseen(
-                    dataset,
-                    int(ws),
-                    [fingerprints[i] for i in rows],
-                    production.dedup_capacity,
-                    _filter_expiry(int(ws), seal_delay_s),
-                    now,
-                )
-
-        n_new = int(unseen.sum())
         self._metrics.record_lateness_samples(
             dataset,
-            new=n_new,
-            duplicate=int(unseen.size) - n_new,
-            sealed=int(len(seal_s) - live_idx.size),
+            new=int(live.sum()),
+            duplicate=suppressed,
+            sealed=int((~live).sum()),
         )
 
-        recorded = lateness_s[live_idx][unseen]
-        counts = bucket_counts(recorded[recorded >= 0])
+        recorded = lateness_s[live]
         await self._record_store.record_lateness(
-            dataset, counts, int(self._retention.total_seconds() // 3600)
+            dataset,
+            bucket_counts(recorded[recorded >= 0]),
+            int(self._retention.total_seconds() // 3600),
         )
 
     async def ingest(
@@ -220,13 +199,20 @@ class IngestionHandler:
             n_points = canonical.table.num_rows
             self.logger.info("Writing batch", batch=batch_num + 1, points=n_points)
 
-            await self._write_tagged(dataset_name, canonical, production, record_id_for)
+            written = await self._write_tagged(
+                dataset_name, canonical, production, record_id_for
+            )
 
             total_points += n_points
             batch_num += 1
             self._metrics.record_batch_processed(dataset_name)
 
-            await self._record_lateness(dataset_name, canonical)
+            await self._record_lateness(
+                dataset_name,
+                written,
+                canonical.table.num_rows - written.num_rows,
+                canonical.timestamp_column,
+            )
 
             checkpoint = checkpoints.advance(canonical.start_time, canonical.end_time)
             if checkpoint is not None:
@@ -265,13 +251,14 @@ class IngestionHandler:
         canonical: CanonicalBatch,
         production: DatasetProductionConfig,
         record_id_for: Callable[[int], UUID],
-    ) -> None:
+    ) -> pa.Table:
         """Write the batch's rows, each tagged with its window's record id —
         the provenance a build selects by, and what lets the claim name the
         windows that received rows. ``dedup_ingestion`` datasets write only
         content not already stored, decided against exact per-window sets that
         are marked once the write succeeds — a crash in between re-stores a
-        duplicate (which the build collapse discards), never loses a row."""
+        duplicate (which the build collapse discards), never loses a row.
+        Returns the rows actually written."""
         table = canonical.table
         novel_fingerprints: dict[int, set[bytes]] = {}
         if production.dedup_ingestion:
@@ -310,6 +297,7 @@ class IngestionHandler:
                 sorted(digests),
                 _filter_expiry(window_start, seal_delay_s),
             )
+        return table
 
     async def _novel_rows(
         self, dataset: str, canonical: CanonicalBatch, production: DatasetProductionConfig

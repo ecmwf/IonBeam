@@ -19,7 +19,7 @@ from ionbeam.observability import (
     BuilderMetrics,
 )
 from ionbeam.storage.arrow_store import LocalFileSystemStore
-from ionbeam.storage.memory_coordination import InMemoryBuildQueue, InMemoryRecordStore
+from ionbeam.storage.memory_coordination import InMemoryBuildQueue, InMemoryCoordinationStore
 from ionbeam.storage.timeseries import TimeSeriesDatabase
 
 
@@ -29,7 +29,7 @@ class InspectableBuildQueue(InMemoryBuildQueue):
         return dict(self._scheduled)
 
 
-class MockTimeSeriesDatabase(TimeSeriesDatabase):
+class FakeTimeSeriesDatabase(TimeSeriesDatabase):
     """Mock wide-Arrow timeseries database for ionbeam testing."""
 
     def __init__(self) -> None:
@@ -135,8 +135,8 @@ def builder_metrics(metrics_registry) -> BuilderMetrics:
 
 
 @pytest.fixture
-def mock_ingestion_record_store() -> InMemoryRecordStore:
-    return InMemoryRecordStore()
+def coordination_store() -> InMemoryCoordinationStore:
+    return InMemoryCoordinationStore()
 
 
 @pytest.fixture
@@ -145,8 +145,8 @@ def build_queue() -> InspectableBuildQueue:
 
 
 @pytest.fixture
-def mock_timeseries_db() -> MockTimeSeriesDatabase:
-    return MockTimeSeriesDatabase()
+def timeseries_db() -> FakeTimeSeriesDatabase:
+    return FakeTimeSeriesDatabase()
 
 
 @pytest.fixture
@@ -155,12 +155,12 @@ def failing_timeseries_db() -> FailingTimeSeriesDatabase:
 
 
 @pytest.fixture
-def mock_arrow_store(tmp_path) -> InspectableFileSystemStore:
+def arrow_store(tmp_path) -> InspectableFileSystemStore:
     return InspectableFileSystemStore(tmp_path / "arrow_store")
 
 
 @pytest.fixture
-def arrow_store_writer(mock_arrow_store):
+def arrow_store_writer(arrow_store):
     async def write(key: str, df: pd.DataFrame) -> int:
         table = pa.Table.from_pandas(df, preserve_index=False)
 
@@ -168,6 +168,6 @@ def arrow_store_writer(mock_arrow_store):
             for batch in table.to_batches():
                 yield batch
 
-        return await mock_arrow_store.write_record_batches(key, batches())
+        return await arrow_store.write_record_batches(key, batches())
 
     return write

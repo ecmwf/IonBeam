@@ -80,12 +80,6 @@ for _name, _, _method, _period in _PARAMETERS:
 # before the window finalises (see the ionbeam service's dataset registry:
 # rebuild_debounce / finalize_after).
 netatmo_metadata: IngestionMetadata = IngestionMetadata(
-    # v2: precipitation_amount added (period-normalized) changed the canonical
-    # schema, so the version bumps to re-register cleanly over the v1 contract.
-    # v3: relative_humidity unit corrected to % — E-SOH publishes percent (per
-    # the message's content.unit); the v2 label "1" was wrong for the same values.
-    # v4: semantic identity is the typed CfSemantics model (one ionbeam.semantics
-    # payload) instead of the stringly scheme/standard_name/attrs trio.
     version=4,
     name="netatmo",
     dataset_schema=DatasetSchema(

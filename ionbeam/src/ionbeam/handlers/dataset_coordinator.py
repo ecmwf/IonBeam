@@ -9,8 +9,7 @@ its records into that window's desired set, then runs one pure decision
 (:func:`decide`) per spanned window. A window whose data supports a build is
 scheduled for the moment it becomes worth building — past its
 measured-lateness settle time and its rebuild debounce — and the queue itself
-holds windows whose moment has not yet come, so there is no separate pending
-set to rescan on later claims."""
+holds windows whose moment has not yet come."""
 
 import time
 from dataclasses import dataclass
@@ -22,7 +21,7 @@ from pydantic import BaseModel
 from structlog.contextvars import bound_contextvars
 
 from ionbeam.datasets import DatasetRegistry
-from ionbeam.models import (
+from ionbeam.provenance import (
     CoverageAnalysis,
     CoverageClaim,
     RecordSet,
@@ -33,7 +32,7 @@ from ionbeam.models import (
 )
 from ionbeam.observability import CoordinatorMetrics
 from ionbeam.storage.build_queue import BuildQueue
-from ionbeam.storage.ingestion_record_store import IngestionRecordStore
+from ionbeam.storage.coordination_store import CoordinationStore
 
 
 class DatasetCoordinatorConfig(BaseModel):
@@ -56,7 +55,7 @@ class Gate:
     now: datetime
     settle: timedelta                 # measured p95 arrival lateness; first build waits this long past window end
     rebuild_debounce: timedelta       # each arrival defers a revision by this
-    finalize_delay: timedelta         # window sealed once now >= end + delay
+    retention: timedelta              # window sealed once now >= end + retention
 
 
 @dataclass(frozen=True)
@@ -65,9 +64,10 @@ class Unchanged:
 
 
 @dataclass(frozen=True)
-class Straggler:
-    """Data arrived for a sealed window and will not be folded in. The data
-    stays in the time-series DB — it is simply not part of an immutable window."""
+class Sealed:
+    """The window is past the retention floor: a late arrival will not be
+    folded in. The data stays in the time-series DB until it ages out — it is
+    simply not part of an immutable window."""
 
 
 @dataclass(frozen=True)
@@ -85,7 +85,7 @@ class Build:
     eligible_at: datetime
 
 
-Decision = Unchanged | Straggler | Skip | Build
+Decision = Unchanged | Sealed | Skip | Build
 
 
 def decide(
@@ -99,14 +99,14 @@ def decide(
 
     A provisional window builds once its coverage is gap-free and complete —
     no earlier than ``end + settle`` for a first build, and for a revision at
-    ``now + rebuild_debounce``, re-decided on every arrival. Past the final
-    floor a built window is sealed, while a never-built one earns one
-    immediate final build regardless of coverage."""
+    ``now + rebuild_debounce``, re-decided on every arrival. Past the
+    retention floor the window is sealed: its records expire with the hot
+    store, so no build could compose them anyway."""
     if state is not None and state.record_ids_hash == desired.hash:
         return Unchanged()
 
-    if gate.now >= window.end + gate.finalize_delay:
-        return Straggler() if state is not None else Build(eligible_at=gate.now)
+    if gate.now >= window.end + gate.retention:
+        return Sealed()
 
     if coverage.has_gap_in_window(window):
         return Skip("gap")
@@ -121,11 +121,11 @@ def decide(
     return Build(eligible_at=eligible_at)
 
 
-class DatasetCoordinatorHandler:
+class DatasetCoordinator:
     def __init__(
         self,
         config: DatasetCoordinatorConfig,
-        record_store: IngestionRecordStore,
+        record_store: CoordinationStore,
         queue: BuildQueue,
         coordinator_metrics: CoordinatorMetrics,
         registry: DatasetRegistry,
@@ -135,7 +135,7 @@ class DatasetCoordinatorHandler:
         self.queue = queue
         self._metrics = coordinator_metrics
         self._registry = registry
-        self.logger = structlog.get_logger("DatasetCoordinatorHandler")
+        self.logger = structlog.get_logger("DatasetCoordinator")
 
     async def handle(self, event: DataAvailableEvent) -> None:
         with bound_contextvars(correlation_id=str(event.id)):
@@ -191,9 +191,7 @@ class DatasetCoordinatorHandler:
             now=datetime.now(timezone.utc),
             settle=await self._settle_duration(dataset),
             rebuild_debounce=production.rebuild_debounce,
-            finalize_delay=production.finalize_delay(
-                timedelta(hours=self.config.lateness_retention_hours)
-            ),
+            retention=timedelta(hours=self.config.lateness_retention_hours),
         )
 
         for window in self._spanned_windows(event, production.aggregation_span):
@@ -239,8 +237,8 @@ class DatasetCoordinatorHandler:
         match decide(window, coverage, state, desired, gate):
             case Unchanged():
                 pass
-            case Straggler():
-                self._metrics.straggler_dropped(window.dataset)
+            case Sealed():
+                self._metrics.sealed_arrival_dropped(window.dataset)
             case Skip(reason=reason):
                 self._metrics.window_skipped(window.dataset, reason)
             case Build(eligible_at=eligible_at):

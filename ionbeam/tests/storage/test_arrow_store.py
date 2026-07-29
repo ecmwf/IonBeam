@@ -59,15 +59,6 @@ async def test_write_then_read_roundtrips_batches(store):
     assert store.read_schema("weather/2024") == _batch([1]).schema
 
 
-async def test_read_reslices_to_batch_size(store):
-    await store.write_record_batches("weather/2024", _stream(_batch(list(range(10)))))
-
-    read_back = [
-        b async for b in store.read_record_batches("weather/2024", batch_size=4)
-    ]
-    assert [b.num_rows for b in read_back] == [4, 4, 2]
-
-
 async def test_a_written_key_is_immutable(store):
     await store.write_record_batches("weather/2024", _stream(_batch([1])))
     assert await store.exists("weather/2024")

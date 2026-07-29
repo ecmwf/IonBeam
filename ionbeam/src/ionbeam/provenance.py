@@ -50,9 +50,9 @@ class RegisteredDatasetMetadata(BaseModel):
 
 
 class ManifestRecord(BaseModel):
-    """One ingestion record folded into a build. The span fields are None when
-    the record's cached copy had expired by build time; the id still names the
-    rows it delivered, via their record_id tags."""
+    """One ingestion record folded into a build. The Optional span fields
+    only read as None in old manifests, from builds that could fold expired
+    records; current builds defer instead."""
 
     id: str
     start_time: Optional[datetime] = None
@@ -61,17 +61,13 @@ class ManifestRecord(BaseModel):
 
 
 class ManifestBuild(BaseModel):
-    """One build of a window. Every build composes exactly its desired
-    records' rows (``source`` = "record_set"); "snapshot" survives only in
-    manifests of builds published before 2026-07-29, when an incomplete
-    record read degraded to an unfolded time-range scan. ``locations`` are
-    the exact store keys the build wrote."""
+    """One build of a window, composing exactly its desired records' rows.
+    ``locations`` are the exact store keys the build wrote."""
 
     version: int
     built_at: datetime
     record_ids_hash: str
     schema_hash: str
-    source: Literal["record_set", "snapshot"]
     total_rows: int
     is_final: bool
     ionbeam_version: str
@@ -99,8 +95,6 @@ class WindowBuildState(BaseModel):
     record_ids_hash: str
     version: int = 1
     timestamp: datetime
-    # the exact store keys of this build
-    dataset_locations: List[str] = []
     total_rows: int = 0
 
 
@@ -144,16 +138,9 @@ class RecordSet:
         joined = ",".join(sorted(self.ids))
         return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
-    def union(self, other: "RecordSet") -> "RecordSet":
-        return RecordSet(self.ids | other.ids)
-
     @classmethod
     def from_list(cls, ids: List[str]) -> "RecordSet":
         return cls(frozenset(ids))
-
-    @classmethod
-    def from_records(cls, records: List[IngestionRecord]) -> "RecordSet":
-        return cls(frozenset(str(r.id) for r in records))
 
 
 @dataclass

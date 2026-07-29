@@ -32,28 +32,28 @@ from ionbeam_client.models import (
     Variable,
     geographic_point_coordinates,
 )
-from ionbeam_client.arrow_tools import canonical_record_batches
-from ionbeam_client.dataframe_tools import align_to_schema
-from ionbeam_client.schema_meta import SCHEMA_HASH
+from ionbeam_client.canonical_stream import canonical_record_batches
+from ionbeam_client.alignment import align_to_schema
+from ionbeam_client.schema_metadata import SCHEMA_HASH
 from ionbeam.application.core import IonbeamCore
 from ionbeam.datasets import DatasetProductionConfig, DatasetRegistry
 from ionbeam.flight.server import IonbeamFlightServer
-from ionbeam.handlers.dataset_builder_handler import (
+from ionbeam.handlers.dataset_builder import (
     DatasetBuilderConfig,
-    DatasetBuilderHandler,
+    DatasetBuilder,
 )
-from ionbeam.handlers.dataset_coordinator_handler import (
+from ionbeam.handlers.dataset_coordinator import (
     DatasetCoordinatorConfig,
-    DatasetCoordinatorHandler,
+    DatasetCoordinator,
 )
-from ionbeam.models import RegisteredDatasetMetadata, align_to_aggregation
-from ionbeam.handlers.ingestion_handler import IngestionHandler
+from ionbeam.provenance import RegisteredDatasetMetadata, align_to_aggregation
+from ionbeam.handlers.ingestion import Ingestion
 from ionbeam.messaging import InMemoryEventBus
 from ionbeam.scheduler import SourceSchedule, SourceScheduler
 from ionbeam.storage.arrow_store import LocalFileSystemStore
 from ionbeam.storage.memory_coordination import (
     InMemoryBuildQueue,
-    InMemoryRecordStore,
+    InMemoryCoordinationStore,
     InMemoryTriggerClaims,
 )
 from ionbeam.storage.memory_timeseries import InMemoryTimeSeriesDatabase
@@ -84,19 +84,25 @@ def _running_ionbeam(
     schedules: list[SourceSchedule],
 ):
     event_bus = InMemoryEventBus()
-    record_store = InMemoryRecordStore()
+    record_store = InMemoryCoordinationStore()
     queue = InMemoryBuildQueue()
     timeseries_db = InMemoryTimeSeriesDatabase()
     arrow_store = LocalFileSystemStore(tmp_path / "datasets")
 
     core = IonbeamCore(
-        ingestion=IngestionHandler(
+        ingestion=Ingestion(
             timeseries_db, ingestion_metrics, record_store, REGISTRY
         ),
-        coordinator=DatasetCoordinatorHandler(
-            DatasetCoordinatorConfig(), record_store, queue, coordinator_metrics, REGISTRY
+        coordinator=DatasetCoordinator(
+            # fixture windows are dated 2024; a huge retention keeps them
+            # provisional rather than sealed
+            DatasetCoordinatorConfig(lateness_retention_hours=24 * 3650),
+            record_store,
+            queue,
+            coordinator_metrics,
+            REGISTRY,
         ),
-        builder=DatasetBuilderHandler(
+        builder=DatasetBuilder(
             DatasetBuilderConfig(poll_interval_seconds=0.05),
             record_store,
             queue,
@@ -260,7 +266,7 @@ def _dataset_descriptor(start: datetime, end: datetime) -> flight.FlightDescript
     return flight.FlightDescriptor.for_command(
         json.dumps(
             {
-                "op": "dataset",
+                "op": "dataset_range",
                 "dataset": DATASET,
                 "start": start.isoformat(),
                 "end": end.isoformat(),
@@ -428,7 +434,6 @@ async def test_built_window_is_fetchable_via_flight_info_and_do_get(ionbeam):
 
         await _poll(built, message="window build")
 
-        assert info.total_records == len(TEMPERATURES)
         assert CANONICAL_TEMP in info.schema.names
 
         table = raw.do_get(info.endpoints[0].ticket).read_all()
@@ -441,7 +446,7 @@ async def test_built_window_is_fetchable_via_flight_info_and_do_get(ionbeam):
 async def test_flight_info_for_unbuilt_window_errors(ionbeam):
     raw = flight.connect(ionbeam.url)
     try:
-        with pytest.raises(flight.FlightError, match="dataset window not built"):
+        with pytest.raises(flight.FlightError, match="no builds in range"):
             raw.get_flight_info(_dataset_descriptor(WINDOW_START, WINDOW_END))
     finally:
         raw.close()

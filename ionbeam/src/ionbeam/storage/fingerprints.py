@@ -23,8 +23,10 @@ def row_fingerprints(table: pa.Table) -> list[bytes]:
         table.column(name).cast(pa.string()).combine_chunks()
         for name in table.column_names
     ]
+    # \x00 cannot occur in a canonical string value, so a null column never
+    # collides with an empty one.
     joined = pc.binary_join_element_wise(
-        *parts, "\x1f", null_handling="replace", null_replacement=""
+        *parts, "\x1f", null_handling="replace", null_replacement="\x00"
     )
     return [
         hashlib.blake2b(row.encode(), digest_size=16).digest()

@@ -1,18 +1,18 @@
 # SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
 # SPDX-License-Identifier: Apache-2.0
 
-import asyncio
 import re
 from datetime import datetime
 from typing import Any, AsyncIterator, Optional
 from uuid import UUID
 
 import httpx
+from httpx_retries import Retry, RetryTransport
 import pandas as pd
 import structlog
 from ionbeam_client import IonbeamClient
-from ionbeam_client.arrow_tools import canonical_record_batches
-from ionbeam_client.dataframe_tools import drop_undeclared_columns
+from ionbeam_client.canonical_stream import canonical_record_batches
+from ionbeam_client.alignment import drop_undeclared_columns
 from ionbeam_client.models import (
     CfSemantics,
     DatasetSchema,
@@ -63,14 +63,19 @@ class MeteoTrackerSource:
         self.config = config
         self.logger = structlog.get_logger(__name__)
         self._access_token: str | None = None
+        self._http = httpx.AsyncClient(
+            timeout=config.timeout,
+            headers=config.headers or {},
+            follow_redirects=True,
+            transport=RetryTransport(
+                retry=Retry(total=config.max_retries, backoff_factor=0.5)
+            ),
+        )
         self.metadata: IngestionMetadata = IngestionMetadata(
-            # v2: relative_humidity unit corrected to % — the device reports
-            # percent; the v1 label "1" was wrong for the same values.
-            # v3: typed semantics. Altitude becomes the trajectory's z
-            # coordinate (it locates the observation); only genuine CF
-            # standard names claim CF governance — the device's own channels
-            # (bluetooth_rssi, air-quality indices, particle counts, pm4)
-            # are ungoverned named columns.
+            # Altitude is the trajectory's z coordinate (it locates the
+            # observation); only genuine CF standard names claim CF governance —
+            # the device's own channels (bluetooth_rssi, air-quality indices,
+            # particle counts, pm4) are ungoverned named columns.
             version=3,
             name="meteotracker",
             dataset_schema=DatasetSchema(
@@ -141,8 +146,7 @@ class MeteoTrackerSource:
         async def dataframe_stream() -> AsyncIterator[pd.DataFrame]:
             for session in sessions_metadata:
                 df = await self._fetch_session_data(session)
-                if df is not None and not df.empty:
-                    yield df
+                yield df
 
         batch_stream = canonical_record_batches(dataframe_stream(), self.metadata)
 
@@ -160,117 +164,46 @@ class MeteoTrackerSource:
             end=end_time.isoformat(),
         )
 
-    async def _authenticate(self) -> bool:
+    async def _authenticate(self) -> None:
         if not self.config.username or not self.config.password:
-            self.logger.error("Username and password required for authentication")
-            return False
+            raise RuntimeError("username and password required for authentication")
 
-        auth_data = {"email": self.config.username, "password": self.config.password}
+        response = await self._http.post(
+            self.config.token_endpoint,
+            json={"email": self.config.username, "password": self.config.password},
+        )
+        response.raise_for_status()
+        token = response.json().get("accessToken")
+        if not token:
+            raise RuntimeError("authentication response missing access token")
+        self._access_token = token
 
-        async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-            try:
-                self.logger.debug(f"Authenticating with {self.config.token_endpoint}")
-                response = await client.post(
-                    self.config.token_endpoint,
-                    json=auth_data,
-                    headers={"Content-Type": "application/json"},
-                )
-                response.raise_for_status()
-
-                auth_result = response.json()
-                self._access_token = auth_result.get("accessToken")
-
-                if self._access_token:
-                    self.logger.debug("Authentication successful")
-                    return True
-
-                self.logger.error("No access token in authentication response")
-                return False
-
-            except httpx.HTTPStatusError as e:
-                self.logger.error(
-                    f"Authentication failed: HTTP {e.response.status_code}"
-                )
-                self.logger.debug(f"Response: {e.response.text}")
-                return False
-            except Exception as e:
-                self.logger.error(f"Authentication error: {e}")
-                return False
-
-    async def _make_request(
-        self,
-        endpoint: str,
-        method: str = "GET",
-        params: dict[str, Any] | None = None,
-        json_data: dict[str, Any] | None = None,
-        require_auth: bool = True,
+    async def _get(
+        self, endpoint: str, params: dict[str, Any] | None = None
     ) -> httpx.Response:
-        if require_auth and not self._access_token:
-            if not await self._authenticate():
-                raise RuntimeError(f"authentication failed for {endpoint}")
-
+        """One authenticated GET; transient failures retry in the transport.
+        A 401 re-authenticates once — a second 401 raises, and any other
+        failure raises so the trigger redelivers the whole fetch."""
         url = f"{self.config.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        if not self._access_token:
+            await self._authenticate()
+        response = await self._http.get(url, params=params, headers=self._auth)
+        if response.status_code == 401:
+            await self._authenticate()
+            response = await self._http.get(url, params=params, headers=self._auth)
+        response.raise_for_status()
+        return response
 
-        request_headers = dict(self.config.headers) if self.config.headers else {}
-        if require_auth and self._access_token:
-            request_headers["Authorization"] = f"Bearer {self._access_token}"
-
-        async with httpx.AsyncClient(
-            timeout=self.config.timeout, headers=request_headers, follow_redirects=True
-        ) as client:
-            for attempt in range(self.config.max_retries + 1):
-                try:
-                    self.logger.debug(
-                        f"Making {method} request to {url} (attempt {attempt + 1})"
-                    )
-
-                    if method.upper() == "GET":
-                        response = await client.get(url, params=params)
-                    elif method.upper() == "POST":
-                        response = await client.post(url, params=params, json=json_data)
-                    else:
-                        raise ValueError(f"Unsupported HTTP method: {method}")
-
-                    response.raise_for_status()
-                    self.logger.debug(
-                        f"Successfully fetched {url} - Status: {response.status_code}"
-                    )
-                    return response
-
-                except httpx.HTTPStatusError as e:
-                    self.logger.warning(
-                        f"HTTP error for {url}: {e.response.status_code}"
-                    )
-
-                    if e.response.status_code == 401 and require_auth:
-                        self.logger.info("Received 401, re-authenticating")
-                        if await self._authenticate():
-                            request_headers["Authorization"] = (
-                                f"Bearer {self._access_token}"
-                            )
-                            client.headers.update(request_headers)
-                            continue
-
-                    if attempt == self.config.max_retries:
-                        raise
-
-                except httpx.RequestError as e:
-                    self.logger.warning(f"Request error for {url}: {e}")
-                    if attempt == self.config.max_retries:
-                        raise
-
-                wait_time = 2**attempt
-                self.logger.debug(f"Waiting {wait_time}s before retry...")
-                await asyncio.sleep(wait_time)
-
-        raise RuntimeError(f"retries exhausted for {url}")
+    @property
+    def _auth(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._access_token}"}
 
     async def _fetch_session_metadata(
         self, start_time: datetime, end_time: datetime
     ) -> list[MT_Session]:
         t1, t2 = (int(t.timestamp()) for t in [start_time, end_time])
         params = {
-            "startTime": (f'{{"$gte":{t1},"$lte":{t2}}}',),
+            "startTime": f'{{"$gte":{t1},"$lte":{t2}}}',
             "dataType": "all",
             "items": 1000,
         }
@@ -279,22 +212,28 @@ class MeteoTrackerSource:
 
         for i in range(self.config.max_queries):
             params["page"] = i
-            response = await self._make_request("/sessions", params=params)
+            response = await self._get("/sessions", params=params)
             payload = response.json()
 
             sessions_metadata.append(payload)
             if len(payload) < params["items"]:
                 break
+        else:
+            # Stopping here would ingest a truncated sweep and still claim the
+            # whole range as checked; fail so the trigger redelivers.
+            raise RuntimeError(
+                f"session metadata exceeded max_queries={self.config.max_queries} "
+                f"pages; range not fully swept"
+            )
 
         out = [s for session in sessions_metadata for s in session]
         return [MT_Session(**j) for j in out]
 
     async def _fetch_session_data(self, session: MT_Session):
-        self.logger.debug("Session data fetching")
         variables = session.columns + ["time", "lo"]
         params = dict(id=session.id, data=" ".join(variables))
 
-        response = await self._make_request("/points/session", params=params)
+        response = await self._get("/points/session", params=params)
         payload = response.json()
 
         df = pd.DataFrame.from_records(payload)

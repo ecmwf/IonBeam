@@ -8,14 +8,13 @@ from typing import Optional
 
 import redis.asyncio as redis
 
-from ..models import Window
+from ..provenance import Window
 
 
 class BuildQueue(ABC):
     """Every window awaiting a build, each carrying the time it becomes worth
     building. The builder only ever sees windows whose time has come, so the
-    coordinator's readiness and debounce delays live in the schedule itself
-    rather than in a separate holding pen."""
+    coordinator's readiness and debounce delays live in the schedule itself."""
 
     @abstractmethod
     async def schedule(self, window: Window, eligible_at: datetime) -> None:
@@ -44,7 +43,20 @@ class BuildQueue(ABC):
     async def complete(self, window: Window, next_claim_floor: datetime) -> None:
         """Release a window's lease once handled. A window re-scheduled during
         the build stays queued but cannot be claimed before ``next_claim_floor``;
-        the floor only defers — a later eligibility stands."""
+        the floor only defers — a later eligibility stands. Clears the window
+        from the dead-letter set: a build that eventually succeeds is no longer
+        given up on."""
+
+    @abstractmethod
+    async def park(self, window: Window, next_claim_floor: datetime) -> None:
+        """Give up on a window after exhausted retries: release as
+        :meth:`complete` and record it on the dead-letter set, so operators can
+        see what the builder abandoned. A later claim that changes the
+        window's content retries it as normal."""
+
+    @abstractmethod
+    async def dead_lettered(self) -> list[Window]:
+        """The windows the builder has given up on."""
 
 
 # Atomically claim the earliest due window into the lease set under a deadline,
@@ -81,12 +93,13 @@ class RedisBuildQueue(BuildQueue):
     def __init__(
         self,
         client: redis.Redis,
-        queue_key: str = "dataset_queue",
+        queue_key: str = "ionbeam:dataset_queue",
         lease_ttl: float = 900.0,
     ):
         self.client = client
         self.queue_key = queue_key
         self.lease_key = f"{queue_key}:leased"
+        self.dead_key = f"{queue_key}:dead"
         self._keys = [self.queue_key, self.lease_key]
         self.lease_ttl = lease_ttl
         self._claim = client.register_script(_CLAIM_SCRIPT)
@@ -120,4 +133,24 @@ class RedisBuildQueue(BuildQueue):
                 xx=True,
             )
             pipe.zrem(self.lease_key, window.dataset_key)
+            pipe.srem(self.dead_key, window.dataset_key)
             await pipe.execute()
+
+    async def park(self, window: Window, next_claim_floor: datetime) -> None:
+        async with self.client.pipeline(transaction=True) as pipe:
+            pipe.zadd(
+                self.queue_key,
+                {window.dataset_key: next_claim_floor.timestamp()},
+                gt=True,
+                xx=True,
+            )
+            pipe.zrem(self.lease_key, window.dataset_key)
+            pipe.sadd(self.dead_key, window.dataset_key)
+            await pipe.execute()
+
+    async def dead_lettered(self) -> list[Window]:
+        members = await self.client.smembers(self.dead_key)
+        return sorted(
+            (Window.from_dataset_key(member.decode("utf-8")) for member in members),
+            key=lambda window: window.dataset_key,
+        )

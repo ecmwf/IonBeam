@@ -6,9 +6,9 @@
 from __future__ import annotations
 
 import pyarrow as pa
-from ionbeam_client.arrow_tools import canonical_arrow_schema
+from ionbeam_client.canonical_stream import canonical_arrow_schema
 from ionbeam_client.models import IngestionMetadata
-from ionbeam_client.schema_meta import SCHEMA_HASH
+from ionbeam_client.schema_metadata import SCHEMA_HASH
 
 
 def _schema_metadata(schema: pa.Schema) -> dict[str, str]:

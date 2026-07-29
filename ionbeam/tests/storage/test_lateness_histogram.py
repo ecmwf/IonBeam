@@ -51,13 +51,13 @@ def test_below_min_samples_is_unknown():
 
 
 def test_percentile_over_estimates_toward_completeness():
-    # 950 arrivals at ~1 min, 50 stragglers at ~1 h; p95 sits at the last of the
+    # 950 arrivals at ~1 min, 50 late at ~1 h; p95 sits at the last of the
     # fast bucket, and the estimate is its ceiling — never an under-estimate.
     counts = _histogram(*([60.0] * 950 + [3600.0] * 50))
     p95 = percentile_seconds(counts, 0.95, min_samples=100)
     assert p95 is not None
     assert 60.0 <= p95 <= bucket_ceiling(bucket_for(60.0))
-    # pushing the percentile into the straggler tail returns a much longer wait
+    # pushing the percentile into the late tail returns a much longer wait
     p99 = percentile_seconds(counts, 0.99, min_samples=100)
     assert p99 > p95 * 10
 

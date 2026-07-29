@@ -56,9 +56,7 @@ class ArrowStore(ABC):
         pass
 
     @abstractmethod
-    def read_record_batches(
-        self, key: str, batch_size: Optional[int] = None
-    ) -> AsyncIterator[pa.RecordBatch]:
+    def read_record_batches(self, key: str) -> AsyncIterator[pa.RecordBatch]:
         pass
 
     @abstractmethod
@@ -157,15 +155,9 @@ class LocalFileSystemStore(ArrowStore):
 
         return total_rows
 
-    async def read_record_batches(
-        self, key: str, batch_size: Optional[int] = None
-    ) -> AsyncIterator[pa.RecordBatch]:
-        path = self._get_path(key)
-        parquet_file = pq.ParquetFile(path)
-
-        actual_batch_size = batch_size or 65536
-
-        for batch in parquet_file.iter_batches(batch_size=actual_batch_size):
+    async def read_record_batches(self, key: str) -> AsyncIterator[pa.RecordBatch]:
+        parquet_file = pq.ParquetFile(self._get_path(key))
+        for batch in parquet_file.iter_batches(batch_size=65536):
             await asyncio.sleep(0)
             yield batch
 
@@ -283,15 +275,13 @@ class S3ObjectStore(ArrowStore):
         )
         return total_rows
 
-    async def read_record_batches(
-        self, key: str, batch_size: Optional[int] = None
-    ) -> AsyncIterator[pa.RecordBatch]:
+    async def read_record_batches(self, key: str) -> AsyncIterator[pa.RecordBatch]:
         def _open() -> pq.ParquetFile:
             return pq.ParquetFile(self.filesystem.open_input_file(self._get_path(key)))
 
         parquet_file = await asyncio.to_thread(_open)
 
-        batches = parquet_file.iter_batches(batch_size=batch_size or 65536)
+        batches = parquet_file.iter_batches(batch_size=65536)
         while True:
             batch = await asyncio.to_thread(next, batches, None)
             if batch is None:

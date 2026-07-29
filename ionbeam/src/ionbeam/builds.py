@@ -3,16 +3,23 @@
 
 """Canonical-store layout and build naming.
 
-A window's build is a single file under its dataset's day directory:
-``<dataset>/<YYYYMMDD>/<window start stamp>_<span>-v<version>-<record-set
-hash>``. The day directory fans a dataset's builds across many small
-directories rather than one flat prefix that an S3 lister short-pages; it is
-a plain path segment, never a hive ``key=value`` partition, so nothing parses
-it as a schema column. The stamp and span name the window (matching its
-``_manifests/`` entry), the version orders that window's builds, and the hash
-ties the file to its manifest entry and its footer's ``ionbeam.build``.
-Readers prune by the window interval in the name or by the time column's
-parquet statistics — the layout itself carries no other structure.
+A window's build is a single file under its dataset's start-day partition:
+``<dataset>/ib_year=YYYY/ib_month=MM/ib_day=DD/<window start stamp>_<span>
+-v<version>-<record-set hash>``. The day partition fans a dataset's builds
+across many small directories rather than one flat prefix that an S3 lister
+short-pages, and spells the day as hive ``key=value`` segments: an engine
+pointed at the store can opt into hive parsing and prune on the keys, which
+live in the platform's reserved ``ib_`` namespace so no declared column can
+collide with them. A reader that does not opt in sees inert path segments.
+The stamp and span name the window (matching its ``_manifests/`` entry), the
+version orders that window's builds, and the hash ties the file to its
+manifest entry and its footer's ``ionbeam.build``. Aggregation spans divide
+one day and windows are epoch-aligned (see
+:class:`~ionbeam.datasets.DatasetProductionConfig`), so every window nests
+inside its partition: the rows under an ``ib_day`` are exactly that day's
+rows. Readers also prune by the window interval in the name or by the time
+column's parquet statistics; predicates on the declared time column never
+prune against the partition keys.
 
 A rebuild writes the next version's file beside the current one and never
 touches an existing file. A window's current build is its highest version.
@@ -26,19 +33,18 @@ from typing import Iterable, Optional
 
 from isodate import duration_isoformat
 
-from .models import Window, WindowBuildState
+from .provenance import Window, WindowBuildState
 from .storage.arrow_store import ArrowStore, StoredObject
 
 # longest a build write or an in-flight read of a superseded build can last
 SUPERSEDED_GRACE = timedelta(minutes=30)
 
-# The day segment is optional so a build written under the old flat layout
-# still parses during the retention overlap — same (dataset, window) identity,
-# so its history and reaping are unaffected.
 _BUILD_FILE = re.compile(
-    r"^(?P<dataset>[^/]+)/(?:\d{8}/)?(?P<window>\d{8}T\d{6}_[^-/]+)"
-    r"-v(?P<version>\d+)-[0-9a-f]+$"
+    r"^(?P<dataset>[^/]+)/ib_year=\d{4}/ib_month=\d{2}/ib_day=\d{2}/"
+    r"(?P<window>\d{8}T\d{6}_[^-/]+)-v(?P<version>\d+)-[0-9a-f]+$"
 )
+
+_DAY_PARTITION = "ib_year=%Y/ib_month=%m/ib_day=%d"
 
 
 def window_name(window: Window) -> str:
@@ -56,7 +62,7 @@ def manifest_key(window: Window) -> str:
 
 
 def build_file_key(window: Window, version: int, record_ids_hash: str) -> str:
-    day = window.start.strftime("%Y%m%d")
+    day = window.start.strftime(_DAY_PARTITION)
     return (
         f"{window.dataset}/{day}/{window_name(window)}"
         f"-v{version}-{record_ids_hash[:8]}"
@@ -84,16 +90,16 @@ def next_version(
 
 
 def _day_prefixes(dataset: str, start: datetime, end: datetime) -> list[str]:
-    """The ``<dataset>/<YYYYMMDD>`` prefixes a window starting in ``[start,
-    end)`` can live under. A window's day is its start day, so the range of
-    start days is exactly ``[start.date, end.date]`` inclusive — listed one day
-    at a time because an object store short-pages a listing of the whole
-    dataset directory once it holds enough builds."""
+    """The day-partition prefixes a window starting in ``[start, end)`` can
+    live under. A window's day is its start day, so the range of start days is
+    exactly ``[start.date, end.date]`` inclusive — listed one day at a time
+    because an object store short-pages a listing of the whole dataset
+    directory once it holds enough builds."""
     day = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
     last = datetime(end.year, end.month, end.day, tzinfo=timezone.utc)
     prefixes = []
     while day <= last:
-        prefixes.append(f"{dataset}/{day.strftime('%Y%m%d')}")
+        prefixes.append(f"{dataset}/{day.strftime(_DAY_PARTITION)}")
         day += timedelta(days=1)
     return prefixes
 

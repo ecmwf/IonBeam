@@ -32,8 +32,8 @@ RPC Surface
      - CMD ``{"op": "await_datasets", ...}``
      - Receive pushed dataset availability events (exporters)
    * - ``GetFlightInfo``
-     - CMD ``{"op": "dataset", ...}``
-     - Look up a built dataset window (schema, row count, ticket)
+     - CMD ``{"op": "dataset_range", ...}``
+     - Resolve the current builds in a time range (schema, ticket)
    * - ``DoGet``
      - Ticket ``{"op": "dataset", ...}``
      - Stream a built dataset out (exporters)
@@ -223,7 +223,7 @@ DataSetAvailableEvent
      - End of the dataset temporal window (UTC)
    * - ``is_final``
      - Boolean
-     - The window's finalize delay has passed: this build is immutable and no further revisions will be published
+     - The window is past the hot-store retention: this build is immutable and no further revisions will be published
 
 .. code-block:: json
 
@@ -232,12 +232,11 @@ DataSetAvailableEvent
       "metadata": {
         "name": "weather_stations",
         "description": "Ground weather station observations",
-        "feature_type": "timeSeries",
         "aggregation_span": "PT1H",
         "source_links": [],
         "keywords": ["weather", "temperature"]
       },
-      "dataset_locations": ["weather_stations/20240101/20240101T120000_PT1H-v1-3f9c2a1b"],
+      "dataset_locations": ["weather_stations/ib_year=2024/ib_month=01/ib_day=01/20240101T120000_PT1H-v1-3f9c2a1b"],
       "start_time": "2024-01-01T12:00:00Z",
       "end_time": "2024-01-01T13:00:00Z",
       "is_final": false
@@ -258,17 +257,15 @@ Exporters stream a built dataset with ``DoGet``. The ticket is issued by the ser
 
 .. code-block:: json
 
-    {"op": "dataset", "locations": ["weather_stations/20240101/20240101T120000_PT1H-v1-3f9c2a1b"]}
+    {"op": "dataset", "locations": ["weather_stations/ib_year=2024/ib_month=01/ib_day=01/20240101T120000_PT1H-v1-3f9c2a1b"]}
 
-A single window is looked up via ``GetFlightInfo`` with a command descriptor:
+Builds are resolved via ``GetFlightInfo`` with a command descriptor:
 
 .. code-block:: json
 
-    {"op": "dataset", "dataset": "weather_stations", "start": "2024-01-01T12:00:00Z", "end": "2024-01-01T13:00:00Z"}
+    {"op": "dataset_range", "dataset": "weather_stations", "start": "2024-01-01T12:00:00Z", "end": "2024-01-01T13:00:00Z"}
 
-``op: dataset_range`` takes the same fields and instead resolves the current build of every window starting in ``[start, end)`` — how an exporter rebuilds a cycle from whatever has been published so far.
-
-The returned ``FlightInfo`` carries the dataset schema, total row count (``-1`` for a range), and the ``DoGet`` ticket. If a requested window has not been built, the call fails.
+It resolves the current build of every window starting in ``[start, end)`` — how an exporter rebuilds a cycle from whatever has been published so far. The returned ``FlightInfo`` carries the dataset schema and the ``DoGet`` ticket; the call fails when the range holds no builds.
 
 The streamed data follows the canonical dataset schema; see :ref:`dataset-schema:Dataset Schema`.
 
@@ -312,13 +309,13 @@ The sequence below is one bounded upload from a source named ``weather_stations`
 3. Once the window ``[12:00, 13:00)`` is complete and its settle time passes, a builder publishes it. Each subscribed exporter receives, on its open exchange::
 
     DoExchange CMD {"op": "await_datasets", "exporter_name": "ecmwf"}
-    ← {"id": "7c9e6679-...", "dataset_locations": ["weather_stations/20240101/20240101T120000_PT1H-v1-3f9c2a1b"],
+    ← {"id": "7c9e6679-...", "dataset_locations": ["weather_stations/ib_year=2024/ib_month=01/ib_day=01/20240101T120000_PT1H-v1-3f9c2a1b"],
        "start_time": "2024-01-01T12:00:00Z", "end_time": "2024-01-01T13:00:00Z",
        "is_final": false, "metadata": {...}}
 
 4. The exporter streams the dataset and acknowledges the event::
 
-    DoGet  Ticket {"op": "dataset", "locations": ["weather_stations/20240101/20240101T120000_PT1H-v1-3f9c2a1b"]}
+    DoGet  Ticket {"op": "dataset", "locations": ["weather_stations/ib_year=2024/ib_month=01/ib_day=01/20240101T120000_PT1H-v1-3f9c2a1b"]}
     ← Arrow RecordBatch stream (canonical schema, sorted by time)
 
 If late data for the window arrives while it is still revisable, steps 3 and 4 repeat with a fresh event for the rebuilt window.
@@ -361,7 +358,7 @@ The canonical stream then carries::
 Dataset Data
 ~~~~~~~~~~~~
 
-Built datasets streamed via ``DoGet`` carry the declared canonical schema: plain column names, with structure and semantics in Arrow field metadata and the dataset's production descriptor in schema metadata. Consumers read them through ``ionbeam_client.schema_meta``; see :doc:`dataset-schema`.
+Built datasets streamed via ``DoGet`` carry the declared canonical schema: plain column names, with structure and semantics in Arrow field metadata and the dataset's production descriptor in schema metadata. Consumers read them through ``ionbeam_client.schema_metadata``; see :doc:`dataset-schema`.
 
 Metadata Structures
 -------------------

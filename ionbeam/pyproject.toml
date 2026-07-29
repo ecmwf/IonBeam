@@ -10,7 +10,6 @@ dependencies = [
     # deterministic at the Flight edge (the client lib treats it as optional)
     "cf-units>=3.3.0",
     "click>=8.0.0",
-    "dependency-injector[yaml]>=4.48.1",
     "influxdb3-python>=0.9.0",
     "isodate>=0.7.2",
     "numpy>=2.3.2",
@@ -18,6 +17,7 @@ dependencies = [
     "prometheus-client>=0.20.0",
     "pyarrow>=22.0.0",
     "pydantic>=2.11.7",
+    "pyyaml>=6.0.3",
     "redis>=6.4.0",
     "structlog>=25.4.0",
 ]

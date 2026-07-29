@@ -12,7 +12,7 @@ def test_registry_entry_inherits_defaults_and_overrides_per_key():
     registry = DatasetRegistry.from_config(
         {
             "defaults": {"aggregation_span": "PT1H", "rebuild_debounce": "PT10M"},
-            "registry": {"netatmo": {"finalize_after": "PT48H"}},
+            "registry": {"netatmo": {"dedup_ingestion": True}},
         }
     )
 
@@ -21,7 +21,7 @@ def test_registry_entry_inherits_defaults_and_overrides_per_key():
     assert netatmo.aggregation_span == timedelta(hours=1)
     assert netatmo.rebuild_debounce == timedelta(minutes=10)
     # the override itself
-    assert netatmo.finalize_after == timedelta(hours=48)
+    assert netatmo.dedup_ingestion is True
 
 
 def test_unconfigured_dataset_falls_back_to_defaults():
@@ -31,8 +31,7 @@ def test_unconfigured_dataset_falls_back_to_defaults():
 
     fallback = registry.get("anything")
     assert fallback.aggregation_span == timedelta(hours=1)
-    # no explicit finalize_after ⇒ the delay falls to the hot-store retention
-    assert fallback.finalize_delay(timedelta(days=7)) == timedelta(days=7)
+    assert fallback.seal_delay(timedelta(days=7)) == timedelta(days=7, hours=1)
 
 def test_aggregation_span_must_be_positive():
     DatasetProductionConfig(aggregation_span=timedelta(minutes=10))

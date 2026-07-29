@@ -20,8 +20,8 @@ class CoordinatorMetrics:
             registry=registry,
         )
 
-        self._stragglers_dropped_total = Counter(
-            name="ionbeam_coordinator_stragglers_dropped_total",
+        self._sealed_arrivals_dropped_total = Counter(
+            name="ionbeam_coordinator_sealed_arrivals_dropped_total",
             documentation="Total late records dropped because the window was already final",
             labelnames=["dataset"],
             registry=registry,
@@ -40,8 +40,8 @@ class CoordinatorMetrics:
     def window_enqueued(self, dataset: str) -> None:
         self._windows_enqueued_total.labels(dataset=dataset).inc()
 
-    def straggler_dropped(self, dataset: str) -> None:
-        self._stragglers_dropped_total.labels(dataset=dataset).inc()
+    def sealed_arrival_dropped(self, dataset: str) -> None:
+        self._sealed_arrivals_dropped_total.labels(dataset=dataset).inc()
 
     def observe_lateness_p95(self, dataset: str, seconds: float) -> None:
         self._lateness_p95_seconds.labels(dataset=dataset).set(seconds)

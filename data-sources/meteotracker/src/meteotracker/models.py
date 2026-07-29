@@ -39,7 +39,6 @@ class MT_Session:
 
     id: SessionId
     n_points: int
-    offset_tz: str
     start_time: datetime
     author: str
     end_time: datetime | None
@@ -48,7 +47,6 @@ class MT_Session:
     def __init__(self, **d):
         self.id = SessionId(d["_id"])
         self.n_points = int(d["nPoints"])
-        self.offset_tz = d["offsetTZ"]
         self.start_time = datetime.fromisoformat(d["startTime"])
         self.end_time = datetime.fromisoformat(d["endTime"]) if "endTime" in d else None
         self.columns = [k for k in d if isinstance(d[k], dict) and "avgVal" in d[k]]

@@ -15,7 +15,7 @@ import structlog
 
 from .config import IonbeamClientConfig
 from .models import DataSetAvailableEvent, IngestDataCommand, IngestionMetadata
-from .schema_meta import SCHEMA_HASH
+from .schema_metadata import SCHEMA_HASH
 
 class IngestRejected(ValueError):
     """The stream can never be ingested as-is (contract violation, empty

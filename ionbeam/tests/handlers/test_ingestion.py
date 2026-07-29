@@ -19,48 +19,51 @@ from ionbeam_client.models import (
     Variable,
     geographic_point_coordinates,
 )
-from ionbeam_client.arrow_tools import canonical_arrow_schema
-from ionbeam_client.schema_meta import SCHEMA_HASH
+from ionbeam_client.canonical_stream import canonical_arrow_schema
+from ionbeam_client.schema_metadata import SCHEMA_HASH
 from ionbeam.datasets import DatasetProductionConfig, DatasetRegistry
-from ionbeam.handlers.ingestion_handler import IngestionHandler
+from ionbeam.handlers.ingestion import Ingestion
 from ionbeam.observability import IngestionMetrics
 from ionbeam.storage.lateness_histogram import bucket_for
 
 
 @pytest.fixture
-def make_ingestion_handler(
-    mock_timeseries_db,
+def make_ingestion(
+    timeseries_db,
     ingestion_metrics: IngestionMetrics,
-    mock_ingestion_record_store,
+    coordination_store,
 ):
-    """Build a handler whose registry aggregates ``test_dataset`` at ``span`` — the
-    aggregation span is server-side production config now, not part of what a source
-    declares, so the coverage-checkpoint span is fixed here rather than in metadata."""
+    """Build a handler whose registry aggregates ``test_dataset`` at ``span`` —
+    the aggregation span is server-side production config, so the
+    coverage-checkpoint span is fixed here rather than in metadata."""
 
     def _make(
         span: timedelta = timedelta(days=1),
-        finalize_after: timedelta | None = None,
+        retention: timedelta = timedelta(days=7),
         dedup_ingestion: bool = False,
-    ) -> IngestionHandler:
+    ) -> Ingestion:
         registry = DatasetRegistry(
             {
                 "test_dataset": DatasetProductionConfig(
                     aggregation_span=span,
-                    finalize_after=finalize_after,
                     dedup_ingestion=dedup_ingestion,
                 )
             }
         )
-        return IngestionHandler(
-            mock_timeseries_db, ingestion_metrics, mock_ingestion_record_store, registry
+        return Ingestion(
+            timeseries_db,
+            ingestion_metrics,
+            coordination_store,
+            registry,
+            retention=retention,
         )
 
     return _make
 
 
 @pytest.fixture
-def ingestion_handler(make_ingestion_handler):
-    return make_ingestion_handler()
+def ingestion(make_ingestion):
+    return make_ingestion()
 
 
 @pytest.fixture
@@ -141,7 +144,7 @@ class TestCoverageCheckpoints:
 
     async def _run(
         self,
-        ingestion_handler,
+        ingestion,
         metadata,
         batches,
         events,
@@ -151,7 +154,7 @@ class TestCoverageCheckpoints:
         async def record(event: DataAvailableEvent) -> None:
             events.append(event)
 
-        return await ingestion_handler.ingest(
+        return await ingestion.ingest(
             ingestion_id=ingestion_id or uuid4(),
             metadata=metadata,
             start_time=DECLARED_START,
@@ -161,7 +164,7 @@ class TestCoverageCheckpoints:
         )
 
     async def test_stream_within_one_window_publishes_only_the_final_event(
-        self, make_ingestion_handler, sample_metadata
+        self, make_ingestion, sample_metadata
     ):
         """Default day-long aggregation: an hour of data crosses no boundary."""
         ingestion_id = uuid4()
@@ -171,7 +174,7 @@ class TestCoverageCheckpoints:
         )
 
         result = await self._run(
-            make_ingestion_handler(),
+            make_ingestion(),
             sample_metadata,
             _stream(_stream_batch(timestamps, sample_metadata)),
             events,
@@ -186,9 +189,9 @@ class TestCoverageCheckpoints:
         assert result.end_time == DECLARED_END
 
     async def test_checkpoint_publishes_when_watermark_crosses_window_boundary(
-        self, make_ingestion_handler
+        self, make_ingestion
     ):
-        ingestion_handler = make_ingestion_handler(self.SPAN)
+        ingestion = make_ingestion(self.SPAN)
         metadata = _metadata()
         ingestion_id = uuid4()
         events: list[DataAvailableEvent] = []
@@ -204,7 +207,7 @@ class TestCoverageCheckpoints:
 
         with structlog.testing.capture_logs() as logs:
             result = await self._run(
-                ingestion_handler, metadata, batches(), events, ingestion_id=ingestion_id
+                ingestion, metadata, batches(), events, ingestion_id=ingestion_id
             )
 
         # nothing inside the first window; one checkpoint on crossing; none without
@@ -224,14 +227,14 @@ class TestCoverageCheckpoints:
         assert not any(log["log_level"] == "warning" for log in logs)
 
     async def test_checkpoints_chain_contiguously_and_batch_spanning_windows_checkpoint_once(
-        self, make_ingestion_handler
+        self, make_ingestion
     ):
-        ingestion_handler = make_ingestion_handler(self.SPAN)
+        ingestion = make_ingestion(self.SPAN)
         metadata = _metadata()
         events: list[DataAvailableEvent] = []
 
         result = await self._run(
-            ingestion_handler,
+            ingestion,
             metadata,
             _stream(
                 _stream_batch([_at(0), _at(11)], metadata),
@@ -251,16 +254,16 @@ class TestCoverageCheckpoints:
         assert result.end_time == DECLARED_END
 
     async def test_late_data_widens_the_next_checkpoint_to_cover_its_window(
-        self, make_ingestion_handler
+        self, make_ingestion
     ):
         """Data older than what is already checkpointed must be re-checkpointed under a fresh
         record id, so windows already built from earlier checkpoints get rebuilt."""
-        ingestion_handler = make_ingestion_handler(self.SPAN)
+        ingestion = make_ingestion(self.SPAN)
         metadata = _metadata()
         events: list[DataAvailableEvent] = []
 
         await self._run(
-            ingestion_handler,
+            ingestion,
             metadata,
             _stream(
                 _stream_batch([_at(0), _at(12)], metadata),
@@ -275,7 +278,7 @@ class TestCoverageCheckpoints:
         assert late_checkpoint.id != events[0].id
 
     async def test_replaying_the_same_command_yields_the_same_record_ids(
-        self, make_ingestion_handler
+        self, make_ingestion
     ):
         """A retried command must not look like new data: identical stream, identical
         ingestion id => identical checkpoint ids, so no spurious window rebuilds."""
@@ -283,7 +286,7 @@ class TestCoverageCheckpoints:
         ingestion_id = uuid4()
 
         async def run() -> list[DataAvailableEvent]:
-            handler = make_ingestion_handler(self.SPAN)
+            handler = make_ingestion(self.SPAN)
             events: list[DataAvailableEvent] = []
             await self._run(
                 handler,
@@ -336,11 +339,11 @@ class TestRowProvenance:
         return events
 
     async def test_rows_are_tagged_with_the_record_that_delivers_them(
-        self, make_ingestion_handler, mock_timeseries_db
+        self, make_ingestion, timeseries_db
     ):
         """Rows written before a checkpoint fires belong to that checkpoint; rows after
         it belong to the next checkpoint (the final record)."""
-        handler = make_ingestion_handler(self.SPAN)
+        handler = make_ingestion(self.SPAN)
         metadata = _metadata()
 
         events = await self._ingest(
@@ -357,7 +360,7 @@ class TestRowProvenance:
         # publishes exactly the records whose rows it wrote
         tagged = [
             set(call["table"].column("ib_record_id").to_pylist())
-            for call in mock_timeseries_db.write_calls
+            for call in timeseries_db.write_calls
         ]
         assert tagged == [
             {str(record.id) for record in events[0].records},
@@ -372,7 +375,7 @@ class TestRowProvenance:
         )
 
     async def test_dedup_ingestion_write_only_novel_content(
-        self, make_ingestion_handler, mock_timeseries_db
+        self, make_ingestion, timeseries_db
     ):
         """A sweep source re-fetching history re-delivers identical rows under
         fresh record ids; a delta dataset stores only changed content — and the
@@ -382,21 +385,21 @@ class TestRowProvenance:
         def sweep(temperatures):
             return [self._batch(metadata, [0, 2, 4], temperatures)]
 
-        handler = make_ingestion_handler(self.SPAN, dedup_ingestion=True)
+        handler = make_ingestion(self.SPAN, dedup_ingestion=True)
         await self._ingest(handler, metadata, sweep([20.0, 21.0, 22.0]))
         await self._ingest(handler, metadata, sweep([20.0, 21.0, 22.0]))
         await self._ingest(handler, metadata, sweep([20.0, 18.5, 22.0]))
 
         written = [
             call["table"].column("temperature").to_pylist()
-            for call in mock_timeseries_db.write_calls
+            for call in timeseries_db.write_calls
         ]
         # first sweep stores all rows; the identical sweep stores nothing
         # (no write at all); the correcting sweep stores just the changed row
         assert written == [[20.0, 21.0, 22.0], [18.5]]
 
     async def test_delta_marks_nothing_stored_when_the_write_fails(
-        self, make_ingestion_handler, mock_timeseries_db
+        self, make_ingestion, timeseries_db
     ):
         """Stored-content sets are marked only after the write succeeds: a
         failed write followed by a retry must persist every row — the failure
@@ -407,8 +410,8 @@ class TestRowProvenance:
         def batches():
             return [self._batch(metadata, [0, 2, 4], [20.0, 21.0, 22.0])]
 
-        handler = make_ingestion_handler(self.SPAN, dedup_ingestion=True)
-        healthy_write = mock_timeseries_db.write
+        handler = make_ingestion(self.SPAN, dedup_ingestion=True)
+        healthy_write = timeseries_db.write
         outage = {"remaining": 1}
 
         async def flaky_write(**kwargs):
@@ -417,19 +420,19 @@ class TestRowProvenance:
                 raise ConnectionError("influx unavailable")
             return await healthy_write(**kwargs)
 
-        mock_timeseries_db.write = flaky_write
+        timeseries_db.write = flaky_write
 
         with pytest.raises(ConnectionError):
             await self._ingest(handler, metadata, batches(), ingestion_id=ingestion_id)
 
         await self._ingest(handler, metadata, batches(), ingestion_id=ingestion_id)
-        assert len(mock_timeseries_db.write_calls) == 1
-        assert mock_timeseries_db.write_calls[0]["table"].num_rows == 3
+        assert len(timeseries_db.write_calls) == 1
+        assert timeseries_db.write_calls[0]["table"].num_rows == 3
 
 
-class TestIngestionHandler:
+class TestIngestion:
     async def test_ingestion_canonicalizes_and_writes_to_timeseries(
-        self, ingestion_handler, sample_metadata, mock_timeseries_db
+        self, ingestion, sample_metadata, timeseries_db
     ):
         """Streamed batches are canonicalized (renames, tz, sort, tags) and written."""
         timestamps = list(
@@ -437,7 +440,7 @@ class TestIngestionHandler:
         )
         batch = _stream_batch(list(reversed(timestamps)), sample_metadata)  # unsorted on purpose
 
-        result = await ingestion_handler.ingest(
+        result = await ingestion.ingest(
             ingestion_id=uuid4(),
             metadata=sample_metadata,
             start_time=DECLARED_START,
@@ -451,8 +454,8 @@ class TestIngestionHandler:
         assert result.start_time == DECLARED_START
         assert result.end_time == DECLARED_END
 
-        assert len(mock_timeseries_db.write_calls) == 1
-        write_call = mock_timeseries_db.write_calls[0]
+        assert len(timeseries_db.write_calls) == 1
+        write_call = timeseries_db.write_calls[0]
 
         assert write_call["measurement"] == "test_dataset"
         assert write_call["timestamp_column"] == "time"
@@ -474,10 +477,10 @@ class TestIngestionHandler:
         assert written_df["time"].is_monotonic_increasing
 
     async def test_ingestion_records_per_datum_arrival_lateness(
-        self, ingestion_handler, sample_metadata, mock_ingestion_record_store
+        self, ingestion, sample_metadata, coordination_store
     ):
         """Every datum's lateness — now minus its own observation time — lands in
-        the histogram, so a batch carrying stragglers records the late tail, not a
+        the histogram, so a batch carrying late rows records the late tail, not a
         single freshest-point sample. Distinct stations, so no row is a content
         duplicate of another."""
         now = pd.Timestamp.now(tz="UTC")
@@ -493,7 +496,7 @@ class TestIngestionHandler:
             },
         )
 
-        await ingestion_handler.ingest(
+        await ingestion.ingest(
             ingestion_id=uuid4(),
             metadata=sample_metadata,
             start_time=DECLARED_START,
@@ -502,7 +505,7 @@ class TestIngestionHandler:
             on_data_available=_discard,
         )
 
-        histogram = mock_ingestion_record_store._lateness["test_dataset"]
+        histogram = coordination_store._lateness["test_dataset"]
         assert sum(histogram.values()) == 5
         assert histogram == {
             bucket_for(3600): 3,
@@ -520,11 +523,12 @@ class TestIngestionHandler:
         )
 
     async def test_identical_redelivery_records_lateness_only_once(
-        self, make_ingestion_handler, sample_metadata, mock_ingestion_record_store
+        self, make_ingestion, sample_metadata, coordination_store
     ):
-        """A pull source re-fetching an overlapping span re-delivers the same rows;
-        they must not re-count as late arrivals."""
-        handler = make_ingestion_handler()
+        """A ``dedup_ingestion`` source re-fetching an overlapping span re-delivers
+        the same rows; the write suppresses them, so they never re-count as late
+        arrivals."""
+        handler = make_ingestion(dedup_ingestion=True)
         now = pd.Timestamp.now(tz="UTC")
         timestamps = [now - pd.Timedelta(minutes=m) for m in range(60, 65)]
         batch = _stream_batch(timestamps, sample_metadata)
@@ -532,15 +536,15 @@ class TestIngestionHandler:
         await self._ingest(handler, sample_metadata, batch)
         await self._ingest(handler, sample_metadata, batch)
 
-        histogram = mock_ingestion_record_store._lateness["test_dataset"]
+        histogram = coordination_store._lateness["test_dataset"]
         assert sum(histogram.values()) == 5
 
     async def test_qc_update_changing_a_value_is_still_recorded(
-        self, make_ingestion_handler, sample_metadata, mock_ingestion_record_store
+        self, make_ingestion, sample_metadata, coordination_store
     ):
         """netatmo's QC pass rewrites a value ~2h later: same station and time,
         different content — that genuinely late change must land in the histogram."""
-        handler = make_ingestion_handler()
+        handler = make_ingestion(dedup_ingestion=True)
         timestamps = [pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=1)] * 3
 
         def batch(temperatures):
@@ -558,15 +562,15 @@ class TestIngestionHandler:
         await self._ingest(handler, sample_metadata, batch([20.0, 21.0, 22.0]))
         await self._ingest(handler, sample_metadata, batch([20.0, 18.5, 22.0]))
 
-        histogram = mock_ingestion_record_store._lateness["test_dataset"]
+        histogram = coordination_store._lateness["test_dataset"]
         assert sum(histogram.values()) == 4
 
     async def test_redelivery_spanning_windows_dedups_each_window(
-        self, make_ingestion_handler, sample_metadata, mock_ingestion_record_store
+        self, make_ingestion, sample_metadata, coordination_store
     ):
         """One batch can straddle aggregation windows (a multi-hour re-fetch);
-        every row must dedup against its own window's filter."""
-        handler = make_ingestion_handler(span=timedelta(hours=1))
+        every row must dedup against its own window's stored-content set."""
+        handler = make_ingestion(span=timedelta(hours=1), dedup_ingestion=True)
         now = pd.Timestamp.now(tz="UTC")
         timestamps = [now - pd.Timedelta(minutes=m) for m in (30, 90, 150)]
         batch = _stream_batch(timestamps, sample_metadata)
@@ -574,17 +578,34 @@ class TestIngestionHandler:
         await self._ingest(handler, sample_metadata, batch)
         await self._ingest(handler, sample_metadata, batch)
 
-        histogram = mock_ingestion_record_store._lateness["test_dataset"]
+        histogram = coordination_store._lateness["test_dataset"]
         assert sum(histogram.values()) == 3
 
+    async def test_redelivery_without_dedup_ingestion_counts_again(
+        self, make_ingestion, sample_metadata, coordination_store
+    ):
+        """The histogram counts what the store writes: a push feed without
+        ``dedup_ingestion`` records its rare redeliveries again — noise a p95
+        tolerates, in exchange for no second dedup machinery."""
+        handler = make_ingestion()
+        now = pd.Timestamp.now(tz="UTC")
+        timestamps = [now - pd.Timedelta(minutes=m) for m in range(60, 65)]
+        batch = _stream_batch(timestamps, sample_metadata)
+
+        await self._ingest(handler, sample_metadata, batch)
+        await self._ingest(handler, sample_metadata, batch)
+
+        histogram = coordination_store._lateness["test_dataset"]
+        assert sum(histogram.values()) == 10
+
     async def test_rows_for_a_sealed_window_are_not_recorded(
-        self, make_ingestion_handler, sample_metadata, mock_ingestion_record_store
+        self, make_ingestion, sample_metadata, coordination_store
     ):
         """A row whose window is already final cannot affect any build; letting it
         into the histogram would push the settle gate past the point where waiting
-        can help (the sensor.community 56h-p95 failure mode)."""
-        handler = make_ingestion_handler(
-            span=timedelta(hours=1), finalize_after=timedelta(hours=48)
+        can help."""
+        handler = make_ingestion(
+            span=timedelta(hours=1), retention=timedelta(hours=48)
         )
         now = pd.Timestamp.now(tz="UTC")
         timestamps = [now - pd.Timedelta(hours=h) for h in (72, 96)]
@@ -592,11 +613,11 @@ class TestIngestionHandler:
 
         await self._ingest(handler, sample_metadata, batch)
 
-        histogram = mock_ingestion_record_store._lateness.get("test_dataset", {})
+        histogram = coordination_store._lateness.get("test_dataset", {})
         assert sum(histogram.values()) == 0
 
     async def test_stream_with_undeclared_column_types_is_rejected(
-        self, ingestion_handler, sample_metadata
+        self, ingestion, sample_metadata
     ):
         """A correctly-named, correctly-stamped stream still fails the contract
         if a column's Arrow type differs from the declared dtype."""
@@ -621,7 +642,7 @@ class TestIngestionHandler:
         )
 
         with pytest.raises(ValueError, match="'temperature' type mismatch"):
-            await ingestion_handler.ingest(
+            await ingestion.ingest(
                 ingestion_id=uuid4(),
                 metadata=sample_metadata,
                 start_time=DECLARED_START,
@@ -631,7 +652,7 @@ class TestIngestionHandler:
             )
 
     async def test_ingestion_widens_end_to_actual_data_end(
-        self, ingestion_handler, sample_metadata
+        self, ingestion, sample_metadata
     ):
         """Data past the declared end widens the record's end; the declared start is kept."""
         declared_end = DECLARED_START + timedelta(minutes=5)
@@ -641,7 +662,7 @@ class TestIngestionHandler:
         )
 
         with structlog.testing.capture_logs() as logs:
-            result = await ingestion_handler.ingest(
+            result = await ingestion.ingest(
                 ingestion_id=uuid4(),
                 metadata=sample_metadata,
                 start_time=DECLARED_START,
@@ -655,14 +676,14 @@ class TestIngestionHandler:
         assert any(log["log_level"] == "warning" for log in logs)
 
     async def test_ingestion_keeps_declared_bounds_when_data_inside_window(
-        self, ingestion_handler, sample_metadata
+        self, ingestion, sample_metadata
     ):
         timestamps = list(
             pd.date_range(DECLARED_START, periods=10, freq="1min", tz="UTC")
         )
 
         with structlog.testing.capture_logs() as logs:
-            result = await ingestion_handler.ingest(
+            result = await ingestion.ingest(
                 ingestion_id=uuid4(),
                 metadata=sample_metadata,
                 start_time=DECLARED_START,
@@ -676,7 +697,7 @@ class TestIngestionHandler:
         assert not any(log["log_level"] == "warning" for log in logs)
 
     async def test_zero_canonical_rows_still_returns_event_with_declared_bounds(
-        self, ingestion_handler, sample_metadata, mock_timeseries_db
+        self, ingestion, sample_metadata, timeseries_db
     ):
         """A window the source covered but that held no data still yields coverage."""
         batch = _canonical_batch(
@@ -691,7 +712,7 @@ class TestIngestionHandler:
         )
 
         ingestion_id = uuid4()
-        result = await ingestion_handler.ingest(
+        result = await ingestion.ingest(
             ingestion_id=ingestion_id,
             metadata=sample_metadata,
             start_time=DECLARED_START,
@@ -704,4 +725,4 @@ class TestIngestionHandler:
         assert result.start_time == DECLARED_START
         assert result.end_time == DECLARED_END
         assert result.records == []  # coverage without rows claims no records
-        assert mock_timeseries_db.write_calls == []
+        assert timeseries_db.write_calls == []

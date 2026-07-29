@@ -10,9 +10,9 @@ from typing import AsyncIterator, Union
 import pandas as pd
 import pyarrow as pa
 
-from .dataframe_tools import align_to_schema, coerce_types
+from .alignment import align_to_schema, coerce_types
 from .models import DatasetMetadata, IngestionMetadata, ScalarDType
-from .schema_meta import attach_metadata
+from .schema_metadata import attach_metadata
 
 DataFrameStream = Union[AsyncIterable[pd.DataFrame], Iterable[pd.DataFrame]]
 

@@ -8,7 +8,7 @@ import pyarrow as pa
 import pytest
 
 
-class MockArrowStore:
+class FakeArrowStore:
     """In-memory, write-once Arrow store for the exporter tests."""
 
     def __init__(self) -> None:
@@ -32,11 +32,7 @@ class MockArrowStore:
         self._storage[key] = batches
         return total_rows
 
-    def read_record_batches(
-        self,
-        key: str,
-        batch_size: Optional[int] = None,
-    ) -> AsyncIterator[pa.RecordBatch]:
+    def read_record_batches(self, key: str) -> AsyncIterator[pa.RecordBatch]:
         async def _generator():
             for batch in self._storage.get(key, []):
                 yield batch
@@ -51,14 +47,14 @@ class MockArrowStore:
 
 
 @pytest.fixture
-def mock_arrow_store() -> MockArrowStore:
+def arrow_store() -> FakeArrowStore:
     """Provide a mock Arrow store for tests."""
-    return MockArrowStore()
+    return FakeArrowStore()
 
 
 @pytest.fixture
 def arrow_store_writer(
-    mock_arrow_store: MockArrowStore,
+    arrow_store: FakeArrowStore,
 ) -> Callable[[str, pd.DataFrame, Optional[pa.Schema]], Awaitable[int]]:
     async def _writer(
         key: str,
@@ -71,6 +67,6 @@ def arrow_store_writer(
         async def stream():
             yield pa.RecordBatch.from_pandas(df, schema=schema, preserve_index=False)
 
-        return await mock_arrow_store.write_record_batches(key, stream(), schema=schema)
+        return await arrow_store.write_record_batches(key, stream(), schema=schema)
 
     return _writer

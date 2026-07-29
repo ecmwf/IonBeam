@@ -10,7 +10,7 @@ import redis.asyncio as redis
 import structlog
 from pydantic import ValidationError
 
-from ..models import (
+from ..provenance import (
     CoverageClaim,
     IngestionRecord,
     RegisteredDatasetMetadata,
@@ -22,7 +22,7 @@ from .lateness_histogram import percentile_seconds
 logger = structlog.get_logger(__name__)
 
 
-class IngestionRecordStore(ABC):
+class CoordinationStore(ABC):
     """Interface for storing ingestion records, registered schemas, and window state."""
 
     @abstractmethod
@@ -96,30 +96,6 @@ class IngestionRecordStore(ABC):
         pass
 
     @abstractmethod
-    async def filter_unseen(
-        self,
-        dataset: str,
-        window_start: int,
-        fingerprints: list[bytes],
-        capacity: int,
-        expire_at: datetime,
-        now: datetime,
-    ) -> np.ndarray:
-        """Which rows of one aggregation window's batch are newly seen content.
-
-        ``fingerprints`` are per-row content digests (see :mod:`.fingerprints`)
-        of rows whose observation time falls in the window starting at
-        ``window_start`` (epoch seconds). Returns a bool mask ``(n_rows,)``, True
-        where the row's content has not been seen in that window before; each row
-        is marked seen as it is checked, in order, so a duplicate later in the
-        same batch reads as seen. ``capacity`` sizes the window's filter at
-        creation (the dataset's expected distinct row-contents per window). The
-        filter is forgotten at ``expire_at`` — its seal time, past which arrivals
-        can no longer affect any build. ``now`` is passed in so adapters stay
-        deterministic."""
-        pass
-
-    @abstractmethod
     async def stored_content(
         self, dataset: str, window_start: int, fingerprints: list[bytes]
     ) -> np.ndarray:
@@ -127,10 +103,10 @@ class IngestionRecordStore(ABC):
         the time-series store — the read half of ``dedup_ingestion``. Exact
         membership, never a Bloom filter: a false positive here would silently
         drop a real row from the store. Returns a bool mask ``(n_rows,)``, True
-        where the content is already stored. Unlike :meth:`filter_unseen` this
-        does NOT mark anything — call :meth:`mark_content_stored` only after the
-        rows' write has succeeded, so every failure mode degrades toward storing
-        a duplicate, never toward losing a row."""
+        where the content is already stored. This does NOT mark anything — call
+        :meth:`mark_content_stored` only after the rows' write has succeeded, so
+        every failure mode degrades toward storing a duplicate, never toward
+        losing a row."""
         pass
 
     @abstractmethod
@@ -147,17 +123,14 @@ class IngestionRecordStore(ABC):
         pass
 
 
-# Cap items per BF.INSERT so one dedup call never blocks the shared Valkey
+# Cap items per command so one dedup call never blocks the shared Valkey
 # (which also carries the streams bus) for an unbounded burst, and can never
 # approach the server's 1M-argument command limit however large a batch grows.
 _DEDUP_ITEMS_PER_COMMAND = 10_000
-_DEDUP_ERROR_RATE = "0.01"
 
 
-class RedisIngestionRecordStore(IngestionRecordStore):
-    """Redis implementation of IngestionRecordStore. The dedup filters need the
-    server to provide the valkey-bloom ``BF.*`` commands (the valkey-bundle
-    image, or Redis with the RedisBloom module)."""
+class RedisCoordinationStore(CoordinationStore):
+    """Redis implementation of CoordinationStore."""
 
     def __init__(self, client: redis.Redis, retention: timedelta = timedelta(days=7)):
         # coordination state must outlive every window it can still affect
@@ -165,25 +138,22 @@ class RedisIngestionRecordStore(IngestionRecordStore):
         self._ttl = int(retention.total_seconds())
 
     def _ingestion_record_key(self, dataset: str, record_id: str) -> str:
-        return f"ingestion_records:{dataset}:{record_id}"
+        return f"ionbeam:ingestion_records:{dataset}:{record_id}"
 
     def _registered_metadata_key(self, dataset: str) -> str:
-        return f"registered_metadata:{dataset}"
+        return f"ionbeam:registered_metadata:{dataset}"
 
     def _desired_records_key(self, window: Window) -> str:
-        return f"{window.dataset_key}:desired_records"
+        return f"ionbeam:window:{window.dataset_key}:desired_records"
 
     def _window_state_key(self, window: Window) -> str:
-        return f"{window.dataset_key}:state"
+        return f"ionbeam:window:{window.dataset_key}:state"
 
     def _lateness_key(self, dataset: str, hour: int) -> str:
-        return f"lateness:{dataset}:{hour}"
-
-    def _dedup_key(self, dataset: str, window_start: int) -> str:
-        return f"dedup:{dataset}:{window_start}"
+        return f"ionbeam:lateness:{dataset}:{hour}"
 
     def _stored_key(self, dataset: str, window_start: int) -> str:
-        return f"delta_stored:{dataset}:{window_start}"
+        return f"ionbeam:delta_stored:{dataset}:{window_start}"
 
     async def save_registered_metadata(self, record: RegisteredDatasetMetadata) -> None:
         key = self._registered_metadata_key(record.metadata.name)
@@ -205,7 +175,7 @@ class RedisIngestionRecordStore(IngestionRecordStore):
             return None
 
     def _coverage_claim_key(self, dataset: str, claim_id: str) -> str:
-        return f"coverage_claims:{dataset}:{claim_id}"
+        return f"ionbeam:coverage_claims:{dataset}:{claim_id}"
 
     async def save_ingestion_record(self, record: IngestionRecord) -> None:
         key = self._ingestion_record_key(record.metadata.name, record.id)
@@ -216,7 +186,7 @@ class RedisIngestionRecordStore(IngestionRecordStore):
         await self.client.set(key, claim.model_dump_json(), ex=self._ttl)
 
     async def get_coverage_claims(self, dataset: str) -> List[CoverageClaim]:
-        pattern = f"coverage_claims:{dataset}:*"
+        pattern = f"ionbeam:coverage_claims:{dataset}:*"
         keys = [key async for key in self.client.scan_iter(match=pattern, count=500)]
         if not keys:
             return []
@@ -228,7 +198,7 @@ class RedisIngestionRecordStore(IngestionRecordStore):
         ]
 
     async def get_ingestion_records(self, dataset: str) -> List[IngestionRecord]:
-        pattern = f"ingestion_records:{dataset}:*"
+        pattern = f"ionbeam:ingestion_records:{dataset}:*"
         keys = [key async for key in self.client.scan_iter(match=pattern, count=500)]
         if not keys:
             return []
@@ -326,42 +296,6 @@ class RedisIngestionRecordStore(IngestionRecordStore):
         seconds = percentile_seconds(counts, percentile, min_samples)
         return timedelta(seconds=seconds) if seconds is not None else None
 
-    async def filter_unseen(
-        self,
-        dataset: str,
-        window_start: int,
-        fingerprints: list[bytes],
-        capacity: int,
-        expire_at: datetime,
-        now: datetime,
-    ) -> np.ndarray:
-        # One valkey-bloom filter per (dataset, aggregation window): a re-delivery
-        # carries its original observation time, so it always lands in the filter
-        # that remembers it, however late it re-arrives while the window is
-        # revisable. The key expires at the window's seal time, when stragglers
-        # stop mattering. BF.INSERT is an atomic check-and-add returning 1 per
-        # newly added item, so concurrent replicas never double-count a row.
-        # CAPACITY applies only when the command creates the filter; a window that
-        # outgrows it scales by stacking sub-filters (slower, looser error) rather
-        # than erroring.
-        if not fingerprints:
-            return np.zeros(0, dtype=bool)
-
-        key = self._dedup_key(dataset, window_start)
-        added: list[int] = []
-        for i in range(0, len(fingerprints), _DEDUP_ITEMS_PER_COMMAND):
-            chunk = fingerprints[i : i + _DEDUP_ITEMS_PER_COMMAND]
-            added.extend(
-                await self.client.execute_command(
-                    "BF.INSERT", key,
-                    "CAPACITY", capacity,
-                    "ERROR", _DEDUP_ERROR_RATE,
-                    "ITEMS", *chunk,
-                )
-            )
-        await self.client.expireat(key, int(expire_at.timestamp()))
-        return np.array(added, dtype=bool)
-
     async def stored_content(
         self, dataset: str, window_start: int, fingerprints: list[bytes]
     ) -> np.ndarray:
@@ -389,5 +323,6 @@ class RedisIngestionRecordStore(IngestionRecordStore):
         async with self.client.pipeline(transaction=False) as pipe:
             for i in range(0, len(fingerprints), _DEDUP_ITEMS_PER_COMMAND):
                 pipe.sadd(key, *fingerprints[i : i + _DEDUP_ITEMS_PER_COMMAND])
-            pipe.expireat(key, int(expire_at.timestamp()))
+                if i == 0:
+                    pipe.expireat(key, int(expire_at.timestamp()))
             await pipe.execute()

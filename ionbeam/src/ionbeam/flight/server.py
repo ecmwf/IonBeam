@@ -8,7 +8,7 @@ A thin *synchronous* adapter over the async :class:`IonbeamCore`. It runs the co
 RPC to it.
 
 * ``DoPut``   CMD ``{"op":"ingest", ...}``        — source streams observations in
-* ``GetFlightInfo`` CMD ``{"op":"dataset", ...}`` — look up a built dataset window
+* ``GetFlightInfo`` CMD ``{"op":"dataset_range", ...}`` — resolve current builds in a range
 * ``DoGet``   ticket ``{"op":"dataset", ...}``    — stream a built dataset out
 * ``DoExchange`` CMD ``{"op":"await_triggers"|"await_datasets", ...}`` — push subscriptions
 * ``DoAction`` ``health_check`` | ``trigger_source``
@@ -26,7 +26,7 @@ import pyarrow as pa
 import pyarrow.flight as flight
 import structlog
 from ionbeam_client.models import IngestionMetadata
-from ionbeam_client.schema_meta import GEOGRAPHIC_CRS
+from ionbeam_client.schema_metadata import GEOGRAPHIC_CRS
 from ionbeam_client.schemes import structural_errors, unit_warnings
 from pydantic import ValidationError
 
@@ -108,8 +108,8 @@ class IonbeamFlightServer(flight.FlightServerBase):
             )
 
         ingestion_id = UUID(cmd["id"]) if cmd.get("id") else uuid4()
-        start = datetime.fromisoformat(cmd["start"])
-        end = datetime.fromisoformat(cmd["end"])
+        start = _utc_timestamp(cmd["start"], "start")
+        end = _utc_timestamp(cmd["end"], "end")
 
         try:
             rows = self._stream_ingest(ingestion_id, registered.metadata, start, end, reader)
@@ -170,19 +170,11 @@ class IonbeamFlightServer(flight.FlightServerBase):
     # --- discovery + read ------------------------------------------------
     def get_flight_info(self, context, descriptor):
         cmd = _command(descriptor)
-        start = datetime.fromisoformat(cmd["start"])
-        end = datetime.fromisoformat(cmd["end"])
-        if cmd.get("op") == "dataset_range":
-            locations = self._run(self._core.current_builds(cmd["dataset"], start, end))
-            rows = -1
-        elif cmd.get("op") == "dataset":
-            state = self._run(self._core.built_dataset(cmd["dataset"], start, end))
-            if state is None or not state.dataset_locations:
-                raise flight.FlightServerError("dataset window not built")
-            locations = state.dataset_locations
-            rows = state.total_rows
-        else:
-            raise flight.FlightServerError("get_flight_info expects op=dataset or dataset_range")
+        start = _utc_timestamp(cmd["start"], "start")
+        end = _utc_timestamp(cmd["end"], "end")
+        if cmd.get("op") != "dataset_range":
+            raise flight.FlightServerError("get_flight_info expects op=dataset_range")
+        locations = self._run(self._core.current_builds(cmd["dataset"], start, end))
         if not locations:
             raise flight.FlightServerError("no builds in range")
 
@@ -191,7 +183,7 @@ class IonbeamFlightServer(flight.FlightServerBase):
             json.dumps({"op": "dataset", "locations": locations}).encode("utf-8")
         )
         endpoint = flight.FlightEndpoint(ticket, [])
-        return flight.FlightInfo(schema, descriptor, [endpoint], rows, -1)
+        return flight.FlightInfo(schema, descriptor, [endpoint], -1, -1)
 
     def do_get(self, context, ticket):
         payload = json.loads(ticket.ticket.decode("utf-8"))
@@ -317,8 +309,8 @@ class IonbeamFlightServer(flight.FlightServerBase):
             self._run(
                 self._core.trigger_source(
                     spec["source_name"],
-                    datetime.fromisoformat(spec["start"]),
-                    datetime.fromisoformat(spec["end"]),
+                    _utc_timestamp(spec["start"], "start"),
+                    _utc_timestamp(spec["end"], "end"),
                 )
             )
             yield flight.Result(b"ok")
@@ -389,3 +381,10 @@ def _command(descriptor) -> dict:
     if not descriptor.command:
         raise flight.FlightServerError("expected a command descriptor")
     return json.loads(descriptor.command.decode("utf-8"))
+
+
+def _utc_timestamp(value: str, field: str) -> datetime:
+    ts = datetime.fromisoformat(value)
+    if ts.tzinfo is None:
+        raise flight.FlightServerError(f"{field} must carry a UTC offset")
+    return ts

@@ -35,10 +35,9 @@ def quantity(sem: Semantics) -> Semantics:
     """The varno-significant identity of a declared semantics.
 
     A varno names a physical quantity, not a source's declaration flavor.
-    ``level`` and ``period`` are observation metadata — every ionbeam export
-    today is a near-surface observation; when a profile-shaped source arrives
-    they route into vertco/time-significance columns instead of changing the
-    varno. An instantaneous reading and a short mean are the same observed
+    ``level`` and ``period`` are observation metadata, not part of the
+    quantity — they belong in vertco/time-significance columns, never in
+    the varno. An instantaneous reading and a short mean are the same observed
     value, so ``point``/``mean`` drop out; aggregations that change the
     quantity (``sum``, ``minimum``, ``maximum``, ...) stay in the identity so
     a daily-maximum temperature never exports as plain temperature.

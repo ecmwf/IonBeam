@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import pyarrow as pa
 
-from ionbeam_client.arrow_tools import canonical_arrow_schema
+from ionbeam_client.canonical_stream import canonical_arrow_schema
 from ionbeam_client.geo import geographic_axes, geospatial_projection
 from ionbeam_client.models import (
     CfSemantics,
@@ -18,7 +18,7 @@ from ionbeam_client.models import (
     Variable,
     geographic_point_coordinates,
 )
-from ionbeam_client.schema_meta import time_field
+from ionbeam_client.schema_metadata import time_field
 
 
 def _geographic_metadata():

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import redis.asyncio as redis
 
-from ionbeam.models import Window
+from ionbeam.provenance import Window
 from ionbeam.storage.build_queue import RedisBuildQueue
 
 REDIS_URL = os.getenv("IONBEAM_TEST_REDIS_URL")
