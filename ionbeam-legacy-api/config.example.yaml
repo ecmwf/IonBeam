@@ -1,0 +1,3 @@
+legacy_api:
+  projection_base_path: "./projections/ionbeam-legacy"
+  max_time_range_days: 31

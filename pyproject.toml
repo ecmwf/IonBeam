@@ -9,6 +9,7 @@ dependencies = []
 members = [
     "ionbeam-client",
     "ionbeam",
+    "ionbeam-legacy-api",
     "data-sources/*",
     "exporters/*",
 ]
