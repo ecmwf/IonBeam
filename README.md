@@ -22,7 +22,7 @@
 
 **IonBeam** is an orchestration system for bringing IoT and other unconventional observations into meteorological workflows. The core service schedules data sources, ingests the observations they push, tracks coverage of each time window, and builds time-windowed datasets, all served over Arrow Flight. Data sources and exporters run as separate Flight clients written with a shared client library, so new ones can be added without changes to the core, and each component can run with multiple replicas.
 
-The bundled components form a meteorological pipeline: data sources that pull from IoT networks such as MeteoTracker and Sensor.Community, exporters that write the built datasets onward as ECMWF ODB files, and a PyGeoAPI server that serves the built GeoParquet datasets as an OGC API — Features web service. The schema itself is agnostic of any metadata convention; the bundled sources declare their variables with CF (Climate and Forecast) semantics, one of the governed vocabularies a declaration can use.
+The bundled components form a meteorological pipeline: data sources that pull from IoT networks such as MeteoTracker and Sensor.Community, and exporters that write the built datasets onward as ECMWF ODB files. The schema itself is agnostic of any metadata convention; the bundled sources declare their variables with CF (Climate and Forecast) semantics, one of the governed vocabularies a declaration can use.
 
 ## Quick Start
 

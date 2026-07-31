@@ -1,6 +1,5 @@
 # Allowlist: the dist stage builds the workspace wheels from these manifests and
-# member sources; the pygeoapi image copies its provider module from the same
-# tree. Everything else stays out of the build context.
+# member sources. Everything else stays out of the build context.
 *
 !pyproject.toml
 !uv.lock

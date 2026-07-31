@@ -136,9 +136,6 @@ jobs:
           - component: legacy-api
             dockerfile: Dockerfile
             target: legacy-api
-          - component: pygeoapi-server
-            dockerfile: Dockerfile.pygeoapi
-            target: ""
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -239,6 +236,5 @@ jobs:
             docker pull eccr.ecmwf.int/ionbeam-next/data-sources:${{ needs.determine-version.outputs.version }}
             docker pull eccr.ecmwf.int/ionbeam-next/ecmwf-exporter:${{ needs.determine-version.outputs.version }}
             docker pull eccr.ecmwf.int/ionbeam-next/legacy-api:${{ needs.determine-version.outputs.version }}
-            docker pull eccr.ecmwf.int/ionbeam-next/pygeoapi-server:${{ needs.determine-version.outputs.version }}
             ```
             Deploy: set `image.tag: "${{ needs.determine-version.outputs.version }}"` in your local values overlay.

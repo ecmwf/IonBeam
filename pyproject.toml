@@ -13,8 +13,6 @@ members = [
     "data-sources/*",
     "exporters/*",
 ]
-# Not a package: the provider module Dockerfile.pygeoapi copies into the server image.
-exclude = ["exporters/pygeoapi"]
 
 [tool.uv]
 constraint-dependencies = [
@@ -33,7 +31,6 @@ testpaths = [
     "ionbeam-client/tests",
     "ionbeam/tests",
     "exporters/ecmwf/tests",
-    "exporters/pygeoapi/tests",
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

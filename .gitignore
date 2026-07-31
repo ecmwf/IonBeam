@@ -47,3 +47,4 @@ test_output/
 docs/_build/
 ionbeam-admin/
 /compactor/
+logs/
