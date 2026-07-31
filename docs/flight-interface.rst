@@ -9,6 +9,16 @@ This document specifies the Arrow Flight interface for implementing data sources
 
 The **ionbeam-client** Python library implements this interface (see :ref:`ionbeam-client/index:IonBeam Client`); most integrators use it rather than speaking Flight directly.
 
+Lifecycle
+---------
+
+One dataset's path through the interface, from raw observations to a resolved read. Every arrow touching the endpoint is one of the RPCs specified below; the stores are internal, shown for where the data rests between calls:
+
+.. mermaid:: flight-lifecycle.mmd
+   :zoom:
+
+Ingested rows land in the time-series buffer while coverage claims schedule the windows they touch. A due window is built once: queried from the buffer, written to the canonical store as an immutable versioned file under its day partition, announced to subscribers. Reads resolve against those files alone — ``GetFlightInfo`` lists just the requested days' partitions and picks each window's current version, so the returned ticket names exact immutable keys and ``DoGet`` streams them untouched by later rebuilds.
+
 RPC Surface
 -----------
 
@@ -194,70 +204,54 @@ Command descriptor:
       "datasets": ["weather_stations"]
     }
 
-``datasets`` is optional; omit it to receive events for all datasets. The server pushes one single-row RecordBatch per event with one string column, ``event``, containing a JSON-encoded ``DataSetAvailableEvent``. After handling an event, the client acknowledges it by writing the event ``id`` back on the return channel; the server redelivers unacknowledged events.
-
-DataSetAvailableEvent
-~~~~~~~~~~~~~~~~~~~~~
+``datasets`` is optional; omit it to receive events for all datasets. The server pushes one single-row RecordBatch per event with the schema:
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 15 65
+   :widths: 20 25 55
 
-   * - Field
-     - Type
+   * - Column
+     - Arrow Type
      - Description
    * - ``id``
-     - UUID
-     - Unique identifier for this dataset build
-   * - ``metadata``
-     - DatasetMetadata
-     - The dataset's production descriptor from the server-side dataset registry (name, presentation metadata, windowing)
-   * - ``dataset_locations``
-     - Array of strings
-     - Opaque dataset keys; pass them back in a ``DoGet`` ticket to stream the data
-   * - ``start_time``
-     - ISO 8601 DateTime
-     - Start of the dataset temporal window (UTC)
-   * - ``end_time``
-     - ISO 8601 DateTime
-     - End of the dataset temporal window (UTC)
-   * - ``is_final``
-     - Boolean
-     - The window is past the hot-store retention: this build is immutable and no further revisions will be published
-
-.. code-block:: json
-
-    {
-      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-      "metadata": {
-        "name": "weather_stations",
-        "description": "Ground weather station observations",
-        "aggregation_span": "PT1H",
-        "source_links": [],
-        "keywords": ["weather", "temperature"]
-      },
-      "dataset_locations": ["weather_stations/ib_year=2024/ib_month=01/ib_day=01/20240101T120000_PT1H-v1-3f9c2a1b"],
-      "start_time": "2024-01-01T12:00:00Z",
-      "end_time": "2024-01-01T13:00:00Z",
-      "is_final": false
-    }
+     - utf8
+     - Event id; acknowledge handling by writing it back on the return channel
+   * - ``dataset``
+     - utf8
+     - Dataset name
+   * - ``start``
+     - timestamp[us, tz=UTC]
+     - Start of the dataset temporal window
+   * - ``end``
+     - timestamp[us, tz=UTC]
+     - End of the dataset temporal window
+   * - ``version``
+     - int64
+     - Revision of this window's build; a higher version supersedes lower ones
+   * - ``revisable_until``
+     - timestamp[us, tz=UTC]
+     - The window's seal instant: no revision is published at or after it, so this build is immutable once the clock passes it
+   * - ``info``
+     - binary
+     - A serialized ``FlightInfo`` (``flight.FlightInfo.deserialize``): the built dataset's schema plus the ``DoGet`` ticket that streams it
 
 Constraints:
 
-- The time window ``[start_time, end_time)`` aligns to ``metadata.aggregation_span`` boundaries
-- Every subscribed exporter identity receives every event (fanout); a rebuilt window emits a fresh event
-- ``dataset_locations`` is opaque: treat it as a ticket, never parse it
+- The time window ``[start, end)`` aligns to the dataset's aggregation span boundaries
+- Every subscribed exporter identity receives every event (fanout); a rebuilt window emits a fresh event with a higher ``version``
+- ``version`` order is authoritative: apply a higher version of a window whenever one arrives. ``revisable_until`` bounds when that can still happen — a window whose last build was published before its seal emits no further event, so absence of an event is never a completeness signal; the deadline is how a client knows it may stop tracking the window
+- After handling an event, the client acknowledges it by writing the event ``id`` back on the return channel; the server redelivers unacknowledged events. The return channel carries acknowledgements only. Redelivery can also follow a *successful* handling whose acknowledgement was lost in a disconnect, so handlers must be idempotent even about work they have already completed
+- Read columns by name and ignore unknown columns: the server may append columns to this schema without notice
+- The ``FlightInfo`` ticket is opaque: pass it to ``DoGet`` unchanged, never parse it
+- The dataset's production metadata (description, aggregation span, presentation fields) is embedded in the ``FlightInfo`` schema's metadata, recoverable with ``ionbeam_client.schema_metadata.dataset_metadata``
+- The subscription delivers one event at a time and waits for its acknowledgement, so a slow handler stalls every event behind it. Keep handlers cheap — record what arrived and reconcile expensive work separately, as the bundled ODB exporter does with its stamp-then-reconcile cycle
 
 Reading Datasets (GetFlightInfo / DoGet)
 ----------------------------------------
 
 Direction: exporter → IonBeam.
 
-Exporters stream a built dataset with ``DoGet``. The ticket is issued by the server and carries the build files to stream:
-
-.. code-block:: json
-
-    {"op": "dataset", "locations": ["weather_stations/ib_year=2024/ib_month=01/ib_day=01/20240101T120000_PT1H-v1-3f9c2a1b"]}
+Exporters stream a built dataset with ``DoGet``. Tickets are issued by the server — inside the ``FlightInfo`` of a pushed dataset event or a ``GetFlightInfo`` response — and are opaque to clients.
 
 Builds are resolved via ``GetFlightInfo`` with a command descriptor:
 
@@ -306,19 +300,19 @@ The sequence below is one bounded upload from a source named ``weather_stations`
            + Arrow RecordBatch stream: time, lat, lon, air_temperature, station_id
     → {"rows": 1440}
 
-3. Once the window ``[12:00, 13:00)`` is complete and its settle time passes, a builder publishes it. Each subscribed exporter receives, on its open exchange::
+3. Once the window ``[12:00, 13:00)`` is complete and its settle time passes, a builder publishes it. Each subscribed exporter receives, on its open exchange, a one-row RecordBatch::
 
     DoExchange CMD {"op": "await_datasets", "exporter_name": "ecmwf"}
-    ← {"id": "7c9e6679-...", "dataset_locations": ["weather_stations/ib_year=2024/ib_month=01/ib_day=01/20240101T120000_PT1H-v1-3f9c2a1b"],
-       "start_time": "2024-01-01T12:00:00Z", "end_time": "2024-01-01T13:00:00Z",
-       "is_final": false, "metadata": {...}}
+    ← id: "7c9e6679-...", dataset: "weather_stations",
+      start: 2024-01-01T12:00:00Z, end: 2024-01-01T13:00:00Z,
+      version: 1, revisable_until: 2024-01-08T13:00:00Z, info: <serialized FlightInfo>
 
-4. The exporter streams the dataset and acknowledges the event::
+4. The exporter streams the dataset through the pushed ``FlightInfo`` and acknowledges the event::
 
-    DoGet  Ticket {"op": "dataset", "locations": ["weather_stations/ib_year=2024/ib_month=01/ib_day=01/20240101T120000_PT1H-v1-3f9c2a1b"]}
+    DoGet  Ticket <info.endpoints[0].ticket>
     ← Arrow RecordBatch stream (canonical schema, sorted by time)
 
-If late data for the window arrives while it is still revisable, steps 3 and 4 repeat with a fresh event for the rebuilt window.
+If late data for the window arrives while it is still revisable, steps 3 and 4 repeat with a fresh event for the rebuilt window, carrying the next ``version``.
 
 Data Payload Format
 -------------------

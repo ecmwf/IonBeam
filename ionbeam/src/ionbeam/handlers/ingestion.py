@@ -12,7 +12,7 @@ import pyarrow as pa
 import structlog
 from ionbeam_client.models import DataAvailableEvent, IngestionMetadata, WindowRecord
 
-from ionbeam.datasets import DatasetProductionConfig, DatasetRegistry
+from ionbeam.datasets import DatasetBuildConfig, DatasetRegistry
 from ionbeam.handlers.canonicalize import CanonicalBatch, canonicalize
 from ionbeam.handlers.schema_contract import verify_stream_schema
 from ionbeam.provenance import align_to_aggregation
@@ -25,8 +25,8 @@ from ionbeam.storage.timeseries import RECORD_ID_COLUMN, TimeSeriesDatabase
 
 DataAvailablePublisher = Callable[[DataAvailableEvent], Awaitable[None]]
 
-# margin past a window's seal before its stored-content set is forgotten, so a
-# row deemed live against the seal never races a just-expired set
+# margin past a window's seal before its stored-content set is forgotten;
+# keeps a row deemed live against the seal from racing a just-expired set
 _FILTER_EXPIRY_MARGIN = timedelta(hours=1)
 
 
@@ -105,9 +105,8 @@ class Ingestion:
     ) -> None:
         """Record each stored row's arrival lateness (now minus its observation
         time). The rows a ``dedup_ingestion`` dataset suppresses never reach
-        the histogram, so a re-fetched span cannot inflate the p95; rows of an
-        already-sealed window are skipped — no build can use them, so they
-        must not push the settle gate."""
+        the histogram: a re-fetched span cannot inflate the p95. Rows of an
+        already-sealed window are skipped, since no build can use them."""
         times = written.column(timestamp_column).to_pandas()
         now = pd.Timestamp.now(tz="UTC")
         lateness_s = (now - times).dt.total_seconds().to_numpy()
@@ -149,11 +148,11 @@ class Ingestion:
         checkpoints = CoverageCheckpoints(start_time, production.aggregation_span)
         claim_num = 0
 
-        # Deterministic ids — a retried command re-checkpoints, re-tags, and
-        # re-claims under the same ids, so replays never read as new data.
+        # Deterministic ids: a retried command re-checkpoints, re-tags, and
+        # re-claims under the same ids, so replays read as the same data.
         # Each claim's windows get their own record ids: the id every row of
-        # that window is tagged with, and the id the claim publishes so the
-        # coordinator can fold it into exactly that window's desired set.
+        # that window is tagged with, and the id the claim publishes for the
+        # coordinator to fold into that window's desired set.
         claim_records: dict[int, UUID] = {}
 
         def record_id_for(window_start_s: int) -> UUID:
@@ -185,7 +184,7 @@ class Ingestion:
                 verify_stream_schema(batch.schema, metadata)
                 stream_verified = True
             self._record_batch_observability(dataset_name, batch, metadata)
-            # CPU-bound; keep it off the Flight server's event loop
+            # CPU-bound; kept off the Flight server's event loop
             canonical = await asyncio.to_thread(
                 canonicalize, batch, metadata.dataset_schema
             )
@@ -243,21 +242,22 @@ class Ingestion:
 
         event = claim_event(final_start_time, final_end_time)
         await on_data_available(event)
+        self._metrics.record_success(dataset_name)
         return event
 
     async def _write_tagged(
         self,
         dataset: str,
         canonical: CanonicalBatch,
-        production: DatasetProductionConfig,
+        production: DatasetBuildConfig,
         record_id_for: Callable[[int], UUID],
     ) -> pa.Table:
         """Write the batch's rows, each tagged with its window's record id —
         the provenance a build selects by, and what lets the claim name the
         windows that received rows. ``dedup_ingestion`` datasets write only
-        content not already stored, decided against exact per-window sets that
-        are marked once the write succeeds — a crash in between re-stores a
-        duplicate (which the build collapse discards), never loses a row.
+        content not already stored, decided against exact per-window sets
+        marked once the write succeeds. A crash in between re-stores a
+        duplicate, which the build collapse discards.
         Returns the rows actually written."""
         table = canonical.table
         novel_fingerprints: dict[int, set[bytes]] = {}
@@ -300,7 +300,7 @@ class Ingestion:
         return table
 
     async def _novel_rows(
-        self, dataset: str, canonical: CanonicalBatch, production: DatasetProductionConfig
+        self, dataset: str, canonical: CanonicalBatch, production: DatasetBuildConfig
     ) -> tuple[pa.Table, dict[int, set[bytes]]]:
         """The batch's rows whose full content is not already stored, with their
         fingerprints grouped by aggregation window for post-write marking."""

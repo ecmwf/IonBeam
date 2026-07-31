@@ -4,13 +4,13 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from ionbeam_client.models import (
+from ionbeam_client.models import DatasetMetadata
+
+from ionbeam.messaging import (
     DataSetAvailableEvent,
-    DatasetMetadata,
+    InMemoryEventBus,
     StartSourceCommand,
 )
-
-from ionbeam.messaging import InMemoryEventBus
 
 BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

@@ -13,7 +13,7 @@ import pyarrow.compute as pc
 import structlog
 from ionbeam_client.canonical_stream import canonical_arrow_schema
 from ionbeam_client.geo import geospatial_projection
-from ionbeam_client.models import DataSetAvailableEvent, IngestionMetadata
+from ionbeam_client.models import IngestionMetadata
 from ionbeam_client.schema_metadata import BUILD
 from pydantic import BaseModel, ValidationError
 
@@ -25,6 +25,7 @@ from ionbeam.builds import (
     stored_builds,
 )
 from ionbeam.datasets import DatasetRegistry
+from ionbeam.messaging.event_bus import DataSetAvailableEvent
 from ionbeam.provenance import (
     ManifestBuild,
     ManifestRecord,
@@ -46,10 +47,9 @@ def collapse_revisions(
 ) -> pa.Table:
     """Collapse a record-scoped read to one row per identity — the row from the
     highest-precedence (latest-arrived) record, ``rank`` giving each row its
-    record's precedence. This is the same upsert the store applies on
-    (tags, time), made deterministic over an explicit record set: a correction
-    replaces the whole row, its columns coming from the correcting record, never
-    stitched across records."""
+    record's precedence. Applies the store's (tags, time) upsert deterministically
+    over an explicit record set: a correction replaces the whole row, its columns
+    coming from the correcting record."""
     if table.num_rows == 0:
         return table
     combined = table.append_column("__rank", rank).append_column(
@@ -61,8 +61,8 @@ def collapse_revisions(
     )
 
     # A row survives iff its identity differs from the previous (higher-
-    # precedence) row's. Null-safe: equal() is null when either side is null,
-    # so fall back to "both null" — null tags compare equal to each other.
+    # precedence) row's. equal() is null when either side is null; null tags
+    # compare equal to each other via the "both null" fallback.
     same_as_previous = None
     for column in identity_columns:
         values = ordered.column(column).combine_chunks()
@@ -82,9 +82,9 @@ def collapse_revisions(
 
 
 class IncompleteRecordSet(Exception):
-    """The window's desired record set cannot be composed from the hot store —
+    """The window's desired record set cannot be composed from the hot store:
     an expired registration leaves arrival order unknowable, or a record's
-    rows are gone. Publishing anyway would be silent data loss, so the build
+    rows are gone. Publishing anyway would be silent data loss; the build
     defers instead."""
 
     def __init__(self, reason: str, detail: str):
@@ -98,8 +98,8 @@ class DatasetBuilderConfig(BaseModel):
     concurrency: int = 1
     retention: timedelta = timedelta(days=7)  # the hot-store horizon and final floor
     # A failing build re-enqueues with exponential backoff, then parks on the
-    # dead-letter set after max_build_attempts. The budget must ride out a
-    # multi-hour store outage: 12 attempts at a 600s cap spans ~3.5h.
+    # dead-letter set after max_build_attempts. 12 attempts at a 600s cap spans
+    # ~3.5h, covering a multi-hour store outage.
     max_build_attempts: int = 12
     retry_backoff_base_seconds: float = 5.0
     retry_backoff_max_seconds: float = 600.0
@@ -133,9 +133,8 @@ class DatasetBuilder:
         self.logger = structlog.get_logger(__name__)
 
     def _is_final(self, window: Window) -> bool:
-        """A window is final once the hot-store retention has passed — after
-        which its build is immutable and no further revisions will be
-        published."""
+        """A window is final once the hot-store retention has passed: its build
+        is immutable, and no further revisions will be published."""
         return datetime.now(timezone.utc) >= window.end + self.config.retention
 
     def _next_claim_floor(self, window: Window) -> datetime:
@@ -164,8 +163,7 @@ class DatasetBuilder:
                 return
 
             if not desired.ids:
-                # a queued window can outlive its desired set's TTL; there is
-                # nothing left to publish
+                # a queued window can outlive its desired set's TTL
                 self.logger.info("No records for window", window=window.dataset_key)
                 await self._settle(window)
                 return
@@ -224,16 +222,16 @@ class DatasetBuilder:
             self._metrics.observe_build_duration(window.dataset, duration)
 
     async def _handle_build_failure(self, window: Window) -> None:
-        """A build raised — almost always a timed-out or overloaded query. Log it,
-        then defer with backoff (or drop past the cap)."""
+        """A build raised — almost always a timed-out or overloaded query. Defers
+        with backoff, or drops past the cap."""
         self.logger.exception("Build failed", window=window.dataset_key)
         self._metrics.build_failed(window.dataset)
         await self._defer_window(window, "exception")
 
     async def _defer_window(self, window: Window, reason: str) -> None:
         """Release the lease and reschedule with exponential backoff. The queue
-        holds the delay, so a failing window never blocks a worker slot; drop it
-        after ``max_build_attempts`` so one poisoned window can't retry forever."""
+        holds the delay, keeping a failing window from blocking a worker slot;
+        drops the window after ``max_build_attempts``."""
         key = window.dataset_key
         attempts = self._attempts.get(key, 0) + 1
         self._attempts[key] = attempts
@@ -311,7 +309,7 @@ class DatasetBuilder:
             shaped = shape_batch(batch)
             return geo_transform(shaped) if geo_transform else shaped
 
-        # Read exactly the desired records' rows, so the stamped record-set
+        # Reads exactly the desired records' rows, so the stamped record-set
         # hash names what the artifact holds.
         ordered_ids = self._record_precedence(records, desired)
         if ordered_ids is None:
@@ -341,8 +339,8 @@ class DatasetBuilder:
             ):
                 yield batch  # raw: the collapse needs record_id, which shaping drops
 
-        # The query is unsorted by design (see InfluxTimeSeriesDatabase.
-        # _open_reader); the window is sorted below, in the builder's memory.
+        # The query is unsorted (see InfluxTimeSeriesDatabase._open_reader);
+        # the window is sorted below, in the builder's memory.
         drain_start = time.perf_counter()
         collected = [batch async for batch in dataset_batches()]
         drained = {
@@ -351,10 +349,9 @@ class DatasetBuilder:
             for record_id in pc.unique(batch.column(RECORD_ID_COLUMN)).to_pylist()
         }
         if not drained.issuperset(ordered_ids):
-            # Every desired record put rows in this window when it was made;
-            # rows the tag filter cannot reach mean the hot store lost or
-            # expired them. Publishing a partial record set would be silent
-            # data loss.
+            # Every desired record put rows in this window when it was made.
+            # Rows the tag filter cannot reach mean the hot store lost or
+            # expired them.
             missing = len(set(ordered_ids) - drained)
             raise IncompleteRecordSet(
                 "missing_record_rows",
@@ -427,6 +424,7 @@ class DatasetBuilder:
             dataset_locations=locations,
             start_time=window.start,
             end_time=window.end,
+            version=version,
             is_final=is_final,
         )
         return event, int(total_rows)
@@ -435,8 +433,8 @@ class DatasetBuilder:
     def _manifest_records(
         records: list[IngestionRecord], desired: RecordSet
     ) -> list[ManifestRecord]:
-        # every desired id resolved: _record_precedence already deferred the
-        # build if any registration had expired
+        # every desired id resolved; _record_precedence defers the build if
+        # any registration has expired
         by_id = {str(record.id): record for record in records}
         return [
             ManifestRecord(
@@ -454,8 +452,7 @@ class DatasetBuilder:
         """Append this build to the window's history sidecar under the
         dataset's ``_manifests/`` prefix (``_``-prefixed so dataset discovery
         skips it); each entry names its build's exact file set. Written after
-        the files: a crash in between leaves the history a build behind, never
-        describing an unwritten build."""
+        the files, so a crash in between leaves the history a build behind."""
         key = manifest_key(window)
 
         builds: list[ManifestBuild] = []
@@ -520,8 +517,8 @@ class DatasetBuilder:
                         self._track_task(task)
                     failures = 0
                 except Exception:
-                    # The queue is this loop's only external boundary (Valkey);
-                    # an outage must idle the builder, never kill it.
+                    # The queue is this loop's only external boundary (Valkey).
+                    # An outage idles the builder; it never kills it.
                     failures += 1
                     backoff = min(
                         self.config.retry_backoff_max_seconds,

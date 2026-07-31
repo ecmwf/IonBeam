@@ -74,5 +74,3 @@ scheduler:
 
 logging:
   level: "INFO"
-  log_dir: "./logs"
-  log_name: "ionbeam.log"

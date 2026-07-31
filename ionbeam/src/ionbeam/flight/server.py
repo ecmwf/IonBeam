@@ -31,11 +31,12 @@ from ionbeam_client.schemes import structural_errors, unit_warnings
 from pydantic import ValidationError
 
 from ionbeam.application.core import IonbeamCore
+from ionbeam.observability import FlightMetrics
 
 logger = structlog.get_logger(__name__)
 
 _SENTINEL = object()
-_INGEST_QUEUE_DEPTH = 8  # bounded → backpressure the client when the store lags
+_INGEST_QUEUE_DEPTH = 8  # bounded: backpressures the client when the store lags
 
 TRIGGER_SCHEMA = pa.schema(
     [
@@ -44,13 +45,27 @@ TRIGGER_SCHEMA = pa.schema(
         ("end", pa.timestamp("us", tz="UTC")),
     ]
 )
-DATASET_EVENT_SCHEMA = pa.schema([("event", pa.string())])
+DATASET_EVENT_SCHEMA = pa.schema(
+    [
+        pa.field("id", pa.string(), nullable=False),
+        pa.field("dataset", pa.string(), nullable=False),
+        pa.field("start", pa.timestamp("us", tz="UTC"), nullable=False),
+        pa.field("end", pa.timestamp("us", tz="UTC"), nullable=False),
+        # a higher version of the same range supersedes lower ones
+        pa.field("version", pa.int64(), nullable=False),
+        # no revision of the range is published at or after this instant
+        pa.field("revisable_until", pa.timestamp("us", tz="UTC"), nullable=False),
+        # serialized flight.FlightInfo whose endpoint tickets stream this build
+        pa.field("info", pa.binary(), nullable=False),
+    ]
+)
 
 
 class IonbeamFlightServer(flight.FlightServerBase):
-    def __init__(self, location: str, core: IonbeamCore):
+    def __init__(self, location: str, core: IonbeamCore, metrics: FlightMetrics):
         super().__init__(location)
         self._core = core
+        self._metrics = metrics
         self._shutting_down = threading.Event()
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -81,15 +96,19 @@ class IonbeamFlightServer(flight.FlightServerBase):
                 break
 
     def shutdown(self):
-        # gRPC shutdown waits for in-flight RPCs, and subscription streams never end
-        # on their own — signal the _pump loops first so they finish within one poll.
-        # Only stop the loop after the drain, so no bridged call is left pending.
+        # gRPC shutdown waits for in-flight RPCs; subscription streams don't end on
+        # their own, so signal the _pump loops first to finish within one poll.
+        # The loop stops only after the drain, leaving no bridged call pending.
         self._shutting_down.set()
         super().shutdown()
         self._loop.call_soon_threadsafe(self._loop.stop)
 
     # --- ingest ----------------------------------------------------------
     def do_put(self, context, descriptor, reader, writer):
+        with self._metrics.track("ingest"):
+            self._do_put(descriptor, reader, writer)
+
+    def _do_put(self, descriptor, reader, writer):
         cmd = _command(descriptor)
         if cmd.get("op") != "ingest":
             raise flight.FlightServerError(f"do_put expects op=ingest, got {cmd.get('op')!r}")
@@ -114,15 +133,15 @@ class IonbeamFlightServer(flight.FlightServerBase):
         try:
             rows = self._stream_ingest(ingestion_id, registered.metadata, start, end, reader)
         except Exception as exc:
-            # Keep the error concise: a full traceback exceeds gRPC's metadata limit.
+            # A full traceback exceeds gRPC's metadata limit.
             raise flight.FlightServerError(f"ingest failed: {str(exc)[:300]}")
         writer.write(pa.py_buffer(json.dumps({"rows": rows}).encode("utf-8")))
 
     def _stream_ingest(self, ingestion_id, metadata, start, end, reader):
         """Bridge the synchronous gRPC reader to the async ingestion through a
-        bounded queue: each batch is canonicalized+written as it arrives, and a full
-        queue blocks this thread's reads — backpressuring the client, so a fast
-        source can't outrun the store."""
+        bounded queue. Each batch is canonicalized and written as it arrives.
+        A full queue blocks this thread's reads, backpressuring the client so a
+        fast source can't outrun the store."""
         queue: "asyncio.Queue" = asyncio.Queue(maxsize=_INGEST_QUEUE_DEPTH)
 
         async def _batches():
@@ -169,15 +188,32 @@ class IonbeamFlightServer(flight.FlightServerBase):
 
     # --- discovery + read ------------------------------------------------
     def get_flight_info(self, context, descriptor):
-        cmd = _command(descriptor)
-        start = _utc_timestamp(cmd["start"], "start")
-        end = _utc_timestamp(cmd["end"], "end")
-        if cmd.get("op") != "dataset_range":
-            raise flight.FlightServerError("get_flight_info expects op=dataset_range")
-        locations = self._run(self._core.current_builds(cmd["dataset"], start, end))
-        if not locations:
-            raise flight.FlightServerError("no builds in range")
+        with self._metrics.track("dataset_range"):
+            cmd = _command(descriptor)
+            start = _utc_timestamp(cmd["start"], "start")
+            end = _utc_timestamp(cmd["end"], "end")
+            if cmd.get("op") != "dataset_range":
+                raise flight.FlightServerError("get_flight_info expects op=dataset_range")
+            locations = self._run(self._core.current_builds(cmd["dataset"], start, end))
+            if not locations:
+                raise flight.FlightServerError("no builds in range")
+            return self._flight_info(cmd["dataset"], start, end, locations)
 
+    def _flight_info(
+        self, dataset: str, start: datetime, end: datetime, locations: list[str]
+    ) -> flight.FlightInfo:
+        """Sole minting point for dataset tickets; ticket contents stay opaque
+        to clients."""
+        descriptor = flight.FlightDescriptor.for_command(
+            json.dumps(
+                {
+                    "op": "dataset_range",
+                    "dataset": dataset,
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                }
+            ).encode("utf-8")
+        )
         schema = self._core.dataset_schema(locations[0])
         ticket = flight.Ticket(
             json.dumps({"op": "dataset", "locations": locations}).encode("utf-8")
@@ -186,17 +222,19 @@ class IonbeamFlightServer(flight.FlightServerBase):
         return flight.FlightInfo(schema, descriptor, [endpoint], -1, -1)
 
     def do_get(self, context, ticket):
-        payload = json.loads(ticket.ticket.decode("utf-8"))
-        if payload.get("op") != "dataset":
-            raise flight.FlightServerError("do_get expects op=dataset ticket")
-        locations = payload["locations"]
-        if not locations:
-            raise flight.FlightServerError("empty dataset locations")
-        for location in locations:
-            # tickets are client input; a location must stay inside the store
-            if location.startswith("/") or ".." in location.split("/"):
-                raise flight.FlightServerError(f"invalid dataset location {location!r}")
-        schema = self._core.dataset_schema(locations[0])
+        # tracks ticket resolution; the returned stream's lifetime is not timed
+        with self._metrics.track("dataset_read"):
+            payload = json.loads(ticket.ticket.decode("utf-8"))
+            if payload.get("op") != "dataset":
+                raise flight.FlightServerError("do_get expects op=dataset ticket")
+            locations = payload["locations"]
+            if not locations:
+                raise flight.FlightServerError("empty dataset locations")
+            for location in locations:
+                # tickets are client input; a location must stay inside the store
+                if location.startswith("/") or ".." in location.split("/"):
+                    raise flight.FlightServerError(f"invalid dataset location {location!r}")
+            schema = self._core.dataset_schema(locations[0])
 
         def batches():
             for location in locations:
@@ -209,14 +247,17 @@ class IonbeamFlightServer(flight.FlightServerBase):
         cmd = _command(descriptor)
         op = cmd.get("op")
         if op == "await_triggers":
-            self._stream_triggers(context, cmd["source_name"], reader, writer)
+            with self._metrics.track_subscription(op):
+                self._stream_triggers(context, cmd["source_name"], reader, writer)
         elif op == "await_datasets":
-            datasets = set(cmd["datasets"]) if cmd.get("datasets") else None
-            self._stream_datasets(
-                context, cmd["exporter_name"], datasets, reader, writer
-            )
+            with self._metrics.track_subscription(op):
+                datasets = set(cmd["datasets"]) if cmd.get("datasets") else None
+                self._stream_datasets(
+                    context, cmd["exporter_name"], datasets, reader, writer
+                )
         else:
-            raise flight.FlightServerError(f"do_exchange unknown op {op!r}")
+            with self._metrics.track("unknown"):
+                raise flight.FlightServerError(f"do_exchange unknown op {op!r}")
 
     def _stream_triggers(self, context, source_name, reader, writer):
         subscription = self._run(self._core.subscribe_triggers(source_name))
@@ -238,15 +279,16 @@ class IonbeamFlightServer(flight.FlightServerBase):
     def _pump(self, context, subscription, reader, writer, schema, to_batch):
         """Poll a subscription and push each event as a one-row batch. The bounded
         wait lets us notice client cancellation (``is_cancelled``) and disconnects
-        (failed writes), so the stream and its bus queue tear down — no pinned thread.
+        (failed writes), tearing down the stream and its bus queue without a
+        pinned thread.
 
-        The bus ack certifies *work completion*, not delivery: after pushing an
+        The bus ack certifies work completion, not delivery. After pushing an
         event the pump blocks on the exchange's return channel for the client's
         ack — an app-metadata frame carrying the event id, sent only once the
         client's handler finished. A client that dies or errors mid-handler tears
-        the stream down instead, so the event stays pending and the bus
-        redelivers it (at-least-once; handlers are idempotent). An ack for the
-        wrong id is a protocol breach and tears down likewise."""
+        the stream down instead, leaving the event pending for the bus to
+        redeliver (at-least-once; handlers are idempotent). An ack for the
+        wrong id tears down the stream the same way."""
         try:
             writer.begin(schema)
             while not (context.is_cancelled() or self._shutting_down.is_set()):
@@ -287,23 +329,50 @@ class IonbeamFlightServer(flight.FlightServerBase):
             schema=TRIGGER_SCHEMA,
         )
 
-    @staticmethod
-    def _dataset_batch(event):
+    def _dataset_batch(self, event):
+        info = self._flight_info(
+            event.metadata.name,
+            event.start_time,
+            event.end_time,
+            event.dataset_locations,
+        )
         return pa.record_batch(
-            [pa.array([event.model_dump_json()])], schema=DATASET_EVENT_SCHEMA
+            [
+                pa.array([str(event.id)]),
+                pa.array([event.metadata.name]),
+                pa.array(
+                    [event.start_time], type=DATASET_EVENT_SCHEMA.field("start").type
+                ),
+                pa.array(
+                    [event.end_time], type=DATASET_EVENT_SCHEMA.field("end").type
+                ),
+                pa.array([event.version], type=pa.int64()),
+                pa.array(
+                    [self._core.revisable_until(event.end_time)],
+                    type=DATASET_EVENT_SCHEMA.field("revisable_until").type,
+                ),
+                pa.array([info.serialize()], type=pa.binary()),
+            ],
+            schema=DATASET_EVENT_SCHEMA,
         )
 
     # --- actions ---------------------------------------------------------
     def do_action(self, context, action):
+        known = {"health_check", "register_dataset", "trigger_source"}
+        with self._metrics.track(action.type if action.type in known else "unknown"):
+            result = self._do_action(action)
+        yield result
+
+    def _do_action(self, action) -> flight.Result:
         if action.type == "health_check":
-            yield flight.Result(b"ok")
+            return flight.Result(b"ok")
         elif action.type == "register_dataset":
             metadata = self._parse_registration(action)
             try:
                 schema_hash = self._run(self._core.register_dataset(metadata))
             except Exception as exc:
                 raise flight.FlightServerError(str(exc)) from exc
-            yield flight.Result(json.dumps({"schema_hash": schema_hash}).encode("utf-8"))
+            return flight.Result(json.dumps({"schema_hash": schema_hash}).encode("utf-8"))
         elif action.type == "trigger_source":
             spec = json.loads(action.body.to_pybytes().decode("utf-8"))
             self._run(
@@ -313,7 +382,7 @@ class IonbeamFlightServer(flight.FlightServerBase):
                     _utc_timestamp(spec["end"], "end"),
                 )
             )
-            yield flight.Result(b"ok")
+            return flight.Result(b"ok")
         else:
             raise flight.FlightServerError(f"Unknown action {action.type!r}")
 

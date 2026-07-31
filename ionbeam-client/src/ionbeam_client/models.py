@@ -202,12 +202,12 @@ class DatasetSchema(BaseModel):
 
 
 class DatasetMetadata(BaseModel):
-    """The server-side definition of an *output* dataset: how a dataset is
-    produced and presented, not what any single source declares at ingestion.
+    """How the server produces and presents one output dataset.
 
-    A data source does not own these fields — they live in server-side per-dataset
-    config (see the ionbeam service's dataset registry) and travel outward on the
-    :class:`DataSetAvailableEvent` for exporters to consume.
+    Set in the ionbeam service's per-dataset registry and embedded in every
+    built dataset's schema metadata, where
+    :func:`ionbeam_client.schema_metadata.dataset_metadata` reads it back.
+    Sources declare their side of the contract with :class:`IngestionMetadata`.
     """
 
     name: str
@@ -273,25 +273,6 @@ class DataAvailableEvent(BaseModel):
     end_time: datetime
     arrived_at: datetime
     records: list[WindowRecord] = []
-
-
-class StartSourceCommand(BaseModel):
-    id: UUID
-    source_name: str
-    start_time: datetime
-    end_time: datetime
-
-
-class DataSetAvailableEvent(BaseModel):
-    id: UUID
-    metadata: DatasetMetadata
-    # the exact store keys of the published build
-    dataset_locations: list[str]
-    start_time: datetime
-    end_time: datetime
-    # the window's finalize delay has passed: this build is immutable and no
-    # further revisions will be published
-    is_final: bool = False
 
 
 def geographic_point_coordinates(altitude: bool = False) -> list[Coordinate]:

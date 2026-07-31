@@ -1,27 +1,21 @@
 Using the Data
 ==============
 
-Built datasets are canonical GeoParquet files in the object store (:ref:`architecture:Dataset publication`). Every consumer path reads that store or a stream of it: the web API for interactive and geospatial queries, direct Parquet reads for bulk analytics, and Flight for programs that want resolved builds streamed or pushed.
+Built datasets are canonical GeoParquet files in the object store (:ref:`architecture:Dataset publication`). The primary access path is the Flight endpoint, which streams any dataset range as Arrow record batches and pushes build events to subscribers; every exporter is built on it. Bulk analytics can read the store directly.
 
-The Web API
+Over Flight
 -----------
 
-A PyGeoAPI server serves the store as an `OGC API — Features <https://ogcapi.ogc.org/features/>`__ service, one collection per dataset. Each observation is a feature: the declared columns are its properties and the synthesized ``ib_geometry`` its geometry. The base URL is deployment-specific.
+The Flight endpoint serves resolved builds: the server picks each window's current build and streams it as Arrow record batches carrying the declared schema. Resolve a range with ``GetFlightInfo`` (op ``dataset_range``) and stream it with ``DoGet`` (:ref:`flight-interface:Reading Datasets (GetFlightInfo / DoGet)`).
 
-List the collections::
+Programs that follow a dataset as it publishes subscribe to build events over :ref:`flight-interface:Dataset Events (DoExchange)` and fetch each new build as it lands. The client library packages this loop — an exporter is a subscription plus a transform to the target system (:ref:`ionbeam-client/index:Writing an Exporter`); the ECMWF/ODB exporter works this way.
 
-    curl "https://<host>/collections?f=json"
-
-Fetch observations for an area and time range::
-
-    curl "https://<host>/collections/meteotracker/items?f=json&limit=100&bbox=5,44,16,55&datetime=2026-07-29T00:00:00Z/2026-07-29T23:59:59Z"
-
-The response is a GeoJSON ``FeatureCollection``; ``numberMatched`` carries the total for paging with ``offset``.
+A separate, non-public PyGeoAPI deployment serves the store as an `OGC API — Features <https://ogcapi.ogc.org/features/>`__ service for internal tooling; it is not an integration surface.
 
 Reading the Store Directly
 --------------------------
 
-Bulk consumers can read the GeoParquet files with any Parquet engine; stored objects carry a ``.parquet`` suffix on top of the build key. The layout asks two things of a direct reader:
+Bulk analytics can read the GeoParquet files with any Parquet engine; stored objects carry a ``.parquet`` suffix on top of the build key. Flight resolves windows and versions server-side; a direct reader takes on both:
 
 - **Select the partitions yourself.** Predicates on the declared time column do not prune the ``ib_year``/``ib_month``/``ib_day`` partitions; constrain the path (or hive filter) to the days you want, then filter rows by time.
 - **Resolve build versions.** A window's current build is its highest ``-v<N>-``; superseded files stay beside it until the sweep removes them, so a bare glob double-counts revised windows.
@@ -41,12 +35,7 @@ With DuckDB, both in one query::
 
 Each file is one window, written time-sorted, with the declared schema in Arrow field metadata and the build's provenance in the Parquet footer (key ``ionbeam.build``).
 
-Over Flight
------------
-
-The Flight endpoint streams resolved builds — the server picks each window's current build for you. Resolve a range with ``GetFlightInfo`` (op ``dataset_range``) and stream it with ``DoGet`` (:ref:`flight-interface:Reading Datasets (GetFlightInfo / DoGet)`), or subscribe to builds as they publish with the client library (:ref:`ionbeam-client/index:Writing an Exporter`).
-
 The Legacy HTTP API
 -------------------
 
-``ionbeam-legacy-api`` serves the previous public HTTP API, unchanged, from the new system, so consumers built against the old contract keep working. New integrations should use the web API or Flight.
+``ionbeam-legacy-api`` serves the previous public HTTP API, unchanged, from the new system, so consumers built against the old contract keep working. New integrations should use Flight.

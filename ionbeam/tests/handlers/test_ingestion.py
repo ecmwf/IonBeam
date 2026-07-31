@@ -21,7 +21,7 @@ from ionbeam_client.models import (
 )
 from ionbeam_client.canonical_stream import canonical_arrow_schema
 from ionbeam_client.schema_metadata import SCHEMA_HASH
-from ionbeam.datasets import DatasetProductionConfig, DatasetRegistry
+from ionbeam.datasets import DatasetBuildConfig, DatasetRegistry
 from ionbeam.handlers.ingestion import Ingestion
 from ionbeam.observability import IngestionMetrics
 from ionbeam.storage.lateness_histogram import bucket_for
@@ -33,9 +33,9 @@ def make_ingestion(
     ingestion_metrics: IngestionMetrics,
     coordination_store,
 ):
-    """Build a handler whose registry aggregates ``test_dataset`` at ``span`` —
-    the aggregation span is server-side production config, so the
-    coverage-checkpoint span is fixed here rather than in metadata."""
+    """Build a handler whose registry aggregates ``test_dataset`` at ``span``.
+    The aggregation span is server-side production config, fixed here rather
+    than in metadata."""
 
     def _make(
         span: timedelta = timedelta(days=1),
@@ -44,7 +44,7 @@ def make_ingestion(
     ) -> Ingestion:
         registry = DatasetRegistry(
             {
-                "test_dataset": DatasetProductionConfig(
+                "test_dataset": DatasetBuildConfig(
                     aggregation_span=span,
                     dedup_ingestion=dedup_ingestion,
                 )
@@ -131,8 +131,7 @@ def _metadata() -> IngestionMetadata:
 
 
 def _at(ticks: float) -> datetime:
-    """Six minutes per tick: ten ticks span one PT1H aggregation window, so
-    the checkpoint tests cross window boundaries at round tick counts."""
+    """Six minutes per tick: ten ticks span one PT1H aggregation window."""
     return DECLARED_START + timedelta(minutes=6 * ticks)
 
 
@@ -223,7 +222,7 @@ class TestCoverageCheckpoints:
         assert result.end_time == DECLARED_END
         assert events == [checkpoint, result]
 
-        # chained checkpoints are by design, not a bounds anomaly worth warning about
+        # chained checkpoints are expected behavior
         assert not any(log["log_level"] == "warning" for log in logs)
 
     async def test_checkpoints_chain_contiguously_and_batch_spanning_windows_checkpoint_once(
@@ -280,8 +279,8 @@ class TestCoverageCheckpoints:
     async def test_replaying_the_same_command_yields_the_same_record_ids(
         self, make_ingestion
     ):
-        """A retried command must not look like new data: identical stream, identical
-        ingestion id => identical checkpoint ids, so no spurious window rebuilds."""
+        """A retried command produces identical checkpoint ids for identical
+        stream and ingestion id, so no spurious window rebuilds."""
         metadata = _metadata()
         ingestion_id = uuid4()
 
@@ -305,8 +304,7 @@ class TestCoverageCheckpoints:
 
 class TestRowProvenance:
     """Every stored row carries the id of the ingestion record that delivered it,
-    so a build can select exactly its desired record set instead of whatever the
-    time range holds at query time."""
+    so a build can select exactly its desired record set at query time."""
 
     SPAN = timedelta(hours=1)
 
@@ -479,10 +477,9 @@ class TestIngestion:
     async def test_ingestion_records_per_datum_arrival_lateness(
         self, ingestion, sample_metadata, coordination_store
     ):
-        """Every datum's lateness — now minus its own observation time — lands in
-        the histogram, so a batch carrying late rows records the late tail, not a
-        single freshest-point sample. Distinct stations, so no row is a content
-        duplicate of another."""
+        """Every datum's lateness (now minus its own observation time) lands in
+        the histogram: a batch carrying late rows records the late tail. Distinct
+        stations keep each row a distinct content set."""
         now = pd.Timestamp.now(tz="UTC")
         timestamps = [now - pd.Timedelta(hours=1)] * 3 + [now - pd.Timedelta(hours=6)] * 2
         batch = _canonical_batch(
@@ -526,7 +523,7 @@ class TestIngestion:
         self, make_ingestion, sample_metadata, coordination_store
     ):
         """A ``dedup_ingestion`` source re-fetching an overlapping span re-delivers
-        the same rows; the write suppresses them, so they never re-count as late
+        the same rows; the write suppresses them, so they do not re-count as late
         arrivals."""
         handler = make_ingestion(dedup_ingestion=True)
         now = pd.Timestamp.now(tz="UTC")

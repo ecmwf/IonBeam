@@ -19,13 +19,13 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.flight as flight
 import pytest
+from prometheus_client import CollectorRegistry
 
-from ionbeam_client import IonbeamClient, IonbeamClientConfig
+from ionbeam_client import AvailableDataset, IonbeamClient, IonbeamClientConfig
 from ionbeam_client.models import (
     CfSemantics,
     Coordinate,
     DatasetSchema,
-    DataSetAvailableEvent,
     IngestionMetadata,
     Tag,
     TimeCoordinate,
@@ -34,9 +34,9 @@ from ionbeam_client.models import (
 )
 from ionbeam_client.canonical_stream import canonical_record_batches
 from ionbeam_client.alignment import align_to_schema
-from ionbeam_client.schema_metadata import SCHEMA_HASH
+from ionbeam_client.schema_metadata import SCHEMA_HASH, dataset_metadata
 from ionbeam.application.core import IonbeamCore
-from ionbeam.datasets import DatasetProductionConfig, DatasetRegistry
+from ionbeam.datasets import DatasetBuildConfig, DatasetRegistry
 from ionbeam.flight.server import IonbeamFlightServer
 from ionbeam.handlers.dataset_builder import (
     DatasetBuilderConfig,
@@ -49,6 +49,7 @@ from ionbeam.handlers.dataset_coordinator import (
 from ionbeam.provenance import RegisteredDatasetMetadata, align_to_aggregation
 from ionbeam.handlers.ingestion import Ingestion
 from ionbeam.messaging import InMemoryEventBus
+from ionbeam.observability import FlightMetrics
 from ionbeam.scheduler import SourceSchedule, SourceScheduler
 from ionbeam.storage.arrow_store import LocalFileSystemStore
 from ionbeam.storage.memory_coordination import (
@@ -64,7 +65,7 @@ WINDOW_START = datetime(2024, 1, 1, 10, tzinfo=timezone.utc)
 WINDOW_END = datetime(2024, 1, 1, 11, tzinfo=timezone.utc)
 TEMPERATURES = [20.0 + i * 0.5 for i in range(10)]
 REGISTRY = DatasetRegistry(
-    {DATASET: DatasetProductionConfig(aggregation_span=timedelta(hours=1))}
+    {DATASET: DatasetBuildConfig(aggregation_span=timedelta(hours=1))}
 )
 
 
@@ -94,9 +95,8 @@ def _running_ionbeam(
             timeseries_db, ingestion_metrics, record_store, REGISTRY
         ),
         coordinator=DatasetCoordinator(
-            # fixture windows are dated 2024; a huge retention keeps them
-            # provisional rather than sealed
-            DatasetCoordinatorConfig(lateness_retention_hours=24 * 3650),
+            # fixture windows are dated 2024; a huge retention keeps them provisional
+            DatasetCoordinatorConfig(retention=timedelta(days=3650)),
             record_store,
             queue,
             coordinator_metrics,
@@ -120,7 +120,9 @@ def _running_ionbeam(
         schedules, core.trigger_source, InMemoryTriggerClaims().try_claim
     )
 
-    server = IonbeamFlightServer("grpc://localhost:0", core)
+    server = IonbeamFlightServer(
+        "grpc://localhost:0", core, FlightMetrics(CollectorRegistry())
+    )
     server.spawn(core.start()).result(timeout=5)
     server.spawn(scheduler.start()).result(timeout=5)
     try:
@@ -276,13 +278,7 @@ def _dataset_descriptor(start: datetime, end: datetime) -> flight.FlightDescript
 
 
 def _read_event(connection, event):
-    reader = connection.do_get(
-        flight.Ticket(
-            json.dumps(
-                {"op": "dataset", "locations": event.dataset_locations}
-            ).encode()
-        )
-    )
+    reader = connection.do_get(event.info.endpoints[0].ticket)
     return [chunk.data for chunk in reader]
 
 
@@ -314,11 +310,14 @@ async def test_ingested_window_is_built_and_pushed_to_export_handler(ionbeam):
         await _poll(lambda: received, message="dataset available push")
 
     event, batches = received[0]
-    assert isinstance(event, DataSetAvailableEvent)
-    assert event.metadata.name == DATASET
+    assert isinstance(event, AvailableDataset)
+    assert event.dataset == DATASET
     assert event.start_time == WINDOW_START
     assert event.end_time == WINDOW_END
-    assert event.dataset_locations
+    assert event.version == 1
+    assert event.revisable_until == WINDOW_END + DatasetBuilderConfig().retention
+    assert CANONICAL_TEMP in event.info.schema.names
+    assert dataset_metadata(event.info.schema).name == DATASET
 
     df = pa.Table.from_batches(batches).to_pandas()
     assert len(df) == len(TEMPERATURES)
@@ -338,8 +337,7 @@ async def test_ingested_window_is_built_and_pushed_to_export_handler(ionbeam):
 
 
 async def test_dataset_is_built_and_exported_while_ingest_stream_is_still_open(ionbeam):
-    """A continuous stream must yield datasets as windows settle — not only
-    when the stream ends."""
+    """A continuous stream yields datasets as windows settle, while still open."""
     received = []
 
     def export_handler(connection, event):
@@ -401,7 +399,7 @@ async def test_dataset_is_built_and_exported_while_ingest_stream_is_still_open(i
             await ingest_task
 
     event, batches = received[0]
-    assert isinstance(event, DataSetAvailableEvent)
+    assert isinstance(event, AvailableDataset)
     assert event.start_time == WINDOW_START
     assert event.end_time == WINDOW_END
 
@@ -566,9 +564,9 @@ def test_drifted_stream_schema_rejected_with_column_named(ionbeam):
 
 
 def test_registration_rejects_uninterpretable_structural_coordinate_units(ionbeam):
-    """Geographic x/y are structural — core interprets their values (GeoParquet
-    geometry, exporter geolocation) — so a unit that cannot mean degrees is
-    rejected at the edge, before anything ingests under it."""
+    """Geographic x/y are structural: core interprets their values for GeoParquet
+    geometry and exporter geolocation. A unit that cannot mean degrees is rejected
+    at registration."""
     bad = _metadata().model_copy(
         update={
             "dataset_schema": DatasetSchema(
@@ -651,9 +649,8 @@ def test_identical_reregistration_is_noop(ionbeam):
 
 
 async def test_scheduler_drives_the_full_loop_unattended(scheduled_ionbeam):
-    """The system runs itself: the scheduler emits a lagged trigger window, the
-    source fetches and ingests it, and the built dataset is pushed to the exporter
-    — no manual ingest or trigger anywhere."""
+    """The scheduler emits a lagged trigger window, the source fetches and ingests
+    it, and the built dataset is pushed to the exporter."""
     span = timedelta(hours=1)
     triggers = []
     received = []
@@ -713,7 +710,7 @@ async def test_scheduler_drives_the_full_loop_unattended(scheduled_ionbeam):
     assert lag >= timedelta(hours=2) - timedelta(seconds=1)  # window_lag honored
 
     event, batches = received[0]
-    assert event.metadata.name == DATASET
+    assert event.dataset == DATASET
     assert event.end_time - event.start_time == span
     assert event.start_time >= align_to_aggregation(start, span)
     assert event.end_time <= align_to_aggregation(end, span) + span

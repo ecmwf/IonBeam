@@ -8,8 +8,8 @@ windows got rows". Each claim stores itself for gap analysis, folds each of
 its records into that window's desired set, then runs one pure decision
 (:func:`decide`) per spanned window. A window whose data supports a build is
 scheduled for the moment it becomes worth building — past its
-measured-lateness settle time and its rebuild debounce — and the queue itself
-holds windows whose moment has not yet come."""
+measured-lateness settle time and its rebuild debounce. The queue holds
+windows whose moment has not yet come."""
 
 import time
 from dataclasses import dataclass
@@ -36,16 +36,18 @@ from ionbeam.storage.coordination_store import CoordinationStore
 
 
 class DatasetCoordinatorConfig(BaseModel):
-    # The settle delay waits until this percentile of a source's data has
-    # historically arrived, measured from observed lateness, so each source
-    # self-tunes when its window is complete enough for a first build. min_samples
-    # guards against trusting a cold histogram (which falls through to an immediate,
-    # revisable build). The histogram rolls over retention_hours — matched to the
-    # hot store's retention, which is also the default final floor: a window cannot
-    # be rebuilt from data that has aged out of the time-series DB.
-    lateness_percentile: float = 0.95
-    lateness_min_samples: int = 50
-    lateness_retention_hours: int = 168
+    # The settle delay is this percentile of a source's observed arrival
+    # lateness, giving each source its own threshold for when a window is
+    # complete enough for a first build. min_samples guards against trusting
+    # a cold histogram: below the threshold, the build proceeds immediately
+    # and is revisable.
+    settle_percentile: float = 0.95
+    settle_min_samples: int = 50
+    # The hot store's retention, shared with the InfluxDB database via
+    # IONBEAM_RETENTION. Windows seal at it and the lateness histogram rolls
+    # over it — a window cannot be rebuilt from data that has aged out of the
+    # time-series DB.
+    retention: timedelta = timedelta(days=7)
 
 
 @dataclass(frozen=True)
@@ -66,8 +68,8 @@ class Unchanged:
 @dataclass(frozen=True)
 class Sealed:
     """The window is past the retention floor: a late arrival will not be
-    folded in. The data stays in the time-series DB until it ages out — it is
-    simply not part of an immutable window."""
+    folded in. The data stays in the time-series DB until it ages out, not as
+    part of any window build."""
 
 
 @dataclass(frozen=True)
@@ -191,7 +193,7 @@ class DatasetCoordinator:
             now=datetime.now(timezone.utc),
             settle=await self._settle_duration(dataset),
             rebuild_debounce=production.rebuild_debounce,
-            retention=timedelta(hours=self.config.lateness_retention_hours),
+            retention=self.config.retention,
         )
 
         for window in self._spanned_windows(event, production.aggregation_span):
@@ -210,16 +212,16 @@ class DatasetCoordinator:
 
     async def _settle_duration(self, dataset: str) -> timedelta:
         """The measured p95 of this source's arrival lateness. A cold histogram
-        yields zero, so windows build eagerly and are then revised as data
-        lands; the rebuild debounce keeps those revisions cheap.
+        yields zero: windows build eagerly and are then revised as data lands,
+        with the rebuild debounce keeping those revisions cheap.
 
-        The histogram itself is filled per-datum at ingestion, not here — this
-        only reads the settled estimate."""
+        The histogram is filled per-datum at ingestion; this reads the settled
+        estimate."""
         measured = await self.record_store.lateness_percentile(
             dataset,
-            self.config.lateness_percentile,
-            self.config.lateness_min_samples,
-            self.config.lateness_retention_hours,
+            self.config.settle_percentile,
+            self.config.settle_min_samples,
+            int(self.config.retention.total_seconds() // 3600),
         )
         self._metrics.observe_lateness_p95(
             dataset, measured.total_seconds() if measured else 0.0

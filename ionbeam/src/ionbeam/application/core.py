@@ -9,12 +9,7 @@ from uuid import UUID, uuid4
 
 import pyarrow as pa
 import structlog
-from ionbeam_client.models import (
-    DataAvailableEvent,
-    DataSetAvailableEvent,
-    IngestionMetadata,
-    StartSourceCommand,
-)
+from ionbeam_client.models import DataAvailableEvent, IngestionMetadata
 
 from ionbeam.builds import current_build_keys, prune_superseded
 from ionbeam.handlers import (
@@ -22,7 +17,12 @@ from ionbeam.handlers import (
     DatasetCoordinator,
     Ingestion,
 )
-from ionbeam.messaging import EventBus, Subscription
+from ionbeam.messaging import (
+    DataSetAvailableEvent,
+    EventBus,
+    StartSourceCommand,
+    Subscription,
+)
 from ionbeam.provenance import RegisteredDatasetMetadata
 from ionbeam.storage.arrow_store import ArrowStore
 from ionbeam.storage.coordination_store import CoordinationStore
@@ -71,8 +71,8 @@ class IonbeamCore:
         )
         await self._record_store.save_registered_metadata(registered)
 
-        # durable registration log; first sighting wins, so a re-register
-        # after a cache wipe keeps the original document
+        # durable registration log; first sighting wins, preserving the
+        # original document across a cache wipe and re-register
         log_key = f"registrations/{metadata.name}/{schema_hash}.json"
         if await self._arrow_store.read_json(log_key) is None:
             await self._arrow_store.write_json(log_key, registered.model_dump_json())
@@ -89,7 +89,7 @@ class IonbeamCore:
         end_time: datetime,
         batches: AsyncIterator[pa.RecordBatch],
     ) -> DataAvailableEvent:
-        # coverage checkpoints flow to the coordinator while the stream is open, so
+        # coverage checkpoints flow to the coordinator while the stream is open;
         # settled windows build without waiting for the stream to end
         return await self._ingestion.ingest(
             ingestion_id,
@@ -110,6 +110,11 @@ class IonbeamCore:
 
     def dataset_schema(self, location: str) -> pa.Schema:
         return self._arrow_store.read_schema(location)
+
+    def revisable_until(self, window_end: datetime) -> datetime:
+        """The instant a window seals: no revision of it is published at or
+        after this time."""
+        return window_end + self._builder.config.retention
 
     async def subscribe_triggers(
         self, source_name: str
@@ -142,8 +147,8 @@ class IonbeamCore:
         self._sweep = asyncio.create_task(self._sweep_superseded())
 
     async def _sweep_superseded(self) -> None:
-        """The sole deleter of canonical-store objects: periodically drop
-        build files superseded for longer than the grace period."""
+        """Sole deleter of canonical-store objects. Periodically drops build
+        files superseded for longer than the grace period."""
         while True:
             try:
                 deleted = await prune_superseded(self._arrow_store)

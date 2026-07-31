@@ -13,7 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from ionbeam.builds import manifest_key
-from ionbeam.datasets import DatasetProductionConfig, DatasetRegistry
+from ionbeam.datasets import DatasetBuildConfig, DatasetRegistry
 from ionbeam.handlers.dataset_builder import (
     DatasetBuilderConfig,
     DatasetBuilder,
@@ -38,7 +38,7 @@ from ionbeam_client.models import (
 )
 
 REGISTRY = DatasetRegistry(
-    {"test_dataset": DatasetProductionConfig(aggregation_span=timedelta(hours=1))}
+    {"test_dataset": DatasetBuildConfig(aggregation_span=timedelta(hours=1))}
 )
 
 METADATA = IngestionMetadata(
@@ -198,9 +198,9 @@ async def _seed_record(store, arrived_at: datetime, id=None) -> str:
 
 
 class TestRecordScopedBuilds:
-    """A build composes exactly its desired records' rows — never whatever the
-    time range happens to hold at query time — so the stamped record-set hash
-    names the artifact's true contents."""
+    """A build composes exactly its desired records' rows, not whatever the
+    time range holds at query time. The stamped record-set hash names the
+    artifact's contents."""
 
     async def _build(
         self, store, queue, db, metrics, arrow_store
@@ -221,9 +221,9 @@ class TestRecordScopedBuilds:
         arrow_store,
         builder_metrics,
     ):
-        """Rows delivered by a record outside the desired set — arrived after
-        the build was decided, or never recorded — stay out of the artifact,
-        even though they sit in the same time range."""
+        """Rows from a record outside the desired set (arrived after the build
+        was decided, or never recorded) stay out of the artifact, regardless of
+        their time range."""
         db = InMemoryTimeSeriesDatabase()
         desired = await _seed_record(
             coordination_store, arrived_at=_arrived(1)
@@ -248,9 +248,9 @@ class TestRecordScopedBuilds:
         builder_metrics,
     ):
         """Same station and observation time in two desired records: the
-        later-arrived record's row replaces the earlier one — a QC correction
-        propagates. The correction gets the lexicographically smaller id, so
-        passing proves the collapse orders by arrival, not by record id."""
+        later-arrived record's row replaces the earlier one. The collapse
+        orders by arrival time; the correction here has the lexicographically
+        smaller id."""
         db = InMemoryTimeSeriesDatabase()
         original = await _seed_record(
             coordination_store,
@@ -284,7 +284,7 @@ class TestRecordScopedBuilds:
         """A desired record whose rows the record filter cannot reach means the
         hot store lost or expired them. Publishing a partial record set would
         be silent data loss; publishing the raw time range would be unfolded
-        duplicates. The build defers instead — nothing is published."""
+        duplicates. The build defers and publishes nothing."""
         db = InMemoryTimeSeriesDatabase()
         reachable = await _seed_record(
             coordination_store, arrived_at=_arrived(1)
@@ -311,8 +311,8 @@ class TestRecordScopedBuilds:
 
 class TestWindowManifests:
     """Every artifact write appends a build entry to a manifest stored beside
-    the file — the durable record of which ingestion records, under which
-    schema, produced it — so provenance survives the coordination cache."""
+    the file: the durable record of which ingestion records, under which
+    schema, produced it."""
 
     async def _build(
         self, store, queue, db, metrics, arrow_store
@@ -396,8 +396,8 @@ class TestWindowManifests:
             manifest.builds[0].record_ids_hash != manifest.builds[1].record_ids_hash
         )
 
-        # each build is its own immutable object: the rebuild never rewrote v1,
-        # so a reader holding the v1 location is undisturbed until v1 expires
+        # each build is its own immutable object: the rebuild wrote v2 alongside
+        # v1; a reader holding the v1 location keeps it until v1 expires
         (v1,) = manifest.builds[0].locations
         (v2,) = manifest.builds[1].locations
         assert arrow_store.stored_keys() == sorted([v1, v2])
@@ -447,8 +447,8 @@ async def test_a_deferring_window_frees_its_slot_for_other_builds(
     arrow_store,
     builder_metrics,
 ):
-    """A window that cannot build defers into the queue — its backoff must not
-    hold the worker slot, so the next due window builds immediately even with
+    """A window that cannot build defers into the queue. Its backoff does not
+    hold the worker slot: the next due window builds immediately even with
     one worker."""
     db = InMemoryTimeSeriesDatabase()
     await _seed_record(coordination_store, arrived_at=_arrived(1))  # no rows
@@ -498,9 +498,8 @@ async def test_worker_loop_survives_a_queue_outage(
     arrow_store,
     builder_metrics,
 ):
-    """A transient coordination outage (Valkey down, DNS blip at startup) must
-    idle the worker loop, not kill it: once the queue answers again, queued
-    windows still build."""
+    """A transient coordination outage (Valkey down, DNS blip at startup) idles
+    the worker loop. Once the queue answers again, queued windows build."""
     window = await _seed_window(
         coordination_store, datetime(2024, 1, 1, 10, tzinfo=timezone.utc)
     )
@@ -548,7 +547,7 @@ async def test_build_file_footer_carries_its_own_provenance(
     builder_metrics,
 ):
     """Every build file is self-describing: the parquet footer carries the
-    build's own manifest entry, so a copied file keeps its provenance."""
+    build's own manifest entry. A copied file keeps its provenance."""
     db = InMemoryTimeSeriesDatabase()
     record = await _seed_record(coordination_store, arrived_at=_arrived(1))
     await _seed_rows(db, record, [0, 6], [20.0, 21.0])

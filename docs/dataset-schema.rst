@@ -85,24 +85,19 @@ Schema-level metadata carries ``ionbeam.schema_hash`` (the declared contract's h
 Reading Datasets
 ----------------
 
-An export handler registered via ``IonbeamClient.register_export_handler()`` receives each availability event together with a live Flight connection. The event's ``dataset_locations`` go back to the server as the ``DoGet`` ticket; structure and semantics are read from the streamed schema through ``ionbeam_client.schema_metadata``:
+An export handler registered via ``IonbeamClient.register_export_handler()`` receives each availability announcement together with a live Flight connection. The announcement's ``info`` is a server-minted ``FlightInfo`` whose ticket streams the build via standard ``DoGet``; structure and semantics are read from the streamed schema through ``ionbeam_client.schema_metadata``:
 
 .. code-block:: python
 
-    import json
-
     import pyarrow.flight as flight
 
-    from ionbeam_client.models import DataSetAvailableEvent
+    from ionbeam_client import AvailableDataset
     from ionbeam_client.schema_metadata import (
         find_coordinates, semantics, time_field, unit, value_fields,
     )
 
-    def export_handler(connection: flight.FlightClient, event: DataSetAvailableEvent) -> None:
-        ticket = flight.Ticket(
-            json.dumps({"op": "dataset", "locations": event.dataset_locations}).encode()
-        )
-        reader = connection.do_get(ticket)
+    def export_handler(connection: flight.FlightClient, event: AvailableDataset) -> None:
+        reader = connection.do_get(event.info.endpoints[0].ticket)
 
         schema = reader.schema
         t = time_field(schema)

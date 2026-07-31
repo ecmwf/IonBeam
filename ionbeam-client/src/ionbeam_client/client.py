@@ -5,6 +5,7 @@ import asyncio
 import json
 import random
 import threading
+from dataclasses import dataclass
 from datetime import datetime
 from typing import AsyncIterator, Awaitable, Callable, List, Optional, Set
 from uuid import UUID, uuid4
@@ -14,7 +15,7 @@ import pyarrow.flight as flight
 import structlog
 
 from .config import IonbeamClientConfig
-from .models import DataSetAvailableEvent, IngestDataCommand, IngestionMetadata
+from .models import IngestDataCommand, IngestionMetadata
 from .schema_metadata import SCHEMA_HASH
 
 class IngestRejected(ValueError):
@@ -22,13 +23,37 @@ class IngestRejected(ValueError):
     stream); retrying the same data is pointless."""
 
 
+@dataclass(frozen=True)
+class AvailableDataset:
+    """A pushed announcement that a dataset build can be fetched.
+
+    ``info`` is a server-minted :class:`flight.FlightInfo`; stream the data by
+    redeeming every endpoint's ticket with ``connection.do_get``, in endpoint
+    order. Structure and semantics travel in the streamed schema, readable via
+    :mod:`ionbeam_client.schema_metadata`.
+
+    A higher ``version`` of the same time range supersedes this build whenever
+    it arrives. No revision is published at or after ``revisable_until``, so
+    the build is immutable once the clock passes it.
+    """
+
+    id: UUID
+    dataset: str
+    start_time: datetime
+    end_time: datetime
+    version: int
+    revisable_until: datetime
+    info: flight.FlightInfo
+
+
 # The trigger's command id is deterministic per (schedule, boundary); a handler
 # that ingests under it (ingestion_id=trigger_id) makes a redelivered trigger
 # replay as the same claims and records instead of fresh data.
 TriggerHandler = Callable[[datetime, datetime, UUID], Awaitable[None]]
 # The handler reads the canonical data it needs itself (via do_get on the
-# connection), so it is handed the connection and the event, nothing pre-fetched.
-ExportHandler = Callable[[flight.FlightClient, DataSetAvailableEvent], None]
+# connection), so it is handed the connection and the announcement, nothing
+# pre-fetched.
+ExportHandler = Callable[[flight.FlightClient, AvailableDataset], None]
 
 _MAX_RETRY_DELAY = 60.0
 
@@ -80,9 +105,9 @@ class _FlightSubscription:
 
     def stop(self) -> None:
         # Signal first so no new event is picked up, then cancel the read cursor to
-        # unblock an idle subscription. A handler already running keeps going: we
-        # join for the full grace window so in-flight work (an export, a fetch) is
-        # never cut short — k8s SIGKILL at grace end is the hard bound.
+        # unblock an idle subscription. Joins for the full grace window so a running
+        # handler's in-flight work (an export, a fetch) completes; k8s SIGKILL at
+        # grace end is the hard bound.
         self._closing.set()
         reader = self._reader
         if reader is not None:
@@ -140,10 +165,9 @@ class _FlightSubscription:
                 if chunk.data is None:
                     continue
                 # A handler failure propagates and tears the stream down without
-                # acking, so the server leaves the event pending for redelivery —
-                # work is acknowledged, not delivery. The handler returns the
-                # event id it completed; echoing it lets the server verify the
-                # ack matches what it delivered.
+                # acking, so the server leaves the event pending for redelivery.
+                # The handler returns the event id it completed; echoing it lets
+                # the server verify the ack matches what it delivered.
                 completed_id = self._on_batch(connection, chunk.data)
                 writer.write_metadata(completed_id.encode())
         finally:
@@ -409,17 +433,24 @@ class IonbeamClient:
         )
 
         def on_batch(connection: flight.FlightClient, batch: pa.RecordBatch) -> str:
-            event = DataSetAvailableEvent.model_validate_json(
-                batch.column("event")[0].as_py()
+            event = AvailableDataset(
+                id=UUID(batch.column("id")[0].as_py()),
+                dataset=batch.column("dataset")[0].as_py(),
+                start_time=batch.column("start")[0].as_py(),
+                end_time=batch.column("end")[0].as_py(),
+                version=batch.column("version")[0].as_py(),
+                revisable_until=batch.column("revisable_until")[0].as_py(),
+                info=flight.FlightInfo.deserialize(batch.column("info")[0].as_py()),
             )
 
             bound_logger.info(
                 "Received dataset available event",
                 event_id=str(event.id),
-                dataset=event.metadata.name,
-                files=len(event.dataset_locations),
+                dataset=event.dataset,
                 start=event.start_time.isoformat(),
                 end=event.end_time.isoformat(),
+                version=event.version,
+                revisable_until=event.revisable_until.isoformat(),
             )
 
             try:
@@ -427,7 +458,7 @@ class IonbeamClient:
                 bound_logger.info(
                     "Export handler completed successfully",
                     event_id=str(event.id),
-                    dataset=event.metadata.name,
+                    dataset=event.dataset,
                 )
             except Exception:
                 # Propagate: the subscription tears down unacked, so the bus

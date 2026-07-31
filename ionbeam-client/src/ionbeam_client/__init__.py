@@ -3,7 +3,13 @@
 
 from . import canonical_stream, models, schema_metadata, schemes
 from .canonical_stream import canonical_record_batches
-from .client import ExportHandler, IngestRejected, IonbeamClient, TriggerHandler
+from .client import (
+    AvailableDataset,
+    ExportHandler,
+    IngestRejected,
+    IonbeamClient,
+    TriggerHandler,
+)
 from .config import IonbeamClientConfig
 from .alignment import align_to_schema, coerce_types
 from .models import (
@@ -25,6 +31,7 @@ from .runner import run_source
 __all__ = [
     "IonbeamClient",
     "IonbeamClientConfig",
+    "AvailableDataset",
     "ExportHandler",
     "IngestRejected",
     "TriggerHandler",

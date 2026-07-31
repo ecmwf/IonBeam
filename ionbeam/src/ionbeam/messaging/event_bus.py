@@ -13,11 +13,35 @@ client disconnects without destroying the subscription.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Generic, Optional, Set, TypeVar
+from uuid import UUID
 
-from ionbeam_client.models import DataSetAvailableEvent, StartSourceCommand
+from ionbeam_client.models import DatasetMetadata
+from pydantic import BaseModel
 
 T = TypeVar("T")
+
+
+class StartSourceCommand(BaseModel):
+    id: UUID
+    source_name: str
+    start_time: datetime
+    end_time: datetime
+
+
+class DataSetAvailableEvent(BaseModel):
+    id: UUID
+    metadata: DatasetMetadata
+    # the exact store keys of the published build
+    dataset_locations: list[str]
+    start_time: datetime
+    end_time: datetime
+    # a higher version of the same window supersedes lower ones
+    version: int = 1
+    # the window's finalize delay has passed: this build is immutable and no
+    # further revisions will be published
+    is_final: bool = False
 
 
 class Subscription(ABC, Generic[T]):

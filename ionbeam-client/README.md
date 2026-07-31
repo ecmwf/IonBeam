@@ -114,22 +114,21 @@ The `source_name` must match a `scheduler.windows` entry in the core config. A t
 
 ## Exporting
 
-An exporter subscribes to dataset availability. The handler receives the event and a live Flight connection, and streams the current builds for the range it cares about with `GetFlightInfo` (`op: "dataset_range"`) — the bundled ODB exporter rebuilds its whole analysis cycle this way on every event:
+An exporter subscribes to dataset availability. The handler receives an `AvailableDataset` announcement and a live Flight connection. The announcement's `info` is a server-minted `FlightInfo` whose ticket streams that exact build (`connection.do_get(event.info.endpoints[0].ticket)`); an exporter that instead assembles a wider range resolves the current builds with `GetFlightInfo` (`op: "dataset_range"`) — the bundled ODB exporter rebuilds its whole analysis cycle this way on every event:
 
 ```python
 import json
 
 import pyarrow.flight as flight
-from ionbeam_client import IonbeamClient, IonbeamClientConfig
-from ionbeam_client.models import DataSetAvailableEvent
+from ionbeam_client import AvailableDataset, IonbeamClient, IonbeamClientConfig
 
 
-def export_handler(connection: flight.FlightClient, event: DataSetAvailableEvent) -> None:
+def export_handler(connection: flight.FlightClient, event: AvailableDataset) -> None:
     descriptor = flight.FlightDescriptor.for_command(
         json.dumps(
             {
                 "op": "dataset_range",
-                "dataset": event.metadata.name,
+                "dataset": event.dataset,
                 "start": event.start_time.isoformat(),
                 "end": event.end_time.isoformat(),
             }

@@ -4,9 +4,13 @@
 from .ingestion import IngestionMetrics
 from .coordinator import CoordinatorMetrics
 from .builder import BuilderMetrics
+from .event_bus import EventBusMetrics
+from .flight import FlightMetrics
 
 __all__ = [
     "IngestionMetrics",
     "CoordinatorMetrics",
     "BuilderMetrics",
+    "EventBusMetrics",
+    "FlightMetrics",
 ]

@@ -12,13 +12,15 @@ from uuid import uuid4
 
 import pytest
 import redis.asyncio as redis
-from ionbeam_client.models import (
+from ionbeam_client.models import DatasetMetadata
+from prometheus_client import CollectorRegistry
+
+from ionbeam.messaging import (
     DataSetAvailableEvent,
-    DatasetMetadata,
+    RedisStreamsEventBus,
     StartSourceCommand,
 )
-
-from ionbeam.messaging import RedisStreamsEventBus
+from ionbeam.observability import EventBusMetrics
 
 REDIS_URL = os.getenv("IONBEAM_TEST_REDIS_URL")
 pytestmark = pytest.mark.skipif(
@@ -54,7 +56,7 @@ def _trigger(source_name: str) -> StartSourceCommand:
 async def bus():
     client = redis.from_url(REDIS_URL)
     await client.flushdb()
-    yield RedisStreamsEventBus(client)
+    yield RedisStreamsEventBus(client, EventBusMetrics(CollectorRegistry()))
     await client.aclose()
 
 
@@ -124,10 +126,12 @@ async def test_delivered_event_is_acked_and_not_redelivered(bus):
 
 async def test_unacked_event_is_redelivered_to_a_new_consumer():
     # A subscriber that reads but dies before ack (a disconnect mid-delivery)
-    # must not lose the event: a reconnecting consumer reclaims it.
+    # leaves the event pending: a reconnecting consumer reclaims it.
     client = redis.from_url(REDIS_URL)
     await client.flushdb()
-    bus = RedisStreamsEventBus(client, reclaim_min_idle_ms=0)
+    bus = RedisStreamsEventBus(
+        client, EventBusMetrics(CollectorRegistry()), reclaim_min_idle_ms=0
+    )
 
     sub = await bus.subscribe_datasets("odb")
     await bus.publish_dataset_available(_dataset_event("weather"))
@@ -146,12 +150,14 @@ async def test_unacked_event_is_redelivered_to_a_new_consumer():
 
 
 async def test_dead_consumer_names_are_reaped_on_subscribe():
-    # A SIGKILLed subscriber never reaches close(), so its consumer name stays
-    # registered in the group forever; a new subscription sweeps idle names
-    # with nothing pending, leaving only live subscribers registered.
+    # A SIGKILLed subscriber never reaches close(); its consumer name stays
+    # registered in the group. A new subscription sweeps idle names with
+    # nothing pending, leaving only live subscribers registered.
     client = redis.from_url(REDIS_URL)
     await client.flushdb()
-    bus = RedisStreamsEventBus(client, reap_consumer_min_idle_ms=500)
+    bus = RedisStreamsEventBus(
+        client, EventBusMetrics(CollectorRegistry()), reap_consumer_min_idle_ms=500
+    )
 
     dead = await bus.subscribe_datasets("odb")
     assert await dead.next(0.05) is None  # registers its consumer name
@@ -190,12 +196,12 @@ async def test_triggers_route_by_source_name(bus):
 
 
 async def test_poison_event_is_dropped_after_max_deliveries():
-    # An event whose handler dies on every delivery must not redeliver forever
-    # (it would block everything behind it): past the delivery cap it is
-    # dropped with an error instead.
+    # An event whose handler dies on every delivery blocks everything behind it
+    # if redelivered forever. Past the delivery cap it is dropped with an error.
     client = redis.from_url(REDIS_URL)
     await client.flushdb()
-    bus = RedisStreamsEventBus(client, reclaim_min_idle_ms=0)
+    registry = CollectorRegistry()
+    bus = RedisStreamsEventBus(client, EventBusMetrics(registry), reclaim_min_idle_ms=0)
 
     first = await bus.subscribe_datasets("odb")
     await bus.publish_dataset_available(_dataset_event("weather"))
@@ -219,11 +225,18 @@ async def test_poison_event_is_dropped_after_max_deliveries():
     assert await again.next(0.2) is None
     await again.close()
 
-    # ...but parked with payload and provenance, not lost
+    # parked with payload and provenance
     parked = await client.xrange("ionbeam:dead-letter")
     assert len(parked) == 1
     _, fields = parked[0]
     assert fields[b"stream"] == b"ionbeam:datasets"
     assert fields[b"group"] == b"odb"
     assert b"weather" in fields[b"event"]
+    assert (
+        registry.get_sample_value(
+            "ionbeam_eventbus_dead_lettered_total",
+            {"stream": "ionbeam:datasets", "group": "odb"},
+        )
+        == 1
+    )
     await client.aclose()

@@ -7,15 +7,15 @@ scenarios; the stateful behaviours (build lifecycle, measured-lateness settle,
 rebuild debounce, sealing) are individual flows.
 
 The aggregation span and the finaliser thresholds are server-side production
-config (see :class:`DatasetRegistry`), so the windowing scenarios pin them
-through ``_registry`` rather than the event."""
+config (see :class:`DatasetRegistry`). The windowing scenarios pin them
+through ``_registry``, not the event."""
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
-from ionbeam.datasets import DatasetProductionConfig, DatasetRegistry
+from ionbeam.datasets import DatasetBuildConfig, DatasetRegistry
 from ionbeam.handlers.dataset_coordinator import (
     DatasetCoordinatorConfig,
     DatasetCoordinator,
@@ -42,10 +42,9 @@ from ionbeam_client.models import (
 
 T0 = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
 
-# Windows at T0 are years old, so a real retention would seal them before the
-# coverage gates the windowing scenarios exercise. A far horizon keeps every
-# window provisional, isolating the windowing decision under test.
-_NEVER_FINAL_HOURS = 24 * 3650
+# Windows at T0 are years old; a far horizon keeps every window provisional,
+# isolating the windowing decision under test.
+_NEVER_FINAL = timedelta(days=3650)
 
 
 def at(hours: int, minutes: int = 0) -> datetime:
@@ -76,7 +75,7 @@ def _registry(
 ) -> DatasetRegistry:
     return DatasetRegistry(
         {
-            "test_dataset": DatasetProductionConfig(
+            "test_dataset": DatasetBuildConfig(
                 aggregation_span=span,
                 rebuild_debounce=debounce,
             )
@@ -108,7 +107,7 @@ def _event(
 
 
 def _handler(store, queue, metrics, registry=None, **config) -> DatasetCoordinator:
-    config.setdefault("lateness_retention_hours", _NEVER_FINAL_HOURS)
+    config.setdefault("retention", _NEVER_FINAL)
     return DatasetCoordinator(
         DatasetCoordinatorConfig(**config), store, queue, metrics, registry or _registry()
     )
@@ -191,7 +190,7 @@ async def test_window_decisions(
     assert sorted(queue) == sorted(expected_keys)
 
     # a cold lateness histogram means no settle delay: every scheduled window is
-    # eligible the moment it ends, so older windows are claimed first
+    # eligible the moment it ends; older windows are claimed first
     assert [queue[key] for key in expected_keys] == [
         start + scenario.span for start in starts
     ]
@@ -273,7 +272,7 @@ async def test_measured_lateness_defers_eligibility(
         coordination_store,
         build_queue,
         coordinator_metrics,
-        lateness_min_samples=3,
+        settle_min_samples=3,
     )
     metadata = _metadata()
 
@@ -284,8 +283,8 @@ async def test_measured_lateness_defers_eligibility(
         "test_dataset", {six_hours: 100}, 168
     )
 
-    # a just-completed window: its data could still be arriving, so its build is
-    # scheduled for after the measured settle time, not now
+    # a just-completed window: its data could still be arriving, so its build
+    # is scheduled for after the measured settle time
     now = datetime.now(timezone.utc)
     fresh_start = align_to_aggregation(now, span) - span
     fresh = Window("test_dataset", fresh_start, span)
@@ -344,13 +343,13 @@ async def test_rebuild_is_debounced(
 async def test_sealed_window_drops_late_arrivals(
     coordination_store, build_queue, coordinator_metrics
 ):
-    """Past the retention floor a window is sealed — its records expire with the
-    hot store, so a late arrival cannot schedule any build, built or not."""
+    """Past the retention floor a window is sealed and its records expire with
+    the hot store. A late arrival cannot schedule any build, built or not."""
     handler = _handler(
         coordination_store,
         build_queue,
         coordinator_metrics,
-        lateness_retention_hours=1,
+        retention=timedelta(hours=1),
     )
     metadata = _metadata()
     built = Window("test_dataset", at(10), timedelta(hours=1))

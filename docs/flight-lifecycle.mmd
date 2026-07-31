@@ -1,0 +1,24 @@
+%%{init: {"sequence": {"diagramMarginX": 12, "actorMargin": 48, "messageMargin": 40, "mirrorActors": false}}}%%
+sequenceDiagram
+  autonumber
+  participant SRC as Data source
+  participant IB as IonBeam<br/>Flight endpoint
+  participant TSDB as InfluxDB 3<br/>ingest buffer
+  participant STORE as Arrow store<br/>canonical GeoParquet
+  participant EXP as Exporter
+
+  SRC->>IB: DoAction register_dataset
+  IB-->>SRC: schema_hash
+  SRC->>IB: DoPut ingest · RecordBatch stream
+  IB->>TSDB: write observations
+  note over IB: coverage claimed as rows arrive,<br/>each window scheduled once due
+  IB->>TSDB: query window rows
+  IB->>STORE: write build<br/>ib_year=/ib_month=/ib_day=/…-v1-….parquet
+  IB-)EXP: DoExchange await_datasets · event push
+  EXP->>IB: GetFlightInfo dataset_range [start, end)
+  note over IB,STORE: lists only the range's day partitions,<br/>keeps each window's highest -vN-
+  IB-->>EXP: FlightInfo · schema + ticket of resolved build keys
+  EXP->>IB: DoGet ticket
+  STORE->>IB: read record batches
+  IB-->>EXP: RecordBatch stream · windows in order
+  note over SRC,EXP: late rows rebuild their window: v2 lands beside v1<br/>and a fresh event fires — until revisable_until seals it

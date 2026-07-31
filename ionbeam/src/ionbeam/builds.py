@@ -6,16 +6,16 @@
 A window's build is a single file under its dataset's start-day partition:
 ``<dataset>/ib_year=YYYY/ib_month=MM/ib_day=DD/<window start stamp>_<span>
 -v<version>-<record-set hash>``. The day partition fans a dataset's builds
-across many small directories rather than one flat prefix that an S3 lister
-short-pages, and spells the day as hive ``key=value`` segments: an engine
-pointed at the store can opt into hive parsing and prune on the keys, which
-live in the platform's reserved ``ib_`` namespace so no declared column can
-collide with them. A reader that does not opt in sees inert path segments.
-The stamp and span name the window (matching its ``_manifests/`` entry), the
-version orders that window's builds, and the hash ties the file to its
-manifest entry and its footer's ``ionbeam.build``. Aggregation spans divide
-one day and windows are epoch-aligned (see
-:class:`~ionbeam.datasets.DatasetProductionConfig`), so every window nests
+across many small directories, avoiding a single flat prefix that an S3
+lister short-pages, and spells the day as hive ``key=value`` segments: an
+engine pointed at the store can opt into hive parsing and prune on the keys.
+The keys live in the platform's reserved ``ib_`` namespace, so no declared
+column can collide with them. A reader that does not opt in sees inert path
+segments. The stamp and span name the window (matching its ``_manifests/``
+entry), the version orders that window's builds, and the hash ties the file
+to its manifest entry and its footer's ``ionbeam.build``. Aggregation spans
+divide one day and windows are epoch-aligned (see
+:class:`~ionbeam.datasets.DatasetBuildConfig`), so every window nests
 inside its partition: the rows under an ``ib_day`` are exactly that day's
 rows. Readers also prune by the window interval in the name or by the time
 column's parquet statistics; predicates on the declared time column never
@@ -23,8 +23,8 @@ prune against the partition keys.
 
 A rebuild writes the next version's file beside the current one and never
 touches an existing file. A window's current build is its highest version.
-Once the current build is older than :data:`SUPERSEDED_GRACE` — its write is
-complete and any read that resolved an earlier build has finished — every
+Once the current build is older than :data:`SUPERSEDED_GRACE`, its write is
+complete and any read that resolved an earlier build has finished; every
 version but the current and the one before it is deleted by the sweep."""
 
 import re
@@ -91,9 +91,9 @@ def next_version(
 
 def _day_prefixes(dataset: str, start: datetime, end: datetime) -> list[str]:
     """The day-partition prefixes a window starting in ``[start, end)`` can
-    live under. A window's day is its start day, so the range of start days is
-    exactly ``[start.date, end.date]`` inclusive — listed one day at a time
-    because an object store short-pages a listing of the whole dataset
+    live under. A window's day is its start day, so the range of start days
+    is exactly ``[start.date, end.date]`` inclusive. Listed one day at a
+    time: an object store short-pages a listing of the whole dataset
     directory once it holds enough builds."""
     day = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
     last = datetime(end.year, end.month, end.day, tzinfo=timezone.utc)
@@ -145,9 +145,10 @@ async def current_build_keys(
 
 def superseded(stored: Iterable[StoredObject], now: datetime) -> list[str]:
     """Keys of build files below their window's current and previous versions,
-    for windows whose current build is older than the grace period — a write
-    still in progress, being younger, protects the versions beneath it. The
-    previous version is kept as a one-deep rollback margin."""
+    for windows whose current build is older than the grace period. A write
+    still in progress is younger than the grace period, protecting the
+    versions beneath it. The previous version is kept as a one-deep rollback
+    margin."""
     windows: dict[tuple[str, str], dict[int, list[StoredObject]]] = {}
     for obj in stored:
         parsed = parse_build(obj.key)

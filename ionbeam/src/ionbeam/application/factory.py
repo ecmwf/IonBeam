@@ -5,16 +5,22 @@
 
 import logging
 import os
+import re
 import signal
 import threading
 from datetime import timedelta
-from pathlib import Path
 from typing import NamedTuple
 
 import redis.asyncio as redis
 import structlog
 import yaml
-from prometheus_client import CollectorRegistry, start_http_server
+from prometheus_client import (
+    CollectorRegistry,
+    GCCollector,
+    PlatformCollector,
+    ProcessCollector,
+    start_http_server,
+)
 
 from ionbeam.application.core import IonbeamCore
 from ionbeam.datasets import DatasetRegistry
@@ -31,6 +37,8 @@ from ionbeam.observability.logging import setup_logging
 from ionbeam.observability.recorders import (
     BuilderMetrics,
     CoordinatorMetrics,
+    EventBusMetrics,
+    FlightMetrics,
     IngestionMetrics,
 )
 from ionbeam.scheduler import SourceSchedule, SourceScheduler
@@ -62,7 +70,26 @@ def load_config() -> dict:
         return yaml.safe_load(f) or {}
 
 
+_RETENTION_UNITS = {"h": "hours", "d": "days", "w": "weeks"}
+
+
+def parse_retention(value: str) -> timedelta:
+    """An InfluxDB-style duration (``7d``, ``168h``, ``2w``) as a timedelta, so
+    one IONBEAM_RETENTION value drives both the database and this service."""
+    match = re.fullmatch(r"(\d+)([hdw])", value)
+    if match is None:
+        raise ValueError(
+            f"IONBEAM_RETENTION must be an InfluxDB duration like 7d, 168h or 2w, got {value!r}"
+        )
+    return timedelta(**{_RETENTION_UNITS[match.group(2)]: int(match.group(1))})
+
+
 def build(config: dict) -> Ionbeam:
+    metrics_registry = CollectorRegistry()
+    ProcessCollector(registry=metrics_registry)
+    PlatformCollector(registry=metrics_registry)
+    GCCollector(registry=metrics_registry)
+
     coordination = config["coordination"]
     redis_client = (
         redis.from_url(coordination["redis"]["url"])
@@ -77,12 +104,13 @@ def build(config: dict) -> Ionbeam:
         else None
     )
 
+    # one retention knob, shared with the InfluxDB database itself: ingestion's
+    # lateness histogram, the coordinator's build gate, the builder's finalize
+    # floor, and the record store TTL follow it
+    retention = parse_retention(os.getenv("IONBEAM_RETENTION", "7d"))
     coordinator_config = DatasetCoordinatorConfig(
-        **(config.get("dataset_coordinator") or {})
+        retention=retention, **(config.get("dataset_coordinator") or {})
     )
-    # one retention knob: ingestion's lateness histogram, the coordinator's build
-    # gate, the builder's finalize floor, and the record store TTL all follow it
-    retention = timedelta(hours=coordinator_config.lateness_retention_hours)
 
     if coordination["record_store"]["adapter"] == "redis":
         record_store = RedisCoordinationStore(redis_client, retention=retention)
@@ -97,7 +125,7 @@ def build(config: dict) -> Ionbeam:
         else InMemoryBuildQueue()
     )
     event_bus = (
-        RedisStreamsEventBus(redis_client)
+        RedisStreamsEventBus(redis_client, EventBusMetrics(metrics_registry))
         if config["messaging"]["adapter"] == "redis"
         else InMemoryEventBus()
     )
@@ -114,7 +142,6 @@ def build(config: dict) -> Ionbeam:
 
     dataset_registry = DatasetRegistry.from_config(config.get("datasets"))
 
-    metrics_registry = CollectorRegistry()
     core = IonbeamCore(
         ingestion=Ingestion(
             timeseries_db,
@@ -160,11 +187,7 @@ def run(host: str, port: int) -> None:
     config = load_config()
 
     log_config = config.get("logging") or {}
-    setup_logging(
-        level=getattr(logging, log_config.get("level", "INFO")),
-        log_dir=Path(log_config.get("log_dir", "./logs")),
-        log_name=log_config.get("log_name", "ionbeam.log"),
-    )
+    setup_logging(level=getattr(logging, log_config.get("level", "INFO")))
 
     ionbeam = build(config)
 
@@ -179,7 +202,11 @@ def run(host: str, port: int) -> None:
         ionbeam.trigger_claims.try_claim,
     )
 
-    server = IonbeamFlightServer(f"grpc://{host}:{port}", ionbeam.core)
+    server = IonbeamFlightServer(
+        f"grpc://{host}:{port}",
+        ionbeam.core,
+        FlightMetrics(ionbeam.metrics_registry),
+    )
     server.spawn(ionbeam.core.start())
     server.spawn(scheduler.start())
 
@@ -192,16 +219,16 @@ def run(host: str, port: int) -> None:
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
 
-    # serve() blocks its thread inside gRPC where Python signal handlers never run,
-    # so serve on a worker thread and keep the main thread free to react to signals.
+    # serve() blocks its thread inside gRPC, where Python signal handlers never
+    # run; serve on a worker thread and keep the main thread free for signals.
     serve_thread = threading.Thread(target=server.serve, name="flight-serve")
     serve_thread.start()
 
     logger.info("ionbeam Flight endpoint listening", host=host, port=port)
     stop_requested.wait()
 
-    # Stop the scheduler and builder on the server loop while it still runs,
-    # then drain gRPC and stop the loop.
+    # Stops the scheduler and builder on the server loop while it still runs,
+    # then drains gRPC and stops the loop.
     server.spawn(scheduler.stop()).result()
     server.spawn(ionbeam.core.stop()).result()
     server.shutdown()

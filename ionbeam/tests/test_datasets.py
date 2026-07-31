@@ -4,7 +4,7 @@
 from datetime import timedelta
 
 import pytest
-from ionbeam.datasets import DatasetProductionConfig, DatasetRegistry
+from ionbeam.datasets import DatasetBuildConfig, DatasetRegistry
 from pydantic import ValidationError
 
 
@@ -17,7 +17,7 @@ def test_registry_entry_inherits_defaults_and_overrides_per_key():
     )
 
     netatmo = registry.get("netatmo")
-    # inherited from defaults — a per-key override must not reset these
+    # inherited from defaults; the per-key override leaves these unchanged
     assert netatmo.aggregation_span == timedelta(hours=1)
     assert netatmo.rebuild_debounce == timedelta(minutes=10)
     # the override itself
@@ -34,10 +34,10 @@ def test_unconfigured_dataset_falls_back_to_defaults():
     assert fallback.seal_delay(timedelta(days=7)) == timedelta(days=7, hours=1)
 
 def test_aggregation_span_must_nest_windows_within_a_day():
-    # epoch-aligned windows of a day-dividing span never cross midnight, so a
+    # epoch-aligned windows of a day-dividing span never cross midnight; a
     # build's ib_day partition holds exactly that day's rows
     for span in (timedelta(minutes=10), timedelta(hours=6), timedelta(days=1)):
-        DatasetProductionConfig(aggregation_span=span)
+        DatasetBuildConfig(aggregation_span=span)
     for span in (
         timedelta(0),
         timedelta(hours=7),          # drifts across midnight
@@ -45,4 +45,4 @@ def test_aggregation_span_must_nest_windows_within_a_day():
         timedelta(seconds=1.5),      # not whole seconds
     ):
         with pytest.raises(ValidationError):
-            DatasetProductionConfig(aggregation_span=span)
+            DatasetBuildConfig(aggregation_span=span)

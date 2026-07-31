@@ -36,7 +36,8 @@ import structlog
 from pyarrow import flight
 from pydantic import BaseModel, field_validator
 
-from ionbeam_client.models import CfSemantics, DataSetAvailableEvent, Semantics
+from ionbeam_client import AvailableDataset
+from ionbeam_client.models import CfSemantics, Semantics
 from ionbeam_client.schema_metadata import (
     ancillaries_of,
     find_coordinates,
@@ -329,9 +330,9 @@ class ODBExporter:
         if not x_fields or not y_fields:
             return None
 
-        # stalt@hdr is specifically the station altitude — never "whatever z
-        # exists" (a cloud-base or sensor height must not route into the header),
-        # so the z coordinate is fetched by its governed semantics.
+        # stalt@hdr is specifically the station altitude: a cloud-base or sensor
+        # height must not route into the header, so the z coordinate is fetched
+        # by its governed semantics.
         altitude = next(
             (
                 field
@@ -517,8 +518,7 @@ class ODBExporter:
                     continue
 
                 # Variable units are only warned about at registration, not
-                # rejected, so an inconvertible declaration surfaces here —
-                # raising, never silently dropping the column.
+                # rejected, so an inconvertible declaration raises here.
                 converted = _to_unit(
                     values[mask].to_numpy(), variable.unit, target.unit
                 )
@@ -534,9 +534,9 @@ class ODBExporter:
                 )
 
                 # Only the dataset's declared rejected flag values mark a datum
-                # rejected — QC vocabularies differ per source, and a bare
-                # "nonzero means bad" rule misreads them (FMI's 1 means good).
-                # The raw flag value rides along in quality@body regardless.
+                # rejected: QC vocabularies differ per source (FMI's 1 means
+                # good). The raw flag value rides along in quality@body
+                # regardless.
                 if variable.quality_column is not None:
                     qc = (
                         pd.to_numeric(df[variable.quality_column], errors="coerce")
@@ -561,9 +561,9 @@ class ODBExporter:
         return pd.concat(odb_frames, ignore_index=True)[ODB_COLUMNS]
 
     def export_handler(
-        self, connection: flight.FlightClient, event: DataSetAvailableEvent
+        self, connection: flight.FlightClient, event: AvailableDataset
     ) -> None:
-        dataset = event.metadata.name
+        dataset = event.dataset
         if event.end_time - event.start_time > ANALYSIS_CYCLE:
             self.logger.warning(
                 "Dataset window spans more than one analysis cycle; "
@@ -591,10 +591,10 @@ class ODBExporter:
             if due:
                 built = self.store.read_stamp(dataset, analysis, "built")
                 if built is None or built < seen:
-                    # stamp only a cycle that resolved; an empty range is left
+                    # Stamp only a cycle that resolved; an empty range is left
                     # unstamped so a later poke retries once its windows land.
                     if self._build_cycle(connection, dataset, analysis):
-                        # stamp the seen we built from: a poke mid-build re-triggers
+                        # Stamps the seen it built from; a poke mid-build re-triggers.
                         self.store.write_stamp(dataset, analysis, "built", seen)
             if now - seen >= self.config.revision_horizon:
                 self.store.forget(dataset, analysis)
@@ -619,10 +619,10 @@ class ODBExporter:
         try:
             flight_info = connection.get_flight_info(descriptor)
         except flight.FlightServerError as exc:
-            # A cycle with no current build in its range — its windows are not
-            # yet built, or aged out of the canonical store. Skip it; other
-            # cycles in this reconcile still export, and a later poke rebuilds
-            # this one once its windows land.
+            # A cycle with no current build in its range: its windows are not
+            # yet built, or aged out of the canonical store. Other cycles in
+            # this reconcile still export; a later poke rebuilds this one once
+            # its windows land.
             if "no builds in range" in str(exc):
                 self.logger.info(
                     "No builds for cycle yet; skipping",

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
 # SPDX-License-Identifier: Apache-2.0
 
-from prometheus_client import Counter, Histogram, CollectorRegistry
+from prometheus_client import Counter, Gauge, Histogram, CollectorRegistry
 
 
 class IngestionMetrics:
@@ -54,6 +54,16 @@ class IngestionMetrics:
             labelnames=["dataset", "kind"],
             registry=registry,
         )
+
+        self._last_success_timestamp = Gauge(
+            name="ionbeam_ingestion_last_success_timestamp_seconds",
+            documentation="Unix time of the last completed ingestion per dataset; staleness marks a stalled or silent source",
+            labelnames=["dataset"],
+            registry=registry,
+        )
+
+    def record_success(self, dataset: str) -> None:
+        self._last_success_timestamp.labels(dataset=dataset).set_to_current_time()
 
     def observe_data_points(self, dataset: str, count: int) -> None:
         self._data_points_total.labels(dataset=dataset).inc(count)

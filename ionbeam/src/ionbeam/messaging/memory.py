@@ -6,16 +6,20 @@
 import asyncio
 from typing import Callable, Dict, List, Optional, Set
 
-from ionbeam_client.models import DataSetAvailableEvent, StartSourceCommand
-
-from .event_bus import EventBus, Subscription
+from .event_bus import (
+    DataSetAvailableEvent,
+    EventBus,
+    StartSourceCommand,
+    Subscription,
+)
 
 
 class _QueueSubscription(Subscription):
     """A subscription backed by an asyncio queue; ``close`` unregisters it.
 
-    ``next`` waits on the queue with a timeout — cancelling the wait on timeout is
-    safe (the queue is untouched), so the subscription survives idle periods.
+    ``next`` waits on the queue with a timeout. Cancelling the wait on timeout
+    is safe: the queue is untouched, and the subscription survives idle
+    periods.
     """
 
     def __init__(self, unregister: Callable[["_QueueSubscription"], None]):

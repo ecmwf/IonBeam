@@ -29,9 +29,15 @@ from uuid import uuid4
 
 import redis.asyncio as redis
 import structlog
-from ionbeam_client.models import DataSetAvailableEvent, StartSourceCommand
 
-from .event_bus import EventBus, Subscription
+from ionbeam.observability import EventBusMetrics
+
+from .event_bus import (
+    DataSetAvailableEvent,
+    EventBus,
+    StartSourceCommand,
+    Subscription,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -78,6 +84,7 @@ class _StreamSubscription(Subscription[T], Generic[T]):
         stream: str,
         group: str,
         parse: Callable[[bytes], T],
+        metrics: EventBusMetrics,
         matches: Optional[Callable[[T], bool]] = None,
         reclaim_min_idle_ms: int = _RECLAIM_MIN_IDLE_MS,
     ):
@@ -86,6 +93,7 @@ class _StreamSubscription(Subscription[T], Generic[T]):
         self._group = group
         self._consumer = uuid4().hex
         self._parse = parse
+        self._metrics = metrics
         self._matches = matches
         self._reclaim_min_idle_ms = reclaim_min_idle_ms
         self._delivered_unacked: Optional[bytes] = None
@@ -105,6 +113,7 @@ class _StreamSubscription(Subscription[T], Generic[T]):
                 continue
             entry_id, fields = entry
             self._delivered_unacked = entry_id
+            self._metrics.delivered(self._stream, self._group)
             event = self._parse(fields[b"event"])
             if self._matches is None or self._matches(event):
                 return event
@@ -137,6 +146,7 @@ class _StreamSubscription(Subscription[T], Generic[T]):
         if not messages:
             return None
         entry_id, fields = messages[0]
+        self._metrics.reclaimed(self._stream, self._group)
         pending = await self._client.xpending_range(
             self._stream, self._group, min=entry_id, max=entry_id, count=1
         )
@@ -163,6 +173,7 @@ class _StreamSubscription(Subscription[T], Generic[T]):
                 approximate=True,
             )
             await self._client.xack(self._stream, self._group, entry_id)
+            self._metrics.dead_lettered(self._stream, self._group)
             return None
         return entry_id, fields
 
@@ -170,6 +181,7 @@ class _StreamSubscription(Subscription[T], Generic[T]):
         if self._delivered_unacked is not None:
             await self._client.xack(self._stream, self._group, self._delivered_unacked)
             self._delivered_unacked = None
+            self._metrics.acked(self._stream, self._group)
 
     async def close(self) -> None:
         # Deleting a consumer discards its pending entries, so only reap it once
@@ -184,10 +196,12 @@ class RedisStreamsEventBus(EventBus):
     def __init__(
         self,
         client: redis.Redis,
+        metrics: EventBusMetrics,
         reclaim_min_idle_ms: int = _RECLAIM_MIN_IDLE_MS,
         reap_consumer_min_idle_ms: int = _REAP_CONSUMER_MIN_IDLE_MS,
     ):
         self._client = client
+        self._metrics = metrics
         self._reclaim_min_idle_ms = reclaim_min_idle_ms
         self._reap_consumer_min_idle_ms = reap_consumer_min_idle_ms
 
@@ -205,6 +219,7 @@ class RedisStreamsEventBus(EventBus):
             stream,
             source_name,
             StartSourceCommand.model_validate_json,
+            self._metrics,
             reclaim_min_idle_ms=self._reclaim_min_idle_ms,
         )
 
@@ -222,6 +237,7 @@ class RedisStreamsEventBus(EventBus):
             DATASET_STREAM,
             exporter_name,
             DataSetAvailableEvent.model_validate_json,
+            self._metrics,
             matches,
             reclaim_min_idle_ms=self._reclaim_min_idle_ms,
         )
@@ -230,6 +246,7 @@ class RedisStreamsEventBus(EventBus):
         await self._client.xadd(
             stream, {"event": payload}, maxlen=_MAX_STREAM_LENGTH, approximate=True
         )
+        self._metrics.published(stream)
 
     async def _reap_dead_consumers(self, stream: str, group: str) -> None:
         # Deleting a consumer discards its pending entries, so a corpse with

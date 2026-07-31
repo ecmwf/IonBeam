@@ -17,13 +17,12 @@ import pyarrow.flight as flight
 import pyodc
 import pytest
 
+from ionbeam_client import AvailableDataset
 from ionbeam_client.canonical_stream import canonical_arrow_schema
 from ionbeam_client.models import (
     CfSemantics,
     Coordinate,
     DatasetSchema,
-    DataSetAvailableEvent,
-    DatasetMetadata,
     IngestionMetadata,
     Tag,
     TimeCoordinate,
@@ -237,16 +236,20 @@ def odb_exporter(temp_data_path: Path) -> ODBExporter:
 
 
 def _event(
-    start: datetime, end: datetime, locations=("ignored",), dataset: str = "test"
-) -> DataSetAvailableEvent:
-    # dataset_locations rides along but the exporter ignores it: membership is
-    # resolved from the store at build time, not taken from the event.
-    return DataSetAvailableEvent(
+    start: datetime, end: datetime, dataset: str = "test"
+) -> AvailableDataset:
+    # the exporter resolves cycle membership from the store; an empty info suffices
+    info = flight.FlightInfo(
+        pa.schema([]), flight.FlightDescriptor.for_command(b"{}"), [], -1, -1
+    )
+    return AvailableDataset(
         id=uuid4(),
-        metadata=DatasetMetadata(name=dataset, description="Test dataset"),
-        dataset_locations=list(locations),
+        dataset=dataset,
         start_time=start,
         end_time=end,
+        version=1,
+        revisable_until=end + timedelta(days=7),
+        info=info,
     )
 
 
@@ -737,7 +740,7 @@ class TestODBExporter:
         by_time = odb_df.sort_values("time@hdr")
         # STATUS_t bits: 1 = active, 4 = rejected
         assert list(by_time["datum_status@body"]) == [1, 4]
-        # the raw source QC code rides along, not just its collapse
+        # the raw source QC code rides along in quality@body
         assert list(by_time["quality@body"]) == [1, 3]
 
     async def test_undeclared_qc_vocabulary_rejects_nothing(
