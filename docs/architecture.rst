@@ -20,7 +20,7 @@ IonBeam core
 Exporters
   Services that consume built datasets and write them to external systems. Each exporter (ECMWF/ODB, ...) runs independently and receives dataset events pushed over its Flight subscription.
 
-Built datasets are canonical GeoParquet. Each geographic dataset carries a WKB ``ib_geometry`` column tagged with the ``geoarrow.wkb`` Arrow extension and a stable per-observation ``ib_id``, so the files are directly queryable by GeoArrow-aware tools. Every platform-synthesized column lives under the ``ib_`` prefix — declared source columns may use any other name. A stateless PyGeoAPI server serves the store as an OGC EDR/Features API, one collection per dataset, with no export step or second copy.
+Built datasets are canonical GeoParquet. Each geographic dataset carries a WKB ``ib_geometry`` column tagged with the ``geoarrow.wkb`` Arrow extension and a stable per-observation ``ib_id``, so the files are directly queryable by GeoArrow-aware tools. Every platform-synthesized column lives under the ``ib_`` prefix — declared source columns may use any other name. A stateless PyGeoAPI server serves the store as an OGC API — Features service, one collection per dataset, with no export step or second copy (:doc:`using-the-data`).
 
 .. mermaid:: architecture-diagram.mmd
   :zoom:
@@ -99,14 +99,26 @@ Any core replica serves any ``DoPut``. Observations stream straight into the tim
 Dataset publication
 ~~~~~~~~~~~~~~~~~~~
 
-A window's build is one immutable file under its dataset's start-day partition, at ``<dataset>/ib_year=YYYY/ib_month=MM/ib_day=DD/<window start stamp>_<span>-v<version>-<record-set hash>``: the stamp and span name the window (matching its manifest entry), the version orders that window's builds, and the hash ties the file to its provenance (Parquet footer and window manifest). The day is spelled as hive ``key=value`` segments in the platform's reserved ``ib_`` namespace — an engine pointed at the store can opt into hive parsing and prune on them, no declared column can collide with them, and a reader that does not opt in sees plain path segments. Aggregation spans divide one day and windows are epoch-aligned, so every window nests inside its partition — the rows under an ``ib_day`` are exactly that day's rows, and selecting a partition selects the whole day. Readers prune by the window interval in the name or by the time column's Parquet statistics; each file is written time-sorted. A rebuild writes the next version's file beside the current one and never touches an existing file; readers pick the highest version, and a periodic sweep deletes a window's older versions once its current build has stood for a grace period. Local-filesystem writes finish with a rename and S3 writes with a multipart-upload completion, so a reader never sees a partial file.
+A window's build is one immutable file under its dataset's start-day partition::
+
+    weather_stations/ib_year=2024/ib_month=01/ib_day=01/20240101T120000_PT1H-v1-3f9c2a1b
+    └──────┬───────┘ └───────────────┬────────────────┘ └────────┬─────────┘└┬┘└───┬───┘
+        dataset          start-day partition (hive)      window start + span │     │
+                                                                          version  │
+                                                                      record-set hash
+
+The stamp and span name the window (matching its manifest entry), the version orders that window's builds, and the hash ties the file to its provenance (Parquet footer and window manifest).
+
+The day is spelled as hive ``key=value`` segments in the platform's reserved ``ib_`` namespace: an engine pointed at the store can opt into hive parsing and prune on them, no declared column can collide with them, and a reader that does not opt in sees plain path segments. Aggregation spans divide one day and windows are epoch-aligned, so every window nests inside its partition — the rows under an ``ib_day`` are exactly that day's rows, and selecting a partition selects the whole day. Readers prune by the window interval in the name or by the time column's Parquet statistics; each file is written time-sorted.
+
+A rebuild writes the next version's file beside the current one and never touches an existing file. Readers pick the highest version, and a periodic sweep deletes a window's older versions once its current build has stood for a grace period. Local-filesystem writes finish with a rename and S3 writes with a multipart-upload completion, so a reader never sees a partial file.
 
 Stateful backends
 ~~~~~~~~~~~~~~~~~
 
 The service tier scales horizontally today; the stateful backends below it run as single instances:
 
-- InfluxDB 3 Core runs as one node, since the open-source edition has no clustering. It also performs no background compaction: every snapshot cuts a new Parquet file per table, and files are never merged. The repository includes an offline compactor (``compactor/``) that merges each day's files into one deduplicated file between deploy rolls.
+- InfluxDB 3 Core runs as one node, since the open-source edition has no clustering. It also performs no background compaction: every snapshot cuts a new Parquet file per table, and files are never merged.
 - Valkey runs as a single instance carrying the control plane: event bus, build queue, and coordination state.
 - The arrow store speaks plain S3 and can point at any object storage.
 

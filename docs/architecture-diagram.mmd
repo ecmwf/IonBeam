@@ -19,7 +19,7 @@ subgraph STORES["Storage"]
 end
 
 EXPORTERS@{ shape: procs, label: "Exporters<br/>one service per target" }
-PYGEO["PyGeoAPI<br/>OGC EDR API"]
+PYGEO["PyGeoAPI<br/>OGC Features API"]
 OUTPUTS["ODB files"]
 
 EXT -->|"HTTP / MQTT"| SOURCES

@@ -22,14 +22,14 @@
 
 **IonBeam** is an orchestration system for bringing IoT and other unconventional observations into meteorological workflows. The core service schedules data sources, ingests the observations they push, tracks coverage of each time window, and builds time-windowed datasets, all served over Arrow Flight. Data sources and exporters run as separate Flight clients written with a shared client library, so new ones can be added without changes to the core, and each component can run with multiple replicas.
 
-The bundled components form a meteorological pipeline: data sources that pull from IoT networks such as MeteoTracker and Sensor.Community, exporters that write the built datasets onward as ECMWF ODB files, and a PyGeoAPI server that serves the built GeoParquet datasets as an OGC EDR web API. The schema itself is agnostic of any metadata convention; the bundled sources declare their variables with CF (Climate and Forecast) semantics, one of the governed vocabularies a declaration can use.
+The bundled components form a meteorological pipeline: data sources that pull from IoT networks such as MeteoTracker and Sensor.Community, exporters that write the built datasets onward as ECMWF ODB files, and a PyGeoAPI server that serves the built GeoParquet datasets as an OGC API — Features web service. The schema itself is agnostic of any metadata convention; the bundled sources declare their variables with CF (Climate and Forecast) semantics, one of the governed vocabularies a declaration can use.
 
 ## Quick Start
 
 IonBeam requires Python 3.12+ and [uv](https://docs.astral.sh/uv/). From the repository root:
 
 ```bash
-uv sync
+uv sync --all-packages
 uv run ionbeam -c ionbeam/config.local.yaml start
 ```
 
@@ -69,7 +69,7 @@ subgraph STORES["Storage"]
 end
 
 EXPORTERS@{ shape: procs, label: "Exporters<br/>one service per target" }
-PYGEO["PyGeoAPI<br/>OGC EDR API"]
+PYGEO["PyGeoAPI<br/>OGC Features API"]
 OUTPUTS["ODB files"]
 
 EXT -->|"HTTP / MQTT"| SOURCES
@@ -77,7 +77,7 @@ SCHED -.->|"triggers<br/>DoExchange push"| SOURCES
 SOURCES -->|"DoPut<br/>RecordBatch stream"| ING
 ING -->|"write observations"| INFLUX
 ING -.->|"coverage claims"| COORD
-COORD <-.->|"ingestion records<br/>schedule windows"| VALKEY
+COORD <-.->|"claims + records<br/>schedule windows"| VALKEY
 BUILD <-.->|"claim due windows<br/>build state"| VALKEY
 INFLUX -->|"query window"| BUILD
 BUILD -->|"write dataset"| ARROW
@@ -98,7 +98,13 @@ style CORE fill:transparent,stroke:#9AA0A6,stroke-width:1px
 style STORES fill:transparent,stroke:#9AA0A6,stroke-width:1px
 ```
 
-Every service runs with any number of replicas. Coordination lives in Valkey: an atomic claim picks one scheduler replica per trigger boundary, replicas of a source or exporter share one event-stream consumer group and split the work between them, and builders lease due windows from a shared queue so a crashed replica's work returns to the pool. Delivery is at-least-once end to end, with deterministic ids making retries idempotent. [docs/architecture.rst](docs/architecture.rst) covers the mechanisms.
+Every service runs with any number of replicas, with coordination in Valkey:
+
+- an atomic claim picks one scheduler replica to fire each trigger boundary
+- replicas of a source or exporter share one event-stream consumer group and split the events between them
+- builders lease due windows from a shared queue, so a crashed replica's work returns to the pool
+
+Delivery is at-least-once end to end, with deterministic ids making retries idempotent. [docs/architecture.rst](docs/architecture.rst) covers the mechanisms.
 
 The repository is a [uv](https://docs.astral.sh/uv/) workspace:
 
@@ -107,8 +113,6 @@ The repository is a [uv](https://docs.astral.sh/uv/) workspace:
 - [data-sources/](data-sources/) — the bundled data sources: Flight clients that pull from external IoT APIs and push observations in
 - [exporters/](exporters/) — the bundled exporters: Flight clients that subscribe to built datasets and write ODB
 - [ionbeam-legacy-api/](ionbeam-legacy-api/) — the previous public HTTP API, served unchanged from the new system
-
-[compactor/](compactor/) sits outside the workspace: an offline Rust tool that merges InfluxDB 3 Core's per-snapshot Parquet files between deploy rolls.
 
 Deployment configurations (container stacks, Kubernetes chart) are maintained outside the repository and are not published yet.
 

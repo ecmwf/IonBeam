@@ -54,7 +54,7 @@ Exporters match variables on the *quantity* a declaration denotes. The ODB expor
 Coordinates: CRS and Units
 --------------------------
 
-IonBeam interprets geographic coordinates in ``EPSG:4326``/``CRS84`` only, and does not reproject; a source in another CRS reprojects before ingesting. Coordinates declared with x/y axes in any other CRS are stored and served untouched, but every geo product (the GeoParquet projection, EDR, ODB geolocation) skips them, and registration logs a warning saying so.
+IonBeam interprets geographic coordinates in ``EPSG:4326``/``CRS84`` only, and does not reproject; a source in another CRS reprojects before ingesting. Coordinates declared with x/y axes in any other CRS are stored and served untouched, but every geo product (the GeoParquet projection, the Features API, ODB geolocation) skips them, and registration logs a warning saying so.
 
 Coordinates whose values IonBeam interprets are structural, the same tier as the time axis, and their units are enforced at registration: a geographic x/y coordinate must declare a unit convertible to degrees, and a z coordinate carrying ``CfSemantics(standard_name="altitude")`` one convertible to metres. Registration fails otherwise. Exporters convert from the declared unit to their target's expected unit (the ODB exporter writes ``lat@hdr``/``lon@hdr`` in degrees and ``stalt@hdr`` in metres), so an altitude declared in feet is legal and arrives converted. Units on all other coordinates are validated best-effort: a warning when they do not parse, never a rejection.
 
@@ -85,23 +85,34 @@ Schema-level metadata carries ``ionbeam.schema_hash`` (the declared contract's h
 Reading Datasets
 ----------------
 
-Exporters registered via ``IonbeamClient.register_export_handler()`` receive datasets as streaming Arrow batches and read structure and semantics back through ``ionbeam_client.schema_metadata``:
+An export handler registered via ``IonbeamClient.register_export_handler()`` receives each availability event together with a live Flight connection. The event's ``dataset_locations`` go back to the server as the ``DoGet`` ticket; structure and semantics are read from the streamed schema through ``ionbeam_client.schema_metadata``:
 
 .. code-block:: python
 
-    from ionbeam_client.models import CfSemantics, DataSetAvailableEvent
+    import json
+
+    import pyarrow.flight as flight
+
+    from ionbeam_client.models import DataSetAvailableEvent
     from ionbeam_client.schema_metadata import (
         find_coordinates, semantics, time_field, unit, value_fields,
     )
 
-    async def export_handler(event: DataSetAvailableEvent, batch_stream):
-        async for batch in batch_stream:
-            schema = batch.schema
-            t = time_field(schema)
-            lon = find_coordinates(schema, axis="x", crs_kind="geographic")
-            for field in value_fields(schema, primary_only=True):
-                sem = semantics(field)          # CfSemantics | None
-                declared_unit = unit(field)     # UDUNITS string
+    def export_handler(connection: flight.FlightClient, event: DataSetAvailableEvent) -> None:
+        ticket = flight.Ticket(
+            json.dumps({"op": "dataset", "locations": event.dataset_locations}).encode()
+        )
+        reader = connection.do_get(ticket)
+
+        schema = reader.schema
+        t = time_field(schema)
+        [lon] = find_coordinates(schema, axis="x", crs_kind="geographic")
+        for field in value_fields(schema, primary_only=True):
+            sem = semantics(field)          # CfSemantics | None
+            declared_unit = unit(field)     # UDUNITS string
+
+        for chunk in reader:
+            ...                             # chunk.data, sorted by time
 
 Unit Conversion
 ---------------

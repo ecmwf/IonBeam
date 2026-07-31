@@ -18,4 +18,5 @@ Data sources and exporters run as separate Flight clients built on a shared clie
    domain
    flight-interface
    dataset-schema
+   using-the-data
    ionbeam-client/index

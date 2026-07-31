@@ -4,8 +4,10 @@ Python client library for writing ionbeam data sources and exporters. It speaks 
 
 ## Installation
 
+Wheels are published to ECMWF's package index:
+
 ```bash
-pip install ionbeam-client
+pip install ionbeam-client --extra-index-url https://get.ecmwf.int/repository/pypi-private-hosted/simple/
 ```
 
 Inside this repository the workspace already provides it; the bundled sources and exporters under `data-sources/` and `exporters/` are complete working integrations to crib from.
