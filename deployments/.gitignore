@@ -8,3 +8,6 @@ k8s-test/
 
 # The chart is deployed by hand and stays local for now.
 helm/
+
+# One-shot migration scripts, run by hand against the deployment.
+migrations/
