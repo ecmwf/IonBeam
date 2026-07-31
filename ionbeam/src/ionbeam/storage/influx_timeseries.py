@@ -39,11 +39,11 @@ class InfluxTimeSeriesDatabase(TimeSeriesDatabase):
         token: Optional[str] = None,
         org: Optional[str] = None,
     ):
-        # Native v3 write endpoint, all-or-nothing (a partial window must fail the
+        # Native v3 write endpoint, all-or-nothing (a partial window fails the
         # ingest so the bus redelivers it whole), gzipped bodies, and no_sync —
-        # don't wait for the WAL fsync: ingestion is at-least-once and windows
-        # rebuild from the record store, so a sub-second tail lost to a crash is
-        # re-ingested, not gone.
+        # the write does not wait for the WAL fsync. Ingestion is at-least-once
+        # and windows rebuild from the record store, so a sub-second tail lost to
+        # a crash is re-ingested.
         self._client = InfluxDBClient3(
             host=host,
             database=database,
@@ -94,12 +94,11 @@ class InfluxTimeSeriesDatabase(TimeSeriesDatabase):
         timestamp_column: str,
         record_ids: Optional[List[str]] = None,
     ) -> AsyncIterator[pa.RecordBatch]:
-        # Stream off the Flight reader rather than reading the whole window into one
-        # table: a wide window is millions of rows, and materializing it held the
-        # entire window in core's memory at once. Errors propagate — a "not found"
-        # mid-stream means the hot store lost the window's objects, and ending the
-        # stream cleanly instead would let a partially drained record publish as a
-        # complete build.
+        # Streams off the Flight reader; a wide window is millions of rows, and
+        # materializing it holds the entire window in core's memory at once.
+        # Errors propagate: a "not found" mid-stream means the hot store lost the
+        # window's objects, and a clean stream end would let a partially drained
+        # record publish as a complete build.
         reader = await asyncio.to_thread(
             self._open_reader, measurement, start_time, end_time, record_ids
         )

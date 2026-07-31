@@ -101,11 +101,11 @@ class CoordinationStore(ABC):
     ) -> np.ndarray:
         """Which rows of one aggregation window's batch are already persisted in
         the time-series store — the read half of ``dedup_ingestion``. Exact
-        membership, never a Bloom filter: a false positive here would silently
-        drop a real row from the store. Returns a bool mask ``(n_rows,)``, True
-        where the content is already stored. This does NOT mark anything — call
-        :meth:`mark_content_stored` only after the rows' write has succeeded, so
-        every failure mode degrades toward storing a duplicate, never toward
+        membership, never a Bloom filter: a false positive here would drop a real
+        row from the store. Returns a bool mask ``(n_rows,)``, True where the
+        content is already stored. Does not mark anything; call
+        :meth:`mark_content_stored` only after the rows' write has succeeded.
+        Every failure mode degrades toward storing a duplicate, never toward
         losing a row."""
         pass
 
@@ -118,14 +118,14 @@ class CoordinationStore(ABC):
         expire_at: datetime,
     ) -> None:
         """Record row contents as durably written. The set is forgotten at
-        ``expire_at`` (the window's seal time): later duplicates are stored
-        again — dead weight the build collapse discards, never loss."""
+        ``expire_at`` (the window's seal time); later duplicates are stored
+        again and discarded by build collapse."""
         pass
 
 
-# Cap items per command so one dedup call never blocks the shared Valkey
-# (which also carries the streams bus) for an unbounded burst, and can never
-# approach the server's 1M-argument command limit however large a batch grows.
+# Caps items per command, bounding how long one dedup call blocks the shared
+# Valkey (which also carries the streams bus), and staying under the server's
+# 1M-argument command limit.
 _DEDUP_ITEMS_PER_COMMAND = 10_000
 
 
@@ -133,7 +133,7 @@ class RedisCoordinationStore(CoordinationStore):
     """Redis implementation of CoordinationStore."""
 
     def __init__(self, client: redis.Redis, retention: timedelta = timedelta(days=7)):
-        # coordination state must outlive every window it can still affect
+        # Retention must outlive every window the coordination state can still affect.
         self.client = client
         self._ttl = int(retention.total_seconds())
 
@@ -166,9 +166,8 @@ class RedisCoordinationStore(CoordinationStore):
         try:
             return RegisteredDatasetMetadata.model_validate_json(result.decode("utf-8"))
         except ValidationError:
-            # A record from a prior schema version (rolling-deploy cache skew). Treat
-            # as unregistered so the next register_dataset overwrites it with the
-            # current shape — registration self-heals instead of hard-failing ingest.
+            # Metadata from a prior schema version is treated as unregistered; the
+            # next register_dataset overwrites it with the current shape.
             logger.warning(
                 "Discarding stale registered metadata failing validation", dataset=dataset
             )
@@ -212,9 +211,9 @@ class RedisCoordinationStore(CoordinationStore):
             try:
                 records.append(IngestionRecord.model_validate_json(value.decode("utf-8")))
             except ValidationError:
-                # A record written by a prior schema version — cache skew across a
-                # rolling deploy. Skip it rather than failing every read for the
-                # dataset; it ages out via its TTL and is superseded by fresh writes.
+                # A record written by a prior schema version is skipped rather than
+                # failing the read; it ages out via its TTL and is superseded by
+                # fresh writes.
                 skipped += 1
         if skipped:
             logger.warning(
@@ -249,8 +248,8 @@ class RedisCoordinationStore(CoordinationStore):
         try:
             return WindowBuildState.model_validate_json(result.decode("utf-8"))
         except ValidationError:
-            # State written by a prior schema version (rolling-deploy cache skew).
-            # Treat as never-built: the next build rewrites it in the current shape.
+            # State written by a prior schema version is treated as never-built;
+            # the next build rewrites it in the current shape.
             logger.warning(
                 "Discarding stale window state failing validation",
                 window=window.dataset_key,
@@ -264,9 +263,9 @@ class RedisCoordinationStore(CoordinationStore):
     async def record_lateness(
         self, dataset: str, bucket_counts: dict[int, int], retention_hours: int
     ) -> None:
-        # The histogram is sharded into hourly hashes with a rolling TTL so the
-        # estimate forgets stale arrival patterns (and one-off backfills) instead
-        # of accumulating forever. HINCRBY is atomic, so replicas share it safely.
+        # The histogram is sharded into hourly hashes with a rolling TTL: the
+        # estimate forgets stale arrival patterns and one-off backfills rather than
+        # accumulating forever. HINCRBY is atomic.
         if not bucket_counts:
             return
         hour = int(datetime.now(timezone.utc).timestamp()) // 3600

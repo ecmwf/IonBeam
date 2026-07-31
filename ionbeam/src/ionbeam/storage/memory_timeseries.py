@@ -12,7 +12,7 @@ from .timeseries import RECORD_ID_COLUMN, TimeSeriesDatabase
 
 class InMemoryTimeSeriesDatabase(TimeSeriesDatabase):
     """In-memory implementation (Arrow tables) for tests and local execution.
-    Unlike InfluxDB, writes do not upsert on (tags, time): a duplicate delivery
+    Writes do not upsert on (tags, time) as InfluxDB does: a duplicate delivery
     stores a duplicate row."""
 
     def __init__(self):

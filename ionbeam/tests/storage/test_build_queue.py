@@ -59,8 +59,8 @@ async def test_window_not_yet_eligible_is_not_claimable(client):
 
 
 async def test_completed_window_is_not_reclaimed(client):
-    # lease_ttl=0 makes every lease immediately eligible for reclaim, so this
-    # proves complete() — not a long TTL — is what stops redelivery.
+    # lease_ttl=0 makes every lease immediately eligible for reclaim; this
+    # isolates complete() as what stops redelivery.
     queue = RedisBuildQueue(client, queue_key="q", lease_ttl=0.0)
     window = _window("d", 0)
     await queue.schedule(window, eligible_at=_past(1))
@@ -72,8 +72,8 @@ async def test_completed_window_is_not_reclaimed(client):
 
 
 async def test_crashed_build_lease_is_reclaimed(client):
-    # A build that leases a window but never completes (its pod was killed) must
-    # not strand the window: the expired lease returns to the queue, due again.
+    # A build that leases a window but never completes (its pod was killed):
+    # the expired lease returns to the queue, due again.
     queue = RedisBuildQueue(client, queue_key="q", lease_ttl=0.0)
     window = _window("d", 0)
     await queue.schedule(window, eligible_at=_past(1))
@@ -95,9 +95,9 @@ async def test_reschedule_replaces_the_eligibility_time(client):
 
 
 async def test_reschedule_during_a_lease_waits_for_its_release(client):
-    """A record arriving mid-build re-schedules the window; that must never
-    start a concurrent second build (which double-assigns version numbers),
-    and the queued rebuild must survive the lease release."""
+    """A record arriving mid-build re-schedules the window; the rebuild queues
+    behind the lease (a concurrent second build double-assigns version numbers)
+    and survives the lease release."""
     queue = RedisBuildQueue(client, queue_key="q")
     window = _window("d", 0)
     await queue.schedule(window, eligible_at=_past(1))

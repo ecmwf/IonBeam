@@ -78,8 +78,8 @@ def test_platform_prefix_rejected(kwargs, message):
 
 
 def test_plain_standard_words_are_free_to_declare():
-    """A source's native vocabulary — time, source, year — is not the
-    platform's; the declared time name survives as the structural axis."""
+    """A source's native vocabulary — time, source, year — is free to declare;
+    the declared time name survives as the structural axis."""
     schema = dataset_schema(
         time=TimeCoordinate(name="obs_time"),
         variables=[Variable(name="temperature"), Variable(name="time")],
@@ -126,8 +126,7 @@ def test_ancillary_cycle_rejected():
 
 
 def test_all_ancillary_map_rejected():
-    # In a finite map, every variable having ancillary_of implies a cycle; this
-    # proves all-ancillary maps are rejected before ingestion.
+    # A finite map where every variable has ancillary_of always contains a cycle.
     with pytest.raises(ValidationError, match="ancillary cycle"):
         dataset_schema(
             variables=[
@@ -218,9 +217,8 @@ def test_attach_metadata_round_trip_through_parquet(tmp_path):
 
 
 async def test_canonical_record_batches_pins_declared_schema_across_frames():
-    """The stream schema comes from the declaration, never from frame contents:
-    ragged dtypes across frames coerce to the declared types instead of pinning
-    whatever the first frame happened to carry."""
+    """The stream schema comes from the declaration; ragged dtypes across
+    frames coerce to the declared types."""
     meta = metadata(
         dataset_schema=dataset_schema(
             variables=[

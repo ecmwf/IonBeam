@@ -13,7 +13,7 @@ from ..provenance import Window
 
 class BuildQueue(ABC):
     """Every window awaiting a build, each carrying the time it becomes worth
-    building. The builder only ever sees windows whose time has come, so the
+    building. The builder only ever sees windows whose time has come; the
     coordinator's readiness and debounce delays live in the schedule itself."""
 
     @abstractmethod
@@ -22,17 +22,16 @@ class BuildQueue(ABC):
         eligibility time.
 
         Never touches leases: a window scheduled while its build is in flight
-        stays queued and becomes claimable when that lease is released, so a
-        record arriving mid-build can never start a concurrent second build."""
+        stays queued and becomes claimable when that lease is released. A
+        record arriving mid-build cannot start a concurrent second build."""
 
     @abstractmethod
     async def claim_due(self) -> Optional[Window]:
         """Lease the earliest-eligible due window whose lease is not already
         held, or None when nothing is claimable.
 
-        A claimed window that is never completed — its builder was killed
-        mid-build — is reclaimed once its lease expires and handed out again,
-        so a crash never strands a window unbuilt."""
+        A claimed window whose builder is killed mid-build is reclaimed once
+        its lease expires and handed out again."""
 
     @abstractmethod
     async def requeue(self, window: Window, eligible_at: datetime) -> None:
@@ -43,23 +42,21 @@ class BuildQueue(ABC):
     async def complete(self, window: Window, next_claim_floor: datetime) -> None:
         """Release a window's lease once handled. A window re-scheduled during
         the build stays queued but cannot be claimed before ``next_claim_floor``;
-        the floor only defers — a later eligibility stands. Clears the window
-        from the dead-letter set: a build that eventually succeeds is no longer
-        given up on."""
+        a later eligibility still stands. Clears the window from the
+        dead-letter set."""
 
     @abstractmethod
     async def park(self, window: Window, next_claim_floor: datetime) -> None:
         """Give up on a window after exhausted retries: release as
-        :meth:`complete` and record it on the dead-letter set, so operators can
-        see what the builder abandoned. A later claim that changes the
-        window's content retries it as normal."""
+        :meth:`complete` and record it on the dead-letter set. A later claim
+        that changes the window's content retries it as normal."""
 
     @abstractmethod
     async def dead_lettered(self) -> list[Window]:
         """The windows the builder has given up on."""
 
 
-# Atomically claim the earliest due window into the lease set under a deadline,
+# Atomically claims the earliest due window into the lease set under a deadline,
 # skipping windows whose lease is currently held (re-scheduled mid-build).
 _CLAIM_SCRIPT = """
 local offset = 0
@@ -77,8 +74,7 @@ while true do
 end
 """
 
-# Return every lease past its deadline to the queue, due immediately — it was
-# already due when it was claimed.
+# Returns every lease past its deadline to the queue, due immediately.
 _RECLAIM_SCRIPT = """
 local expired = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', ARGV[1])
 for _, member in ipairs(expired) do

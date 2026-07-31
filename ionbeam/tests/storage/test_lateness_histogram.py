@@ -52,7 +52,7 @@ def test_below_min_samples_is_unknown():
 
 def test_percentile_over_estimates_toward_completeness():
     # 950 arrivals at ~1 min, 50 late at ~1 h; p95 sits at the last of the
-    # fast bucket, and the estimate is its ceiling — never an under-estimate.
+    # fast bucket, and the estimate is its ceiling, always at or above p95.
     counts = _histogram(*([60.0] * 950 + [3600.0] * 50))
     p95 = percentile_seconds(counts, 0.95, min_samples=100)
     assert p95 is not None

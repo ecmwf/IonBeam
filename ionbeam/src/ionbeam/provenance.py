@@ -51,8 +51,8 @@ class RegisteredDatasetMetadata(BaseModel):
 
 class ManifestRecord(BaseModel):
     """One ingestion record folded into a build. The Optional span fields
-    only read as None in old manifests, from builds that could fold expired
-    records; current builds defer instead."""
+    read as None in old manifests, from builds that folded expired records.
+    Builds now defer expired records rather than folding them."""
 
     id: str
     start_time: Optional[datetime] = None

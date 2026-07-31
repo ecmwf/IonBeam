@@ -17,8 +17,8 @@ from ionbeam.storage.coordination_store import RedisCoordinationStore
 from ionbeam.storage.memory_coordination import InMemoryCoordinationStore
 
 WINDOW_START = int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp())
-# Redis expires against its own wall clock, so the seal must be genuinely in the
-# future — a fixed past date would delete the key the moment it is written.
+# Redis expires against its own wall clock: the seal must be genuinely in the
+# future, or the key is deleted the moment it is written.
 EXPIRE_AT = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=48)
 
 REDIS_URL = os.getenv("IONBEAM_TEST_REDIS_URL")

@@ -93,8 +93,8 @@ def test_windows_sharing_a_dataset_stay_distinct():
     second = Window(
         "acronet", datetime(2024, 1, 1, 0, 10, tzinfo=timezone.utc), timedelta(minutes=10)
     )
-    # a rebuild of one window must never doom its neighbour's sole build —
-    # nor DAY's, which shares first's start stamp under a different span
+    # a rebuild of one window leaves its neighbour's sole build untouched,
+    # including DAY's, which shares first's start stamp under a different span
     stored = (
         _stored(first, 1) + _stored(first, 2, "bbbb2222") + _stored(first, 3, "cccc3333")
         + _stored(second, 1)
@@ -117,9 +117,9 @@ async def _write(store, key: str) -> None:
 
 @pytest.mark.asyncio
 async def test_current_build_keys_and_stored_builds_find_builds_by_day(tmp_path):
-    # Discovery lists each window's day directory by exact prefix, never the
-    # whole dataset directory — so a build is found regardless of how many
-    # other days' builds crowd the dataset (which an object store short-pages).
+    # Discovery lists each window's day directory by exact prefix. A build is
+    # found regardless of how many other days' builds crowd the dataset (an
+    # object store short-pages a flat listing).
     store = LocalFileSystemStore(tmp_path)
     w0 = Window("acronet", datetime(2024, 1, 1, 23, tzinfo=timezone.utc), timedelta(hours=1))
     w1 = Window("acronet", datetime(2024, 1, 2, 0, tzinfo=timezone.utc), timedelta(hours=1))
@@ -141,11 +141,10 @@ async def test_current_build_keys_and_stored_builds_find_builds_by_day(tmp_path)
 
 
 def test_builds_fan_out_across_day_partitions():
-    # Every build sits under its start day's hive partition, so a dataset's
-    # objects spread across day directories instead of one flat prefix an S3
-    # lister short-pages — no directory grows unbounded with a week of hourly
-    # builds. The partition keys live in the reserved ib_ namespace, so no
-    # declared column can collide with them.
+    # Every build sits under its start day's hive partition: a dataset's
+    # objects spread across day directories, bounding directory size to a
+    # day's builds. The partition keys live in the reserved ib_ namespace,
+    # separate from declared columns.
     import re
     from collections import Counter
 

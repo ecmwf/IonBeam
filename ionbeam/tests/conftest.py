@@ -45,8 +45,8 @@ class FakeTimeSeriesDatabase(TimeSeriesDatabase):
     ) -> AsyncIterator[pa.RecordBatch]:
         time_range = pd.date_range(start_time, end_time, freq="1min", tz="UTC")[:-1]
 
-        # Wide format (one column per field/tag), canonical names throughout;
-        # rows honor the record-scoped contract by carrying the requested tags.
+        # Wide format: one column per field/tag, canonical names throughout.
+        # Each row carries the requested record id.
         ids = list(record_ids or ["untracked"])
         df = pd.DataFrame(
             {

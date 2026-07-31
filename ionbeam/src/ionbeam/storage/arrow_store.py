@@ -216,8 +216,8 @@ class S3ObjectStore(ArrowStore):
             endpoint_override=endpoint or None,
             region=region or None,
             allow_bucket_creation=True,
-            # Overlap part uploads with parquet encoding; the writer/sink close()
-            # still awaits completion, so a failed stream never publishes a partial.
+            # Overlaps part uploads with parquet encoding. The writer/sink close()
+            # awaits completion, so a failed stream never publishes a partial object.
             background_writes=True,
         )
         self.base_path = f"{bucket}/{prefix}".rstrip("/")
@@ -238,8 +238,8 @@ class S3ObjectStore(ArrowStore):
         if await self.exists(key):
             raise FileExistsError(f"Object already exists at {path}")
 
-        # A failed stream never closes, so the multipart upload never completes
-        # and no partial object is published.
+        # A failed stream leaves the multipart upload incomplete; no partial
+        # object is published.
         writer = None
         sink = None
         total_rows = 0
