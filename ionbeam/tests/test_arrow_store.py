@@ -1,6 +1,9 @@
 # SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
 # SPDX-License-Identifier: Apache-2.0
 
+"""ArrowStore port contract over both adapters: write-once keys, prefix listing,
+and all-or-nothing writes."""
+
 import uuid
 from datetime import datetime, timedelta, timezone
 

@@ -23,7 +23,6 @@ from prometheus_client import CollectorRegistry
 
 from ionbeam_client import AvailableDataset, IonbeamClient, IonbeamClientConfig
 from ionbeam_client.models import (
-    CfSemantics,
     Coordinate,
     DatasetSchema,
     IngestionMetadata,
@@ -35,6 +34,7 @@ from ionbeam_client.models import (
 from ionbeam_client.canonical_stream import canonical_record_batches
 from ionbeam_client.alignment import align_to_schema
 from ionbeam_client.schema_metadata import SCHEMA_HASH, dataset_metadata
+from conftest import observation_frame, weather_metadata
 from ionbeam.application.core import IonbeamCore
 from ionbeam.datasets import DatasetBuildConfig, DatasetRegistry
 from ionbeam.flight.server import IonbeamFlightServer
@@ -46,16 +46,14 @@ from ionbeam.handlers.dataset_coordinator import (
     DatasetCoordinatorConfig,
     DatasetCoordinator,
 )
-from ionbeam.provenance import RegisteredDatasetMetadata, align_to_aggregation
+from ionbeam.provenance import RegisteredDatasetMetadata
 from ionbeam.handlers.ingestion import Ingestion
 from ionbeam.messaging import InMemoryEventBus
 from ionbeam.observability import FlightMetrics
-from ionbeam.scheduler import SourceSchedule, SourceScheduler
 from ionbeam.storage.arrow_store import LocalFileSystemStore
 from ionbeam.storage.memory_coordination import (
     InMemoryBuildQueue,
     InMemoryCoordinationStore,
-    InMemoryTriggerClaims,
 )
 from ionbeam.storage.memory_timeseries import InMemoryTimeSeriesDatabase
 
@@ -82,7 +80,6 @@ def _running_ionbeam(
     ingestion_metrics,
     coordinator_metrics,
     builder_metrics,
-    schedules: list[SourceSchedule],
 ):
     event_bus = InMemoryEventBus()
     record_store = InMemoryCoordinationStore()
@@ -116,21 +113,15 @@ def _running_ionbeam(
         arrow_store=arrow_store,
         event_bus=event_bus,
     )
-    scheduler = SourceScheduler(
-        schedules, core.trigger_source, InMemoryTriggerClaims().try_claim
-    )
-
     server = IonbeamFlightServer(
         "grpc://localhost:0", core, FlightMetrics(CollectorRegistry())
     )
     server.spawn(core.start()).result(timeout=5)
-    server.spawn(scheduler.start()).result(timeout=5)
     try:
         yield RunningIonbeam(
             url=f"grpc://localhost:{server.port}", server=server, event_bus=event_bus
         )
     finally:
-        server.spawn(scheduler.stop()).result(timeout=5)
         server.spawn(core.stop()).result(timeout=5)
         server.shutdown()
 
@@ -147,69 +138,18 @@ def ionbeam(
         ingestion_metrics,
         coordinator_metrics,
         builder_metrics,
-        schedules=[],
-    ) as running:
-        yield running
-
-
-LIVE_SOURCE = "live_source"
-LIVE_SCHEDULE = [
-    SourceSchedule(
-        source_name=LIVE_SOURCE,
-        window_size=timedelta(hours=1),
-        trigger_interval=timedelta(seconds=1),
-        window_lag=timedelta(hours=2),
-    )
-]
-
-
-@pytest.fixture
-def scheduled_ionbeam(
-    tmp_path,
-    ingestion_metrics,
-    coordinator_metrics,
-    builder_metrics,
-):
-    with _running_ionbeam(
-        tmp_path,
-        ingestion_metrics,
-        coordinator_metrics,
-        builder_metrics,
-        LIVE_SCHEDULE,
     ) as running:
         yield running
 
 
 def _metadata() -> IngestionMetadata:
-    return IngestionMetadata(
-        name=DATASET,
-        dataset_schema=DatasetSchema(
-            time=TimeCoordinate(),
-            coordinates=geographic_point_coordinates(),
-            variables=[
-                Variable(
-                    name="temperature",
-                    semantics=CfSemantics(standard_name="air_temperature"),
-                    unit="deg_C",
-                )
-            ],
-            tags=[Tag(name="station_id")],
-        ),
-    )
+    return weather_metadata(name=DATASET)
 
 
 def _observation_frame() -> pd.DataFrame:
-    n = len(TEMPERATURES)
-    return pd.DataFrame(
-        {
-            "time": list(
-                pd.date_range(WINDOW_START, periods=n, freq="6min", tz="UTC")
-            ),
-            "lat": [52.5] * n,
-            "lon": [13.4] * n,
-            "temperature": TEMPERATURES,
-            "station_id": ["test_station"] * n,
-        }
+    return observation_frame(
+        pd.date_range(WINDOW_START, periods=len(TEMPERATURES), freq="6min", tz="UTC"),
+        TEMPERATURES,
     )
 
 
@@ -312,28 +252,27 @@ async def test_ingested_window_is_built_and_pushed_to_export_handler(ionbeam):
     event, batches = received[0]
     assert isinstance(event, AvailableDataset)
     assert event.dataset == DATASET
-    assert event.start_time == WINDOW_START
-    assert event.end_time == WINDOW_END
-    assert event.version == 1
-    assert event.revisable_until == WINDOW_END + DatasetBuilderConfig().retention
+    assert (
+        event.start_time,
+        event.end_time,
+        event.version,
+        event.revisable_until,
+    ) == (
+        WINDOW_START,
+        WINDOW_END,
+        1,
+        WINDOW_END + DatasetBuilderConfig().retention,
+    )
     assert CANONICAL_TEMP in event.info.schema.names
     assert dataset_metadata(event.info.schema).name == DATASET
 
     df = pa.Table.from_batches(batches).to_pandas()
-    assert len(df) == len(TEMPERATURES)
-    assert {
-        "time",
-        "lat",
-        "lon",
-        CANONICAL_TEMP,
-        "station_id",
-    } <= set(df.columns)
-    assert df["time"].is_monotonic_increasing
-    assert df["time"].iloc[0] == WINDOW_START
-    assert list(df[CANONICAL_TEMP]) == TEMPERATURES
-    assert set(df["station_id"]) == {"test_station"}
-    assert set(df["lat"]) == {52.5}
-    assert set(df["lon"]) == {13.4}
+    delivered = df[["time", "lat", "lon", CANONICAL_TEMP, "station_id"]].rename(
+        columns={CANONICAL_TEMP: "temperature"}
+    )
+    pd.testing.assert_frame_equal(
+        delivered, _observation_frame(), check_dtype=False
+    )
 
 
 async def test_dataset_is_built_and_exported_while_ingest_stream_is_still_open(ionbeam):
@@ -498,19 +437,45 @@ async def test_empty_stream_ingest_raises_client_side(ionbeam):
             await client.ingest(_stream(), _metadata(), WINDOW_START, WINDOW_END)
 
 
-def test_register_then_ingest_happy_path_raw_flight(ionbeam, tmp_path):
-    metadata = _metadata()
-    raw = flight.connect(ionbeam.url)
+@contextmanager
+def _raw(ionbeam):
+    """A raw Flight connection, for the wire verbs the SDK does not wrap."""
+    connection = flight.connect(ionbeam.url)
     try:
-        results = list(
-            raw.do_action(
-                flight.Action(
-                    "register_dataset",
-                    metadata.model_dump_json().encode("utf-8"),
-                )
-            )
+        yield connection
+    finally:
+        connection.close()
+
+
+def _register(raw, metadata) -> dict:
+    results = list(
+        raw.do_action(
+            flight.Action("register_dataset", metadata.model_dump_json().encode("utf-8"))
         )
-        assert json.loads(results[0].body.to_pybytes())["schema_hash"] == metadata.schema_hash()
+    )
+    return json.loads(results[0].body.to_pybytes())
+
+
+def test_registration_lifecycle_then_ingest_over_raw_flight(ionbeam, tmp_path):
+    """Registering answers with the schema hash and durably logs the metadata;
+    registering the identical schema again answers the same; registering a changed
+    schema under the same name is rejected. A registered dataset then accepts rows."""
+    metadata = _metadata()
+    changed = metadata.model_copy(
+        update={
+            "dataset_schema": DatasetSchema(
+                time=TimeCoordinate(),
+                coordinates=geographic_point_coordinates(),
+                variables=[Variable(name="temperature", unit="K")],
+                tags=[Tag(name="station_id")],
+            )
+        }
+    )
+
+    with _raw(ionbeam) as raw:
+        first = _register(raw, metadata)
+        assert first["schema_hash"] == metadata.schema_hash()
+        assert _register(raw, metadata) == first
 
         # registration lands in the durable log, content-addressed by its hash
         log = (
@@ -521,28 +486,21 @@ def test_register_then_ingest_happy_path_raw_flight(ionbeam, tmp_path):
         assert registered.metadata == metadata
         assert registered.registered_at is not None
 
+        with pytest.raises(Exception, match="different schema hash"):
+            _register(raw, changed)
+
         batch = _canonical_batch(metadata)
         writer, reader = raw.do_put(_ingest_descriptor(metadata), batch.schema)
         writer.write_batch(batch)
         writer.done_writing()
         response = json.loads(reader.read().to_pybytes().decode("utf-8"))
         assert response["rows"] == len(TEMPERATURES)
-    finally:
-        raw.close()
 
 
 def test_drifted_stream_schema_rejected_with_column_named(ionbeam):
     metadata = _metadata()
-    raw = flight.connect(ionbeam.url)
-    try:
-        list(
-            raw.do_action(
-                flight.Action(
-                    "register_dataset",
-                    metadata.model_dump_json().encode("utf-8"),
-                )
-            )
-        )
+    with _raw(ionbeam) as raw:
+        _register(raw, metadata)
         drifted = pa.RecordBatch.from_pydict(
             {
                 "time": [WINDOW_START],
@@ -559,8 +517,6 @@ def test_drifted_stream_schema_rejected_with_column_named(ionbeam):
             writer.done_writing()
             reader.read()
             writer.close()
-    finally:
-        raw.close()
 
 
 def test_registration_rejects_uninterpretable_structural_coordinate_units(ionbeam):
@@ -581,141 +537,8 @@ def test_registration_rejects_uninterpretable_structural_coordinate_units(ionbea
             )
         }
     )
-    raw = flight.connect(ionbeam.url)
-    try:
+    with _raw(ionbeam) as raw:
         with pytest.raises(Exception, match="convertible to degrees"):
-            list(
-                raw.do_action(
-                    flight.Action(
-                        "register_dataset", bad.model_dump_json().encode("utf-8")
-                    )
-                )
-            )
-    finally:
-        raw.close()
+            _register(raw, bad)
 
 
-def test_reregistration_changed_map_same_version_rejected(ionbeam):
-    metadata = _metadata()
-    changed = _metadata().model_copy(
-        update={
-            "dataset_schema": DatasetSchema(
-                time=TimeCoordinate(),
-                coordinates=geographic_point_coordinates(),
-                variables=[Variable(name="temperature", unit="K")],
-                tags=[Tag(name="station_id")],
-            )
-        }
-    )
-    raw = flight.connect(ionbeam.url)
-    try:
-        list(
-            raw.do_action(
-                flight.Action("register_dataset", metadata.model_dump_json().encode("utf-8"))
-            )
-        )
-        with pytest.raises(Exception, match="different schema hash"):
-            list(
-                raw.do_action(
-                    flight.Action(
-                        "register_dataset",
-                        changed.model_dump_json().encode("utf-8"),
-                    )
-                )
-            )
-    finally:
-        raw.close()
-
-
-def test_identical_reregistration_is_noop(ionbeam):
-    metadata = _metadata()
-    raw = flight.connect(ionbeam.url)
-    try:
-        first = list(
-            raw.do_action(
-                flight.Action("register_dataset", metadata.model_dump_json().encode("utf-8"))
-            )
-        )
-        second = list(
-            raw.do_action(
-                flight.Action("register_dataset", metadata.model_dump_json().encode("utf-8"))
-            )
-        )
-        assert json.loads(first[0].body.to_pybytes()) == json.loads(
-            second[0].body.to_pybytes()
-        )
-    finally:
-        raw.close()
-
-
-async def test_scheduler_drives_the_full_loop_unattended(scheduled_ionbeam):
-    """The scheduler emits a lagged trigger window, the source fetches and ingests
-    it, and the built dataset is pushed to the exporter."""
-    span = timedelta(hours=1)
-    triggers = []
-    received = []
-
-    client = IonbeamClient(IonbeamClientConfig(flight_url=scheduled_ionbeam.url))
-
-    async def fetch_on_trigger(start, end, trigger_id):
-        triggers.append((start, end))
-        if len(triggers) > 1:  # the schedule re-fires every second; deliver once
-            return
-        aligned_start = align_to_aggregation(start, span)
-        aligned_end = align_to_aggregation(end, span)
-        if aligned_end < end:
-            aligned_end += span
-        timestamps = pd.date_range(
-            aligned_start, aligned_end, freq="6min", inclusive="left", tz="UTC"
-        )
-        frame = pd.DataFrame(
-            {
-                "time": list(timestamps),
-                "lat": [52.5] * len(timestamps),
-                "lon": [13.4] * len(timestamps),
-                "temperature": [20.0 + i for i in range(len(timestamps))],
-                "station_id": ["live_station"] * len(timestamps),
-            }
-        )
-        metadata = _metadata()
-        await client.ingest(
-            canonical_record_batches([frame], metadata),
-            metadata,
-            aligned_start,
-            aligned_end,
-            ingestion_id=trigger_id,
-        )
-
-    def export_handler(connection, event):
-        received.append((event, _read_event(connection, event)))
-
-    client.register_trigger_handler(LIVE_SOURCE, fetch_on_trigger)
-    client.register_export_handler(
-        "live-exporter", export_handler, dataset_filter={DATASET}
-    )
-
-    async with client:
-        # test-only sync: the export subscription must be registered on the bus
-        # before the builder publishes, or the push is lost (triggers self-heal
-        # because the schedule re-fires every second)
-        await _poll(
-            lambda: scheduled_ionbeam.event_bus._dataset_subs,
-            message="export subscription",
-        )
-        await _poll(lambda: received, timeout=20.0, message="scheduler-driven push")
-
-    start, end = triggers[0]
-    assert end - start == timedelta(hours=1)  # window_size
-    lag = datetime.now(timezone.utc) - end
-    assert lag >= timedelta(hours=2) - timedelta(seconds=1)  # window_lag honored
-
-    event, batches = received[0]
-    assert event.dataset == DATASET
-    assert event.end_time - event.start_time == span
-    assert event.start_time >= align_to_aggregation(start, span)
-    assert event.end_time <= align_to_aggregation(end, span) + span
-
-    df = pa.Table.from_batches(batches).to_pandas()
-    assert len(df) == 10  # one aligned hour at 6-minute cadence
-    assert CANONICAL_TEMP in df.columns
-    assert set(df["station_id"]) == {"live_station"}

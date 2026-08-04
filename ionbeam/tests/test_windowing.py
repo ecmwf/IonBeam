@@ -8,7 +8,7 @@ rebuild debounce, sealing) are individual flows.
 
 The aggregation span and the finaliser thresholds are server-side production
 config (see :class:`DatasetRegistry`). The windowing scenarios pin them
-through ``_registry``, not the event."""
+through ``_registry``."""
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -28,16 +28,11 @@ from ionbeam.provenance import (
     align_to_aggregation,
 )
 from ionbeam.storage.lateness_histogram import bucket_for
+from conftest import weather_metadata
 from ionbeam_client.models import (
-    CfSemantics,
     DataAvailableEvent,
-    DatasetSchema,
     IngestionMetadata,
-    Tag,
-    TimeCoordinate,
-    Variable,
     WindowRecord,
-    geographic_point_coordinates,
 )
 
 T0 = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
@@ -49,24 +44,6 @@ _NEVER_FINAL = timedelta(days=3650)
 
 def at(hours: int, minutes: int = 0) -> datetime:
     return T0 + timedelta(hours=hours, minutes=minutes)
-
-
-def _metadata() -> IngestionMetadata:
-    return IngestionMetadata(
-        name="test_dataset",
-        dataset_schema=DatasetSchema(
-            time=TimeCoordinate(),
-            coordinates=geographic_point_coordinates(),
-            variables=[
-                Variable(
-                    name="temperature",
-                    semantics=CfSemantics(standard_name="air_temperature"),
-                    unit="deg_C",
-                )
-            ],
-            tags=[Tag(name="station_id")],
-        ),
-    )
 
 
 def _registry(
@@ -159,7 +136,7 @@ SCENARIOS = [
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.id)
-async def test_window_decisions(
+async def test_coverage_claims_schedule_exactly_the_complete_windows(
     scenario, coordination_store, build_queue, coordinator_metrics
 ):
     handler = _handler(
@@ -168,7 +145,7 @@ async def test_window_decisions(
         coordinator_metrics,
         registry=_registry(span=scenario.span),
     )
-    metadata = _metadata()
+    metadata = weather_metadata()
 
     for start, end in scenario.claims:
         await coordination_store.save_coverage_claim(
@@ -216,7 +193,7 @@ async def test_window_build_lifecycle(
     """A gap holds the window back; backfill completes and schedules it; once built,
     a replayed event leaves it alone and a genuinely new event rebuilds it."""
     handler = _handler(coordination_store, build_queue, coordinator_metrics)
-    metadata = _metadata()
+    metadata = weather_metadata()
     window = Window("test_dataset", at(10), timedelta(hours=1))
 
     def delivered(*events) -> set[str]:
@@ -274,7 +251,7 @@ async def test_measured_lateness_defers_eligibility(
         coordinator_metrics,
         settle_min_samples=3,
     )
-    metadata = _metadata()
+    metadata = weather_metadata()
 
     # this source has historically arrived ~6h late (p95 ≈ 6h): 100 datums, each
     # bucketed at 6h, seeded straight into the histogram the ingestion path fills
@@ -315,7 +292,7 @@ async def test_rebuild_is_debounced(
         coordinator_metrics,
         registry=_registry(debounce=debounce),
     )
-    metadata = _metadata()
+    metadata = weather_metadata()
     window = Window("test_dataset", at(10), timedelta(hours=1))
 
     first = _event(at(10), at(11), metadata)
@@ -351,7 +328,7 @@ async def test_sealed_window_drops_late_arrivals(
         coordinator_metrics,
         retention=timedelta(hours=1),
     )
-    metadata = _metadata()
+    metadata = weather_metadata()
     built = Window("test_dataset", at(10), timedelta(hours=1))
     await coordination_store.set_window_state(
         built,

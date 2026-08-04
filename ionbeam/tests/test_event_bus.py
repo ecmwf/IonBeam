@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
 # SPDX-License-Identifier: Apache-2.0
 
-"""Behavior of the Redis-Streams EventBus against a live Redis-protocol server
-(Valkey or Redis). Gated on IONBEAM_TEST_REDIS_URL; each test runs in a flushed
-throwaway database, so point it at a disposable instance only."""
+"""Event distribution through the bus port: subscription semantics on both
+adapters, plus the Redis-Streams durability contract. The Redis adapter is
+gated on IONBEAM_TEST_REDIS_URL; each test flushes a throwaway database, so
+point it at a disposable instance only."""
 
 import asyncio
 import os
@@ -17,13 +18,14 @@ from prometheus_client import CollectorRegistry
 
 from ionbeam.messaging import (
     DataSetAvailableEvent,
+    InMemoryEventBus,
     RedisStreamsEventBus,
     StartSourceCommand,
 )
 from ionbeam.observability import EventBusMetrics
 
 REDIS_URL = os.getenv("IONBEAM_TEST_REDIS_URL")
-pytestmark = pytest.mark.skipif(
+requires_redis = pytest.mark.skipif(
     REDIS_URL is None,
     reason="set IONBEAM_TEST_REDIS_URL (e.g. redis://localhost:6379/15) to run",
 )
@@ -53,18 +55,35 @@ def _trigger(source_name: str) -> StartSourceCommand:
 
 
 @pytest.fixture
-async def bus():
+async def redis_client():
+    client = redis.from_url(REDIS_URL)
+    await client.flushdb()
+    yield client
+    await client.aclose()
+
+
+@pytest.fixture(params=["memory", pytest.param("redis", marks=requires_redis)])
+async def any_bus(request):
+    """The bus port over each adapter, so the subscription contract is one suite."""
+    if request.param == "memory":
+        yield InMemoryEventBus()
+        return
     client = redis.from_url(REDIS_URL)
     await client.flushdb()
     yield RedisStreamsEventBus(client, EventBusMetrics(CollectorRegistry()))
     await client.aclose()
 
 
-async def test_dataset_subscription_delivers_and_filters_by_name(bus):
-    sub = await bus.subscribe_datasets("exp", {"weather"})
+@pytest.fixture
+async def bus(redis_client):
+    return RedisStreamsEventBus(redis_client, EventBusMetrics(CollectorRegistry()))
 
-    await bus.publish_dataset_available(_dataset_event("air_quality"))  # filtered out
-    await bus.publish_dataset_available(_dataset_event("weather"))  # delivered
+
+async def test_dataset_subscription_delivers_and_filters_by_name(any_bus):
+    sub = await any_bus.subscribe_datasets("exp", {"weather"})
+
+    await any_bus.publish_dataset_available(_dataset_event("air_quality"))
+    await any_bus.publish_dataset_available(_dataset_event("weather"))
 
     event = await sub.next(2.0)
     assert event.metadata.name == "weather"
@@ -72,6 +91,48 @@ async def test_dataset_subscription_delivers_and_filters_by_name(bus):
     await sub.close()
 
 
+async def test_dataset_subscription_without_filter_receives_everything(any_bus):
+    sub = await any_bus.subscribe_datasets("exp")
+
+    await any_bus.publish_dataset_available(_dataset_event("air_quality"))
+    await any_bus.publish_dataset_available(_dataset_event("weather"))
+
+    first = await sub.next(2.0)
+    second = await sub.next(2.0)
+    assert {first.metadata.name, second.metadata.name} == {"air_quality", "weather"}
+    await sub.close()
+
+
+async def test_triggers_route_by_source_name(any_bus):
+    sub = await any_bus.subscribe_triggers("meteotracker")
+
+    await any_bus.publish_source_trigger(_trigger("ioncannon"))
+    await any_bus.publish_source_trigger(_trigger("meteotracker"))
+
+    trigger = await sub.next(2.0)
+    assert trigger.source_name == "meteotracker"
+    assert await sub.next(0.05) is None
+    await sub.close()
+
+
+async def test_a_closed_in_memory_subscription_receives_nothing_more():
+    """The in-memory bus keeps no durable group: closing unregisters both channels
+    and events published afterwards are gone. The Streams adapter deliberately
+    differs, see test_events_published_while_offline_are_delivered_on_resubscribe."""
+    bus = InMemoryEventBus()
+    triggers = await bus.subscribe_triggers("s")
+    datasets = await bus.subscribe_datasets("exp")
+    await triggers.close()
+    await datasets.close()
+
+    await bus.publish_source_trigger(_trigger("s"))
+    await bus.publish_dataset_available(_dataset_event("weather"))
+
+    assert await triggers.next(0.05) is None
+    assert await datasets.next(0.05) is None
+
+
+@requires_redis
 async def test_each_exporter_identity_sees_every_event_once(bus):
     odb = await bus.subscribe_datasets("odb")
     pygeoapi = await bus.subscribe_datasets("pygeoapi")
@@ -84,6 +145,7 @@ async def test_each_exporter_identity_sees_every_event_once(bus):
     await pygeoapi.close()
 
 
+@requires_redis
 async def test_instances_of_the_same_identity_compete(bus):
     first = await bus.subscribe_datasets("odb")
     second = await bus.subscribe_datasets("odb")
@@ -98,6 +160,7 @@ async def test_instances_of_the_same_identity_compete(bus):
     await second.close()
 
 
+@requires_redis
 async def test_events_published_while_offline_are_delivered_on_resubscribe(bus):
     sub = await bus.subscribe_datasets("odb")
     await sub.close()  # exporter goes away; its group (identity) remains
@@ -109,6 +172,7 @@ async def test_events_published_while_offline_are_delivered_on_resubscribe(bus):
     await again.close()
 
 
+@requires_redis
 async def test_delivered_event_is_acked_and_not_redelivered(bus):
     sub = await bus.subscribe_datasets("odb")
     await bus.publish_dataset_available(_dataset_event("weather"))
@@ -124,9 +188,10 @@ async def test_delivered_event_is_acked_and_not_redelivered(bus):
     await again.close()
 
 
+@requires_redis
 async def test_unacked_event_is_redelivered_to_a_new_consumer():
-    # A subscriber that reads but dies before ack (a disconnect mid-delivery)
-    # leaves the event pending: a reconnecting consumer reclaims it.
+    """A subscriber that reads but dies before ack leaves the event pending: a
+    reconnecting consumer reclaims it."""
     client = redis.from_url(REDIS_URL)
     await client.flushdb()
     bus = RedisStreamsEventBus(
@@ -149,10 +214,11 @@ async def test_unacked_event_is_redelivered_to_a_new_consumer():
     await client.aclose()
 
 
+@requires_redis
 async def test_dead_consumer_names_are_reaped_on_subscribe():
-    # A SIGKILLed subscriber never reaches close(); its consumer name stays
-    # registered in the group. A new subscription sweeps idle names with
-    # nothing pending, leaving only live subscribers registered.
+    """A SIGKILLed subscriber never reaches close(); a new subscription sweeps
+    idle consumer names with nothing pending, leaving only live subscribers
+    registered."""
     client = redis.from_url(REDIS_URL)
     await client.flushdb()
     bus = RedisStreamsEventBus(
@@ -172,7 +238,7 @@ async def test_dead_consumer_names_are_reaped_on_subscribe():
     await bus.subscribe_datasets("odb")
     names = {c["name"] for c in await client.xinfo_consumers("ionbeam:datasets", "odb")}
     assert dead_name not in names
-    assert len(names) == 1  # only the live consumer survives
+    assert len(names) == 1
 
     await bus.publish_dataset_available(_dataset_event("weather"))
     assert (await live.next(2.0)).metadata.name == "weather"
@@ -181,23 +247,10 @@ async def test_dead_consumer_names_are_reaped_on_subscribe():
     await client.aclose()
 
 
-async def test_triggers_route_by_source_name(bus):
-    meteo = await bus.subscribe_triggers("meteotracker")
-    cannon = await bus.subscribe_triggers("ioncannon")
-
-    await bus.publish_source_trigger(_trigger("meteotracker"))
-
-    received = await meteo.next(2.0)
-    assert received.source_name == "meteotracker"
-    assert received.start_time == BASE
-    assert await cannon.next(0.05) is None
-    await meteo.close()
-    await cannon.close()
-
-
+@requires_redis
 async def test_poison_event_is_dropped_after_max_deliveries():
-    # An event whose handler dies on every delivery blocks everything behind it
-    # if redelivered forever. Past the delivery cap it is dropped with an error.
+    """An event whose handler dies on every delivery is dropped with an error
+    once past the delivery cap."""
     client = redis.from_url(REDIS_URL)
     await client.flushdb()
     registry = CollectorRegistry()
@@ -218,7 +271,7 @@ async def test_poison_event_is_dropped_after_max_deliveries():
     else:
         pytest.fail("poison event was never dropped")
 
-    assert deliveries == 8  # _MAX_DELIVERIES
+    assert deliveries == 8  # the delivery cap
 
     # dead-lettered means acked: gone for every future consumer
     again = await bus.subscribe_datasets("odb")

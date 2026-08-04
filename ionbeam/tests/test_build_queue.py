@@ -72,8 +72,8 @@ async def test_completed_window_is_not_reclaimed(client):
 
 
 async def test_crashed_build_lease_is_reclaimed(client):
-    # A build that leases a window but never completes (its pod was killed):
-    # the expired lease returns to the queue, due again.
+    """A build that leases a window and never completes returns to the queue
+    when the lease expires."""
     queue = RedisBuildQueue(client, queue_key="q", lease_ttl=0.0)
     window = _window("d", 0)
     await queue.schedule(window, eligible_at=_past(1))

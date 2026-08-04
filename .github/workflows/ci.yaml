@@ -46,6 +46,18 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # The Valkey-backed adapters (build queue, event bus, coordination store)
+    # are only covered when IONBEAM_TEST_REDIS_URL points at an instance.
+    services:
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -54,6 +66,8 @@ jobs:
         with:
           enable-cache: true
       - name: Run tests
+        env:
+          IONBEAM_TEST_REDIS_URL: redis://localhost:6379/15
         run: |
           set -o pipefail
           uv sync --frozen --all-packages --group dev

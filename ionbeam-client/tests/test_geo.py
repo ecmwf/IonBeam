@@ -1,6 +1,9 @@
 # SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
 # SPDX-License-Identifier: Apache-2.0
 
+"""Geospatial projection of built datasets: WKB geometry and deterministic
+self-locating row ids."""
+
 import re
 import struct
 from datetime import datetime, timezone

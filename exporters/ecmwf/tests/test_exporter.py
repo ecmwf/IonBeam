@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
 # SPDX-License-Identifier: Apache-2.0
 
+"""ODB export of built windows into 6h analysis cycles: mapping, identity,
+assembly, and recovery."""
+
 import json
-import re
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Generator
 from uuid import uuid4
 
 import numpy as np
@@ -52,18 +52,6 @@ TEST_VARIABLE_MAP = [
 
 CYCLE = timedelta(hours=6)
 
-# <dataset>/ib_year=YYYY/ib_month=MM/ib_day=DD/<start stamp>_<span>-v<version>-<hash>
-_BUILD = re.compile(
-    r"^(?P<dataset>[^/]+)/ib_year=\d{4}/ib_month=\d{2}/ib_day=\d{2}/"
-    r"(?P<window>\d{8}T\d{6}_[^-/]+)-v(?P<version>\d+)-[0-9a-f]+$"
-)
-
-
-def _window_start(name: str) -> datetime:
-    return datetime.strptime(name.split("_", 1)[0], "%Y%m%dT%H%M%S").replace(
-        tzinfo=timezone.utc
-    )
-
 
 class _Chunk:
     def __init__(self, data: pa.RecordBatch):
@@ -82,56 +70,54 @@ class _Reader:
         pass
 
 
-class FakeFlight:
-    """Mirrors the server: dataset_range resolves current builds in range;
-    do_get streams their batches from the mock store."""
+class StubFlight:
+    """The one Flight interaction the exporter depends on: a ``dataset_range``
+    lookup answering with the current build of every window starting in the
+    range, in window order, then a stream of their batches.
 
-    def __init__(self, store):
-        self._store = store
+    Publishing a window twice supersedes it, as a revision does on the server.
+    Which stored build is current is the server's concern and stays unmodelled
+    here."""
+
+    def __init__(self):
+        self._windows: dict[tuple[str, datetime], list[pa.RecordBatch]] = {}
+
+    def publish(self, dataset: str, start: datetime, batches) -> None:
+        self._windows[(dataset, start)] = list(batches)
 
     def get_flight_info(self, descriptor):
         cmd = json.loads(descriptor.command)
         assert cmd["op"] == "dataset_range"
         start = datetime.fromisoformat(cmd["start"])
         end = datetime.fromisoformat(cmd["end"])
-        current: dict[str, tuple[int, str]] = {}
-        for key in self._store._storage:
-            match = _BUILD.match(key)
-            if match is None or match["dataset"] != cmd["dataset"]:
-                continue
-            if not (start <= _window_start(match["window"]) < end):
-                continue
-            version = int(match["version"])
-            name = match["window"]
-            if name not in current or version > current[name][0]:
-                current[name] = (version, key)
-        locations = [key for _, (_, key) in sorted(current.items())]
-        if not locations:
+        in_range = sorted(
+            window
+            for window in self._windows
+            if window[0] == cmd["dataset"] and start <= window[1] < end
+        )
+        if not in_range:
             raise flight.FlightServerError("no builds in range")
         ticket = flight.Ticket(
-            json.dumps({"op": "dataset", "locations": locations}).encode()
+            json.dumps(
+                {"windows": [[name, at.isoformat()] for name, at in in_range]}
+            ).encode()
         )
         return SimpleNamespace(endpoints=[SimpleNamespace(ticket=ticket)])
 
     def do_get(self, ticket):
-        locations = json.loads(ticket.ticket)["locations"]
-        batches = [
-            batch
-            for location in locations
-            for batch in self._store._storage.get(location, [])
-        ]
-        return _Reader(batches)
+        windows = json.loads(ticket.ticket)["windows"]
+        return _Reader(
+            [
+                batch
+                for name, at in windows
+                for batch in self._windows[(name, datetime.fromisoformat(at))]
+            ]
+        )
 
 
 @pytest.fixture
-def connection(arrow_store) -> FakeFlight:
-    return FakeFlight(arrow_store)
-
-
-@pytest.fixture
-def temp_data_path() -> Generator[Path, None, None]:
-    with tempfile.TemporaryDirectory() as temp_dir:
-        yield Path(temp_dir)
+def connection() -> StubFlight:
+    return StubFlight()
 
 
 @pytest.fixture
@@ -194,37 +180,40 @@ def _sample_df() -> pd.DataFrame:
     )
 
 
-def _build_key(start: datetime, *, dataset: str = "test", span: str = "PT1H",
-               version: int = 1, digest: str = "deadbeef") -> str:
-    return (f"{dataset}/{start:ib_year=%Y/ib_month=%m/ib_day=%d}/"
-            f"{start:%Y%m%dT%H%M%S}_{span}-v{version}-{digest}")
-
-
-@pytest.fixture
-def write_build(arrow_store_writer, sample_ingestion_metadata):
-    """Publish a window's current build under a layout-conformant key, so the
-    exporter's cycle resolution finds it. Returns the key."""
-    schema = canonical_arrow_schema(sample_ingestion_metadata)
-
-    async def _write(start: datetime, df: pd.DataFrame | None = None, **key_kwargs) -> str:
-        key = _build_key(start, **key_kwargs)
-        await arrow_store_writer(
-            key, df if df is not None else _sample_df(), schema=schema
+def _batches(df: pd.DataFrame, metadata: IngestionMetadata) -> list[pa.RecordBatch]:
+    return [
+        pa.RecordBatch.from_pandas(
+            df, schema=canonical_arrow_schema(metadata), preserve_index=False
         )
-        return key
-
-    return _write
+    ]
 
 
 @pytest.fixture
-async def sample_build(write_build) -> str:
+def publish(connection, sample_ingestion_metadata):
+    """Publish a window's current build, so the exporter's cycle resolution finds it."""
+
+    def _publish(start: datetime, df: pd.DataFrame | None = None, metadata=None) -> None:
+        connection.publish(
+            "test",
+            start,
+            _batches(
+                df if df is not None else _sample_df(),
+                metadata or sample_ingestion_metadata,
+            ),
+        )
+
+    return _publish
+
+
+@pytest.fixture
+def sample_build(publish) -> None:
     """A single window build at T0 (the 00Z window of the 06Z cycle)."""
-    return await write_build(T0)
+    publish(T0)
 
 
 @pytest.fixture
-def odb_exporter(temp_data_path: Path) -> ODBExporter:
-    output_path = temp_data_path / "output"
+def odb_exporter(tmp_path: Path) -> ODBExporter:
+    output_path = tmp_path / "output"
     output_path.mkdir(parents=True, exist_ok=True)
 
     # zero quiesce: cycles here are far past their cutoff, so the event that
@@ -272,549 +261,450 @@ def test_analysis_time_is_the_next_cycle_boundary():
     )
 
 
-class TestODBExporter:
-    async def test_exporter_creates_cycle_odb_with_correct_mapping(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        sample_build: str,
-        temp_data_path: Path,
-    ) -> None:
-        odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+async def test_a_window_build_delivers_a_cycle_odb_with_governance_identity(
+    odb_exporter: ODBExporter,
+    connection: StubFlight,
+    sample_build,
+    tmp_path: Path,
+) -> None:
+    odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
 
-        cycle_file = _cycle_file(temp_data_path)
-        assert cycle_file.exists() and cycle_file.stat().st_size > 0
+    cycle_file = _cycle_file(tmp_path)
+    assert cycle_file.exists() and cycle_file.stat().st_size > 0
 
-        odb_df = pyodc.read_odb(cycle_file, single=True)
+    odb_df = pyodc.read_odb(cycle_file, single=True)
 
-        # one row per (input row x mapped varno with a value)
-        assert len(odb_df) == 4
-        assert set(odb_df["varno@body"]) == {39, 108, 112}
-        assert set(odb_df["statid@hdr"]) == {"A", "B"}
-        assert set(odb_df["source@hdr"]) == {"test"}
+    # one row per (input row x mapped varno with a value)
+    assert len(odb_df) == 4
+    assert set(odb_df["varno@body"]) == {39, 108, 112}
+    assert set(odb_df["statid@hdr"]) == {"A", "B"}
+    assert set(odb_df["source@hdr"]) == {"test"}
 
-        # crowd-AWS report identity per the ODB governance tables
-        assert set(odb_df["reportype@hdr"]) == {16090}
-        assert set(odb_df["codetype@hdr"]) == {179}
-        assert set(odb_df["obstype@hdr"]) == {1}
-        assert set(odb_df["groupid@hdr"]) == {17}
+    # crowd-AWS report identity per the ODB governance tables
+    identity = ("reportype@hdr", "codetype@hdr", "obstype@hdr", "groupid@hdr")
+    assert {column: set(odb_df[column]) for column in identity} == {
+        "reportype@hdr": {16090},
+        "codetype@hdr": {179},
+        "obstype@hdr": {1},
+        "groupid@hdr": {17},
+    }
 
-        # MARS DATE/TIME keys are the analysis cycle, constant per file
-        assert set(odb_df["andate@desc"]) == {20250101}
-        assert set(odb_df["antime@desc"]) == {60000}
+    # MARS DATE/TIME keys are the analysis cycle, constant per file
+    assert set(odb_df["andate@desc"]) == {20250101}
+    assert set(odb_df["antime@desc"]) == {60000}
 
-        # per-datum date/time stay the observation time
-        assert set(odb_df["date@hdr"]) == {20250101}
-        assert set(odb_df["time@hdr"]) == {0, 10000}
+    # per-datum date/time stay the observation time
+    assert set(odb_df["date@hdr"]) == {20250101}
+    assert set(odb_df["time@hdr"]) == {0, 10000}
 
-        # entryno numbers each report's data 1..n: station A carried three
-        # values (temperature, wind, pressure), station B only wind
-        assert sorted(odb_df.loc[odb_df["statid@hdr"] == "A", "entryno@body"]) == [1, 2, 3]
-        assert sorted(odb_df.loc[odb_df["statid@hdr"] == "B", "entryno@body"]) == [1]
-        # no vertco declared for these mappings -> encoded as missing
-        assert odb_df["vertco_type@body"].isna().all()
-        assert odb_df["vertco_reference_1@body"].isna().all()
-        assert set(odb_df["datum_status@body"]) == {1}  # STATUS_t active bit
-        # no altitude coordinate declared -> stalt encodes as missing, not a value
-        assert odb_df["stalt@hdr"].isna().all()
+    # entryno numbers each report's data 1..n: station A carried three
+    # values (temperature, wind, pressure), station B only wind
+    assert sorted(odb_df.loc[odb_df["statid@hdr"] == "A", "entryno@body"]) == [1, 2, 3]
+    assert sorted(odb_df.loc[odb_df["statid@hdr"] == "B", "entryno@body"]) == [1]
+    # no vertco declared for these mappings -> encoded as missing
+    assert odb_df["vertco_type@body"].isna().all()
+    assert odb_df["vertco_reference_1@body"].isna().all()
+    assert set(odb_df["datum_status@body"]) == {1}  # STATUS_t active bit
+    # no altitude coordinate declared: stalt encodes as missing
+    assert odb_df["stalt@hdr"].isna().all()
 
-        temp_rows = odb_df[odb_df["varno@body"] == 39]
-        assert len(temp_rows) == 1
-        assert abs(temp_rows["obsvalue@body"].iloc[0] - 285.45) < 0.01
-
-        pressure_rows = odb_df[odb_df["varno@body"] == 108]
-        assert len(pressure_rows) == 1
-        assert abs(pressure_rows["obsvalue@body"].iloc[0] - 101240.0) < 0.01
-
-        wind_values = sorted(odb_df[odb_df["varno@body"] == 112]["obsvalue@body"])
-        assert abs(wind_values[0] - 3.2) < 0.01
-        assert abs(wind_values[1] - 5.5) < 0.01
-
-    async def test_obsvalues_convert_from_declared_units_to_varno_units(
-        self, connection: FakeFlight, temp_data_path: Path, arrow_store_writer
-    ) -> None:
-        metadata = IngestionMetadata(
-            name="test",
-            dataset_schema=DatasetSchema(
-                time=TimeCoordinate(),
-                coordinates=geographic_point_coordinates(),
-                variables=[
-                    Variable(
-                        name="air_temperature",
-                        semantics=CfSemantics(standard_name="air_temperature"),
-                        unit="degC",
-                    ),
-                    Variable(
-                        name="relative_humidity",
-                        semantics=CfSemantics(standard_name="relative_humidity"),
-                        unit="%",
-                    ),
-                ],
-                tags=[Tag(name="station_id")],
-            ),
+    assert sorted(
+        zip(
+            odb_df["varno@body"],
+            odb_df["statid@hdr"],
+            odb_df["obsvalue@body"].round(2),
         )
-        df = pd.DataFrame(
-            {
-                "time": pd.to_datetime(["2025-01-01T00:00:00Z"], utc=True),
-                "lat": [50.7],
-                "lon": [7.1],
-                "station_id": ["A"],
-                "air_temperature": [18.6],
-                "relative_humidity": [57.0],
-            }
-        )
-        await arrow_store_writer(
-            _build_key(T0), df, schema=canonical_arrow_schema(metadata)
-        )
+    ) == [(39, "A", 285.45), (108, "A", 101240.0), (112, "A", 5.5), (112, "B", 3.2)]
 
-        exporter = ODBExporter(
-            ODBExporterConfig(
-                output_path=temp_data_path / "output",
-                assembly_quiesce=timedelta(0),
-            ),
-            variable_map=[
-                VarNoMapping(
-                    varno=39,
-                    unit="K",
-                    mapped_from=[CfSemantics(standard_name="air_temperature")],
+
+async def test_obsvalues_convert_from_declared_units_to_varno_units(
+    connection: StubFlight, tmp_path: Path, publish
+) -> None:
+    metadata = IngestionMetadata(
+        name="test",
+        dataset_schema=DatasetSchema(
+            time=TimeCoordinate(),
+            coordinates=geographic_point_coordinates(),
+            variables=[
+                Variable(
+                    name="air_temperature",
+                    semantics=CfSemantics(standard_name="air_temperature"),
+                    unit="degC",
                 ),
-                VarNoMapping(
-                    varno=58,
+                Variable(
+                    name="relative_humidity",
+                    semantics=CfSemantics(standard_name="relative_humidity"),
                     unit="%",
-                    mapped_from=[CfSemantics(standard_name="relative_humidity")],
                 ),
             ],
-        )
-        exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+            tags=[Tag(name="station_id")],
+        ),
+    )
+    df = pd.DataFrame(
+        {
+            "time": pd.to_datetime(["2025-01-01T00:00:00Z"], utc=True),
+            "lat": [50.7],
+            "lon": [7.1],
+            "station_id": ["A"],
+            "air_temperature": [18.6],
+            "relative_humidity": [57.0],
+        }
+    )
+    publish(T0, df, metadata)
 
-        odb_df = pyodc.read_odb(_cycle_file(temp_data_path), single=True)
-        temperature = odb_df[odb_df["varno@body"] == 39]["obsvalue@body"].iloc[0]
-        assert abs(temperature - 291.75) < 0.01  # degC -> K
-        humidity = odb_df[odb_df["varno@body"] == 58]["obsvalue@body"].iloc[0]
-        assert abs(humidity - 57.0) < 0.01  # ODB carries percent, as delivered
-
-    async def test_header_coordinates_convert_from_declared_units(
-        self, connection: FakeFlight, temp_data_path: Path, arrow_store_writer
-    ) -> None:
-        """stalt@hdr carries metres whatever length unit the source declared
-        its altitude in; lat/lon pass through as degrees."""
-        metadata = IngestionMetadata(
-            name="test",
-            dataset_schema=DatasetSchema(
-                time=TimeCoordinate(),
-                coordinates=[
-                    *geographic_point_coordinates(),
-                    Coordinate(name="altitude", axis="z",
-                               semantics=CfSemantics(standard_name="altitude"),
-                               unit="ft"),
-                ],
-                variables=[
-                    Variable(
-                        name="air_temperature",
-                        semantics=CfSemantics(standard_name="air_temperature"),
-                        unit="K",
-                    ),
-                ],
-                tags=[Tag(name="station_id")],
+    exporter = ODBExporter(
+        ODBExporterConfig(
+            output_path=tmp_path / "output",
+            assembly_quiesce=timedelta(0),
+        ),
+        variable_map=[
+            VarNoMapping(
+                varno=39,
+                unit="K",
+                mapped_from=[CfSemantics(standard_name="air_temperature")],
             ),
-        )
-        df = pd.DataFrame(
-            {
-                "time": pd.to_datetime(["2025-01-01T00:00:00Z"], utc=True),
-                "lat": [50.7],
-                "lon": [7.1],
-                "altitude": [328.084],  # 328.084 ft == 100 m
-                "station_id": ["A"],
-                "air_temperature": [285.0],
-            }
-        )
-        await arrow_store_writer(
-            _build_key(T0), df, schema=canonical_arrow_schema(metadata)
-        )
-
-        exporter = ODBExporter(
-            ODBExporterConfig(
-                output_path=temp_data_path / "output",
-                assembly_quiesce=timedelta(0),
+            VarNoMapping(
+                varno=58,
+                unit="%",
+                mapped_from=[CfSemantics(standard_name="relative_humidity")],
             ),
-            variable_map=TEST_VARIABLE_MAP,
-        )
-        exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+        ],
+    )
+    exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
 
-        odb_df = pyodc.read_odb(_cycle_file(temp_data_path), single=True)
-        assert abs(odb_df["stalt@hdr"].iloc[0] - 100.0) < 0.01  # ft -> m
-        assert abs(odb_df["lat@hdr"].iloc[0] - 50.7) < 0.001
-        assert abs(odb_df["lon@hdr"].iloc[0] - 7.1) < 0.001
+    odb_df = pyodc.read_odb(_cycle_file(tmp_path), single=True)
+    temperature = odb_df[odb_df["varno@body"] == 39]["obsvalue@body"].iloc[0]
+    assert abs(temperature - 291.75) < 0.01  # degC -> K
+    humidity = odb_df[odb_df["varno@body"] == 58]["obsvalue@body"].iloc[0]
+    assert abs(humidity - 57.0) < 0.01  # ODB carries percent, as delivered
 
-    async def test_revised_window_rebuilds_the_cycle_without_duplicating(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        sample_build: str,
-        temp_data_path: Path,
-    ) -> None:
-        event = _event(T0, T0 + timedelta(hours=1))
 
-        odb_exporter.export_handler(connection, event)
-        odb_exporter.export_handler(connection, event)
+async def test_header_coordinates_convert_from_declared_units(
+    connection: StubFlight, tmp_path: Path, publish
+) -> None:
+    """stalt@hdr carries metres whatever length unit the source declared
+    its altitude in; lat/lon pass through as degrees."""
+    metadata = IngestionMetadata(
+        name="test",
+        dataset_schema=DatasetSchema(
+            time=TimeCoordinate(),
+            coordinates=[
+                *geographic_point_coordinates(),
+                Coordinate(name="altitude", axis="z",
+                           semantics=CfSemantics(standard_name="altitude"),
+                           unit="ft"),
+            ],
+            variables=[
+                Variable(
+                    name="air_temperature",
+                    semantics=CfSemantics(standard_name="air_temperature"),
+                    unit="K",
+                ),
+            ],
+            tags=[Tag(name="station_id")],
+        ),
+    )
+    df = pd.DataFrame(
+        {
+            "time": pd.to_datetime(["2025-01-01T00:00:00Z"], utc=True),
+            "lat": [50.7],
+            "lon": [7.1],
+            "altitude": [328.084],  # 328.084 ft == 100 m
+            "station_id": ["A"],
+            "air_temperature": [285.0],
+        }
+    )
+    publish(T0, df, metadata)
 
-        assert len(pyodc.read_odb(_cycle_file(temp_data_path), single=True)) == 4
+    exporter = ODBExporter(
+        ODBExporterConfig(
+            output_path=tmp_path / "output",
+            assembly_quiesce=timedelta(0),
+        ),
+        variable_map=TEST_VARIABLE_MAP,
+    )
+    exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
 
-    async def test_windows_of_one_cycle_build_into_one_file(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        write_build,
-        temp_data_path: Path,
-    ) -> None:
-        await write_build(T0)
-        await write_build(T0 + timedelta(hours=1))
+    odb_df = pyodc.read_odb(_cycle_file(tmp_path), single=True)
+    assert abs(odb_df["stalt@hdr"].iloc[0] - 100.0) < 0.01  # ft -> m
+    assert abs(odb_df["lat@hdr"].iloc[0] - 50.7) < 0.001
+    assert abs(odb_df["lon@hdr"].iloc[0] - 7.1) < 0.001
 
-        odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
-        odb_exporter.export_handler(
-            connection, _event(T0 + timedelta(hours=1), T0 + timedelta(hours=2))
-        )
 
-        # both windows of the 06Z cycle land in one delivered file
-        assert len(pyodc.read_odb(_cycle_file(temp_data_path), single=True)) == 8
-        assert _seen_stamp(temp_data_path).exists()
+async def test_a_cycle_file_is_the_union_of_its_windows_however_events_arrive(
+    odb_exporter: ODBExporter,
+    connection: StubFlight,
+    publish,
+    tmp_path: Path,
+) -> None:
+    """Each build reads the whole cycle's current windows, so the delivered file
+    is their union whatever order events arrive in and however often they repeat.
+    Windows of the next cycle deliver separately."""
+    for hour in range(7):
+        publish(T0 + timedelta(hours=hour))
 
-    async def test_windows_in_different_cycles_get_separate_files(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        write_build,
-        temp_data_path: Path,
-    ) -> None:
-        await write_build(T0)
-        await write_build(T0 + timedelta(hours=6))
-
-        odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
-        odb_exporter.export_handler(
-            connection, _event(T0 + timedelta(hours=6), T0 + timedelta(hours=7))
-        )
-
-        assert len(pyodc.read_odb(_cycle_file(temp_data_path), single=True)) == 4
-        assert len(
-            pyodc.read_odb(_cycle_file(temp_data_path, "20250101_12"), single=True)
-        ) == 4
-
-    async def test_out_of_order_windows_all_reach_the_delivery(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        write_build,
-        temp_data_path: Path,
-    ) -> None:
-        """A replay delivers a cycle's windows out of order, the cycle-closing
-        window first. Because a build reads the cycle's current builds from the
-        store, every window reaches the delivered file regardless of arrival
-        order."""
-        for hour in range(6):
-            await write_build(T0 + timedelta(hours=hour))
-
-        for hour in (5, 0, 3, 1, 4, 2):
-            odb_exporter.export_handler(
-                connection,
-                _event(T0 + timedelta(hours=hour), T0 + timedelta(hours=hour + 1)),
-            )
-
-        # six windows, four mapped datums each
-        assert len(pyodc.read_odb(_cycle_file(temp_data_path), single=True)) == 24
-
-    async def test_higher_version_build_supersedes_without_duplicating(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        write_build,
-        temp_data_path: Path,
-    ) -> None:
-        """When a window has more than one stored build, the cycle takes only its
-        current (highest-version) build — a revision replaces, never doubles."""
-        cold = _sample_df()
-        cold.loc[0, "air_temperature"] = 280.0
-        warm = _sample_df()
-        warm.loc[0, "air_temperature"] = 290.0
-        await write_build(T0, cold, version=1, digest="00000001")
-        await write_build(T0, warm, version=2, digest="00000002")
-
-        odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
-
-        odb_df = pyodc.read_odb(_cycle_file(temp_data_path), single=True)
-        assert len(odb_df) == 4  # one window's worth, not doubled
-        temperature = odb_df[odb_df["varno@body"] == 39]["obsvalue@body"].iloc[0]
-        assert abs(temperature - 290.0) < 0.01  # the v2 value
-
-    async def test_empty_cycle_is_skipped_without_poisoning_the_reconcile(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        write_build,
-        temp_data_path: Path,
-    ) -> None:
-        """A reconcile touches every remembered cycle. One whose range holds no
-        current build (its windows aren't built yet, or aged out) is skipped —
-        not fatal — so a later, fully-built cycle still exports, and the empty
-        cycle stays unstamped so it rebuilds once its windows land."""
-        # the 12Z cycle is fully built; the 06Z cycle is only *seen*, never built
-        for hour in range(6, 12):
-            await write_build(T0 + timedelta(hours=hour))
-
-        # poke a 06Z-cycle window (no builds) then a 12Z-cycle window (built)
-        odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+    # the 06Z cycle's six windows, out of order, one of them replayed
+    for hour in (5, 0, 3, 1, 4, 2, 0):
         odb_exporter.export_handler(
             connection,
-            _event(T0 + timedelta(hours=6), T0 + timedelta(hours=7)),
+            _event(T0 + timedelta(hours=hour), T0 + timedelta(hours=hour + 1)),
         )
+    odb_exporter.export_handler(
+        connection, _event(T0 + timedelta(hours=6), T0 + timedelta(hours=7))
+    )
 
-        # the built cycle exported despite the empty one being reconciled first
-        assert len(
-            pyodc.read_odb(_cycle_file(temp_data_path, "20250101_12"), single=True)
-        ) == 24
-        # the empty 06Z cycle was seen but never stamped built — it will retry
-        assert odb_exporter.store.read_stamp("test", T0 + timedelta(hours=6), "seen")
-        assert odb_exporter.store.read_stamp("test", T0 + timedelta(hours=6), "built") is None
+    # six windows, four mapped datums each — the replay added nothing
+    assert len(pyodc.read_odb(_cycle_file(tmp_path), single=True)) == 24
+    assert _seen_stamp(tmp_path).exists()
+    assert (
+        len(pyodc.read_odb(_cycle_file(tmp_path, "20250101_12"), single=True))
+        == 4
+    )
 
-    async def test_event_burst_settles_before_building(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        write_build,
-        temp_data_path: Path,
-    ) -> None:
-        """A replayed backlog or straggler burst pokes cycles but does not build
-        per event — the cycle waits until it quiesces."""
-        await write_build(T0)
-        await write_build(T0 + timedelta(hours=1))
-        exporter = ODBExporter(
-            odb_exporter.config.model_copy(
-                update={"assembly_quiesce": timedelta(seconds=60)}
-            ),
-            variable_map=TEST_VARIABLE_MAP,
-        )
-        for start in (T0, T0 + timedelta(hours=1), T0):  # third = replay
-            exporter.export_handler(
-                connection, _event(start, start + timedelta(hours=1))
-            )
 
-        assert not _cycle_file(temp_data_path).exists()
+async def test_empty_cycle_is_skipped_without_poisoning_the_reconcile(
+    odb_exporter: ODBExporter,
+    connection: StubFlight,
+    publish,
+    tmp_path: Path,
+) -> None:
+    """A reconcile touches every remembered cycle. One whose range holds no
+    current build is skipped, so a later, fully-built cycle still exports; the
+    empty cycle stays unstamped and rebuilds once its windows land."""
+    # the 12Z cycle is fully built; the 06Z cycle is only *seen*, never built
+    for hour in range(6, 12):
+        publish(T0 + timedelta(hours=hour))
 
-    async def test_open_cycle_holds_build_until_its_cutoff(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        temp_data_path: Path,
-    ) -> None:
-        """A window of the still-open current cycle must not deliver early —
-        nothing builds before the data cutoff."""
-        now = datetime.now(timezone.utc)
-        odb_exporter.export_handler(
-            connection, _event(now - timedelta(minutes=30), now)
-        )
+    # poke a 06Z-cycle window (no builds) then a 12Z-cycle window (built)
+    odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+    odb_exporter.export_handler(
+        connection,
+        _event(T0 + timedelta(hours=6), T0 + timedelta(hours=7)),
+    )
 
-        assert not list((temp_data_path / "output").glob("*.odb"))
+    # the built cycle exported despite the empty one being reconciled first
+    assert len(
+        pyodc.read_odb(_cycle_file(tmp_path, "20250101_12"), single=True)
+    ) == 24
+    # the empty 06Z cycle was seen but never stamped built — it will retry
+    assert odb_exporter.store.read_stamp("test", T0 + timedelta(hours=6), "seen")
+    assert odb_exporter.store.read_stamp("test", T0 + timedelta(hours=6), "built") is None
 
-    async def test_next_event_builds_cycles_a_crash_left_behind(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        write_build,
-        temp_data_path: Path,
-    ) -> None:
-        """A crash (or busy burst) can leave a due cycle unbuilt; the seen stamp
-        is durable, so any later event's reconcile sweep picks it up."""
-        await write_build(T0)
-        await write_build(T0 + timedelta(hours=6))
-        await write_build(T0 + timedelta(hours=7))
 
-        interrupted = ODBExporter(
-            odb_exporter.config.model_copy(
-                update={"assembly_quiesce": timedelta(seconds=60)}
-            ),
-            variable_map=TEST_VARIABLE_MAP,
-        )
-        interrupted.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
-
-        cycle_file = _cycle_file(temp_data_path)
-        assert not cycle_file.exists()
-
-        # "restart": a fresh exporter over the same store; an unrelated event's
-        # reconcile sweep delivers the missed cycle too
-        odb_exporter.export_handler(
-            connection, _event(T0 + timedelta(hours=6), T0 + timedelta(hours=7))
-        )
-        assert len(pyodc.read_odb(cycle_file, single=True)) == 4
-
-        # already-current cycles are left untouched by later reconciles
-        before = cycle_file.stat().st_mtime_ns
-        odb_exporter.export_handler(
-            connection, _event(T0 + timedelta(hours=7), T0 + timedelta(hours=8))
-        )
-        assert cycle_file.stat().st_mtime_ns == before
-
-    async def test_quiet_cycle_is_forgotten_but_a_replay_still_delivers_it_whole(
-        self,
-        connection: FakeFlight,
-        write_build,
-        temp_data_path: Path,
-    ) -> None:
-        """Past the revision horizon a cycle's stamps are dropped (hygiene), but
-        the delivered file survives — and a straggler replay after cleanup
-        re-tracks the cycle and rebuilds the full file from store truth, losing
-        nothing."""
-        await write_build(T0)
-        await write_build(T0 + timedelta(hours=1))
-        exporter = ODBExporter(
-            ODBExporterConfig(
-                output_path=temp_data_path / "output",
-                assembly_quiesce=timedelta(0),
-                revision_horizon=timedelta(0),
-            ),
-            variable_map=TEST_VARIABLE_MAP,
-        )
-
-        exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
-        cycle_file = _cycle_file(temp_data_path)
-        assert len(pyodc.read_odb(cycle_file, single=True)) == 8  # both windows
-        assert not _seen_stamp(temp_data_path).exists()  # forgotten
-
+async def test_event_burst_settles_before_building(
+    odb_exporter: ODBExporter,
+    connection: StubFlight,
+    publish,
+    tmp_path: Path,
+) -> None:
+    """A replayed backlog or straggler burst pokes cycles but does not build
+    per event — the cycle waits until it quiesces."""
+    publish(T0)
+    publish(T0 + timedelta(hours=1))
+    exporter = ODBExporter(
+        odb_exporter.config.model_copy(
+            update={"assembly_quiesce": timedelta(seconds=60)}
+        ),
+        variable_map=TEST_VARIABLE_MAP,
+    )
+    for start in (T0, T0 + timedelta(hours=1), T0):  # third = replay
         exporter.export_handler(
-            connection, _event(T0 + timedelta(hours=1), T0 + timedelta(hours=2))
+            connection, _event(start, start + timedelta(hours=1))
         )
-        assert len(pyodc.read_odb(cycle_file, single=True)) == 8  # still whole
 
-    def test_forgetting_an_already_gone_cycle_is_a_noop(
-        self, odb_exporter: ODBExporter
-    ) -> None:
-        """Redelivered or overlapping reconciles race to drop the same cycle's
-        stamps; the second forget is a no-op, not an error."""
-        odb_exporter.store.forget("test", T0)
+    assert not _cycle_file(tmp_path).exists()
 
-    async def test_multi_batch_stream_appends_frames_and_flags_qc(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        sample_ingestion_metadata: IngestionMetadata,
-        arrow_store,
-        temp_data_path: Path,
-    ) -> None:
-        """A window build spanning several batches encodes them in order; only a
-        dataset's *declared* rejected flag values mark a datum rejected — QC
-        vocabularies are per-source (FMI's 1 means good, not bad)."""
-        odb_exporter = ODBExporter(
-            odb_exporter.config.model_copy(update={"rejected_flags": {"test": [3]}}),
-            variable_map=TEST_VARIABLE_MAP,
-        )
-        schema = canonical_arrow_schema(sample_ingestion_metadata)
 
-        def batch(hour: int, flag: int) -> pa.RecordBatch:
-            frame = pd.DataFrame(
-                {
-                    "time": pd.to_datetime([f"2025-01-01T0{hour}:00:00Z"], utc=True),
-                    "lat": [50.7],
-                    "lon": [7.1],
-                    "station_id": ["A"],
-                    "air_temperature": [285.45],
-                    "air_temperature_status_flag": [flag],
-                    "wind_speed": [np.nan],
-                    "air_pressure_at_mean_sea_level": [np.nan],
-                }
-            )
-            columns = {
-                field.name: frame[field.name]
-                if field.name in frame
-                else pd.Series([None], dtype="float64")
-                for field in schema
-            }
-            return pa.RecordBatch.from_pandas(
-                pd.DataFrame(columns), schema=schema, preserve_index=False
-            )
+async def test_open_cycle_holds_build_until_its_cutoff(
+    odb_exporter: ODBExporter,
+    connection: StubFlight,
+    tmp_path: Path,
+) -> None:
+    """A window of the still-open current cycle must not deliver early —
+    nothing builds before the data cutoff."""
+    now = datetime.now(timezone.utc)
+    odb_exporter.export_handler(
+        connection, _event(now - timedelta(minutes=30), now)
+    )
 
-        # two batches under one window build: good (nonzero, not rejected) then poor
-        arrow_store._storage[_build_key(T0)] = [batch(0, 1), batch(1, 3)]
-        odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+    assert not list((tmp_path / "output").glob("*.odb"))
 
-        odb_df = pyodc.read_odb(_cycle_file(temp_data_path), single=True)
-        assert len(odb_df) == 2
 
-        by_time = odb_df.sort_values("time@hdr")
-        # STATUS_t bits: 1 = active, 4 = rejected
-        assert list(by_time["datum_status@body"]) == [1, 4]
-        # the raw source QC code rides along in quality@body
-        assert list(by_time["quality@body"]) == [1, 3]
+async def test_next_event_builds_cycles_a_crash_left_behind(
+    odb_exporter: ODBExporter,
+    connection: StubFlight,
+    publish,
+    tmp_path: Path,
+) -> None:
+    """A crash (or busy burst) can leave a due cycle unbuilt; the seen stamp
+    is durable, so any later event's reconcile sweep picks it up."""
+    publish(T0)
+    publish(T0 + timedelta(hours=6))
+    publish(T0 + timedelta(hours=7))
 
-    async def test_undeclared_qc_vocabulary_rejects_nothing(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        sample_build: str,
-        temp_data_path: Path,
-    ) -> None:
-        """Without a declared vocabulary the flag is uninterpretable — collapse
-        nothing; the raw code in quality@body keeps the information."""
-        odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+    interrupted = ODBExporter(
+        odb_exporter.config.model_copy(
+            update={"assembly_quiesce": timedelta(seconds=60)}
+        ),
+        variable_map=TEST_VARIABLE_MAP,
+    )
+    interrupted.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
 
-        odb_df = pyodc.read_odb(_cycle_file(temp_data_path), single=True)
-        assert set(odb_df["datum_status@body"]) == {1}  # all active
+    cycle_file = _cycle_file(tmp_path)
+    assert not cycle_file.exists()
 
-    async def test_report_identity_is_per_dataset_config(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        sample_build: str,
-        temp_data_path: Path,
-    ) -> None:
-        """A dataset with different provenance is a config entry, not a code
-        change; unlisted datasets keep the crowd-AWS defaults."""
-        config = odb_exporter.config.model_copy(
-            update={
-                "report_identity": {
-                    "test": ReportIdentity(reportype=16002, codetype=11)
-                }
-            }
-        )
-        exporter = ODBExporter(config, variable_map=TEST_VARIABLE_MAP)
-        exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+    # "restart": a fresh exporter over the same store; an unrelated event's
+    # reconcile sweep delivers the missed cycle too
+    odb_exporter.export_handler(
+        connection, _event(T0 + timedelta(hours=6), T0 + timedelta(hours=7))
+    )
+    assert len(pyodc.read_odb(cycle_file, single=True)) == 4
 
-        odb_df = pyodc.read_odb(_cycle_file(temp_data_path), single=True)
-        assert set(odb_df["reportype@hdr"]) == {16002}
-        assert set(odb_df["codetype@hdr"]) == {11}
-        assert set(odb_df["obstype@hdr"]) == {1}  # default retained
+    # already-current cycles are left untouched by later reconciles
+    before = cycle_file.stat().st_mtime_ns
+    odb_exporter.export_handler(
+        connection, _event(T0 + timedelta(hours=7), T0 + timedelta(hours=8))
+    )
+    assert cycle_file.stat().st_mtime_ns == before
 
-    async def test_long_station_ids_become_stable_digests(
-        self,
-        odb_exporter: ODBExporter,
-        connection: FakeFlight,
-        sample_ingestion_metadata: IngestionMetadata,
-        arrow_store_writer,
-        temp_data_path: Path,
-    ) -> None:
-        """An 8-char prefix of a long structured id collides across stations;
-        the exporter digests instead. Short ids pass through untouched."""
-        long_id = "0-250-0-9c8e197789cff89e"
-        df = pd.DataFrame(
+
+async def test_quiet_cycle_is_forgotten_but_a_replay_still_delivers_it_whole(
+    connection: StubFlight,
+    publish,
+    tmp_path: Path,
+) -> None:
+    """Past the revision horizon a cycle's stamps are dropped but the delivered
+    file survives; a straggler replay after cleanup re-tracks the cycle and
+    rebuilds the full file from store truth."""
+    publish(T0)
+    publish(T0 + timedelta(hours=1))
+    exporter = ODBExporter(
+        ODBExporterConfig(
+            output_path=tmp_path / "output",
+            assembly_quiesce=timedelta(0),
+            revision_horizon=timedelta(0),
+        ),
+        variable_map=TEST_VARIABLE_MAP,
+    )
+
+    exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+    cycle_file = _cycle_file(tmp_path)
+    assert len(pyodc.read_odb(cycle_file, single=True)) == 8  # both windows
+    assert not _seen_stamp(tmp_path).exists()  # forgotten
+
+    exporter.export_handler(
+        connection, _event(T0 + timedelta(hours=1), T0 + timedelta(hours=2))
+    )
+    assert len(pyodc.read_odb(cycle_file, single=True)) == 8  # still whole
+
+
+async def test_a_multi_batch_build_encodes_in_order_and_flags_declared_rejects(
+    odb_exporter: ODBExporter,
+    connection: StubFlight,
+    sample_ingestion_metadata: IngestionMetadata,
+    tmp_path: Path,
+) -> None:
+    """A window build spanning several batches encodes them in order. QC
+    vocabularies are per-source: only a dataset's declared rejected flag values
+    mark a datum rejected."""
+    odb_exporter = ODBExporter(
+        odb_exporter.config.model_copy(update={"rejected_flags": {"test": [3]}}),
+        variable_map=TEST_VARIABLE_MAP,
+    )
+    schema = canonical_arrow_schema(sample_ingestion_metadata)
+
+    def batch(hour: int, flag: int) -> pa.RecordBatch:
+        frame = pd.DataFrame(
             {
-                "time": pd.to_datetime(["2025-01-01T00:00:00Z"] * 2, utc=True),
-                "lat": [50.7, 51.7],
-                "lon": [7.1, 7.2],
-                "station_id": ["A", long_id],
-                "air_temperature": [285.45, 286.0],
-                "air_temperature_status_flag": [0.0, 0.0],
-                "wind_speed": [np.nan, np.nan],
-                "air_pressure_at_mean_sea_level": [np.nan, np.nan],
+                "time": pd.to_datetime([f"2025-01-01T0{hour}:00:00Z"], utc=True),
+                "lat": [50.7],
+                "lon": [7.1],
+                "station_id": ["A"],
+                "air_temperature": [285.45],
+                "air_temperature_status_flag": [flag],
+                "wind_speed": [np.nan],
+                "air_pressure_at_mean_sea_level": [np.nan],
             }
         )
-        await arrow_store_writer(
-            _build_key(T0), df, schema=canonical_arrow_schema(sample_ingestion_metadata)
+        columns = {
+            field.name: frame[field.name]
+            if field.name in frame
+            else pd.Series([None], dtype="float64")
+            for field in schema
+        }
+        return pa.RecordBatch.from_pandas(
+            pd.DataFrame(columns), schema=schema, preserve_index=False
         )
 
-        odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+    # two batches under one window build: a passing flag, then a declared-rejected one
+    connection.publish("test", T0, [batch(0, 1), batch(1, 3)])
+    odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
 
-        odb_df = pyodc.read_odb(_cycle_file(temp_data_path), single=True)
-        statids = set(odb_df["statid@hdr"])
-        assert "A" in statids
-        digest = next(s for s in statids if s != "A")
-        assert len(digest) == 8 and not long_id.startswith(digest)
+    odb_df = pyodc.read_odb(_cycle_file(tmp_path), single=True)
+    assert len(odb_df) == 2
+
+    by_time = odb_df.sort_values("time@hdr")
+    # STATUS_t bits: 1 = active, 4 = rejected
+    assert list(by_time["datum_status@body"]) == [1, 4]
+    # the raw source QC code rides along in quality@body
+    assert list(by_time["quality@body"]) == [1, 3]
+
+
+async def test_report_identity_is_per_dataset_config(
+    odb_exporter: ODBExporter,
+    connection: StubFlight,
+    sample_build,
+    tmp_path: Path,
+) -> None:
+    """Report identity comes from per-dataset config; unlisted datasets keep the
+    crowd-AWS defaults."""
+    config = odb_exporter.config.model_copy(
+        update={
+            "report_identity": {
+                "test": ReportIdentity(reportype=16002, codetype=11)
+            }
+        }
+    )
+    exporter = ODBExporter(config, variable_map=TEST_VARIABLE_MAP)
+    exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+
+    odb_df = pyodc.read_odb(_cycle_file(tmp_path), single=True)
+    assert set(odb_df["reportype@hdr"]) == {16002}
+    assert set(odb_df["codetype@hdr"]) == {11}
+    assert set(odb_df["obstype@hdr"]) == {1}  # default retained
+
+
+async def test_long_station_ids_become_stable_digests(
+    odb_exporter: ODBExporter,
+    connection: StubFlight,
+    sample_ingestion_metadata: IngestionMetadata,
+    publish,
+    tmp_path: Path,
+) -> None:
+    """An 8-char prefix of a long structured id collides across stations;
+    the exporter digests instead. Short ids pass through untouched."""
+    long_id = "0-250-0-9c8e197789cff89e"
+    df = pd.DataFrame(
+        {
+            "time": pd.to_datetime(["2025-01-01T00:00:00Z"] * 2, utc=True),
+            "lat": [50.7, 51.7],
+            "lon": [7.1, 7.2],
+            "station_id": ["A", long_id],
+            "air_temperature": [285.45, 286.0],
+            "air_temperature_status_flag": [0.0, 0.0],
+            "wind_speed": [np.nan, np.nan],
+            "air_pressure_at_mean_sea_level": [np.nan, np.nan],
+        }
+    )
+    publish(T0, df)
+
+    odb_exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+
+    odb_df = pyodc.read_odb(_cycle_file(tmp_path), single=True)
+    statids = set(odb_df["statid@hdr"])
+    assert "A" in statids
+    digest = next(s for s in statids if s != "A")
+    assert len(digest) == 8 and not long_id.startswith(digest)
 
 
 @pytest.fixture(scope="module")
@@ -829,8 +719,8 @@ def s3_endpoint():
 
 
 async def test_s3_output_delivers_cycle_files(
-    s3_endpoint, monkeypatch, tmp_path, connection, write_build
-):
+    s3_endpoint, monkeypatch, tmp_path, connection, publish
+    ):
     """The delivered cycle file lands at the S3 prefix root, the union of the
     cycle's window builds."""
     import pyarrow.fs as pafs
@@ -845,8 +735,8 @@ async def test_s3_output_delivers_cycle_files(
     )
     fs.create_dir("odb-test")
 
-    await write_build(T0)
-    await write_build(T0 + timedelta(hours=2))
+    publish(T0)
+    publish(T0 + timedelta(hours=2))
 
     exporter = ODBExporter(
         ODBExporterConfig(

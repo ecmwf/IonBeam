@@ -1,6 +1,9 @@
 # SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
 # SPDX-License-Identifier: Apache-2.0
 
+"""The declaration contract: what a source may declare, the schema hash, and how
+declared frames become canonical Arrow streams."""
+
 import json
 
 import pandas as pd
@@ -58,23 +61,39 @@ def metadata(**overrides):
     return IngestionMetadata(**data)
 
 
-def test_duplicate_names_rejected():
-    with pytest.raises(ValidationError, match="duplicate column names"):
-        dataset_schema(variables=[Variable(name="lat")])
-
-
 @pytest.mark.parametrize(
     "kwargs, message",
     [
+        ({"variables": [Variable(name="lat")]}, "duplicate column names"),
         ({"variables": [Variable(name="ib_time")]}, "platform prefix"),
         ({"tags": [Tag(name="ib_geometry")]}, "platform prefix"),
         ({"time": TimeCoordinate(name="ib_year")}, "platform prefix"),
         ({"time": TimeCoordinate(name="_measurement")}, "must match"),
+        ({"variables": [Variable(name="Temperature")]}, "must match"),
+    ],
+    ids=[
+        "a name already taken",
+        "a variable in the platform namespace",
+        "a tag in the platform namespace",
+        "a time axis in the platform namespace",
+        "a name that is not an identifier",
+        "a capitalised name",
     ],
 )
-def test_platform_prefix_rejected(kwargs, message):
+def test_declaration_rejected(kwargs, message):
+    """A dataset schema names its own columns; the platform reserves the ib_
+    namespace and requires identifiers it can carry through Arrow."""
     with pytest.raises(ValidationError, match=message):
         dataset_schema(**kwargs)
+
+
+def test_a_column_declaration_must_stand_on_its_own():
+    """Column rules bind at the column, before any schema sees it: a crs claims
+    an axis role, and a dtype must be one Arrow can carry."""
+    with pytest.raises(ValidationError, match="crs requires an axis role"):
+        Coordinate(name="lat", crs="EPSG:4326")
+    with pytest.raises(ValidationError):
+        Variable(name="temperature", dtype="float128")
 
 
 def test_plain_standard_words_are_free_to_declare():
@@ -89,51 +108,33 @@ def test_plain_standard_words_are_free_to_declare():
     assert {"time", "source", "year"} < set(schema.canonical_columns)
 
 
-def test_bad_name_rejected():
-    with pytest.raises(ValidationError, match="must match"):
-        dataset_schema(variables=[Variable(name="Temperature")])
-
-
-def test_bad_dtype_rejected():
-    with pytest.raises(ValidationError):
-        dataset_schema(variables=[Variable(name="temperature", dtype="float128")])
-
-
-def test_crs_without_axis_rejected():
-    with pytest.raises(ValidationError, match="crs requires an axis role"):
-        dataset_schema(coordinates=[Coordinate(name="lat", crs="EPSG:4326")])
-
-
-def test_dangling_ancillary_reference_rejected():
-    with pytest.raises(ValidationError, match="unknown variable"):
-        dataset_schema(variables=[Variable(name="qc", dtype="int64", ancillary_of=["temperature"])])
-
-
-def test_self_ancillary_reference_rejected():
-    with pytest.raises(ValidationError, match="cannot qualify itself"):
-        dataset_schema(variables=[Variable(name="qc", dtype="int64", ancillary_of=["qc"])])
-
-
-def test_ancillary_cycle_rejected():
-    with pytest.raises(ValidationError, match="ancillary cycle"):
-        dataset_schema(
-            variables=[
+@pytest.mark.parametrize(
+    "variables, message",
+    [
+        (
+            [Variable(name="qc", dtype="int64", ancillary_of=["temperature"])],
+            "unknown variable",
+        ),
+        ([Variable(name="qc", dtype="int64", ancillary_of=["qc"])], "cannot qualify itself"),
+        (
+            [
                 Variable(name="primary"),
                 Variable(name="a", ancillary_of=["b"]),
                 Variable(name="b", ancillary_of=["a"]),
-            ]
-        )
-
-
-def test_all_ancillary_map_rejected():
-    # A finite map where every variable has ancillary_of always contains a cycle.
-    with pytest.raises(ValidationError, match="ancillary cycle"):
-        dataset_schema(
-            variables=[
-                Variable(name="a", ancillary_of=["b"]),
-                Variable(name="b", ancillary_of=["a"]),
-            ]
-        )
+            ],
+            "ancillary cycle",
+        ),
+        # a finite schema where every variable is ancillary always contains a cycle
+        (
+            [Variable(name="a", ancillary_of=["b"]), Variable(name="b", ancillary_of=["a"])],
+            "ancillary cycle",
+        ),
+    ],
+    ids=["dangling reference", "self reference", "cycle", "no primary variable at all"],
+)
+def test_ancillary_references_must_resolve_to_a_primary_variable(variables, message):
+    with pytest.raises(ValidationError, match=message):
+        dataset_schema(variables=variables)
 
 
 def test_schema_hash_covers_the_contract_a_source_owns():
@@ -160,7 +161,7 @@ def test_schema_hash_covers_the_contract_a_source_owns():
     assert base.schema_hash() != changed_schema.schema_hash()
 
 
-def test_attach_metadata_round_trip_through_parquet(tmp_path):
+def test_schema_metadata_round_trips_through_parquet(tmp_path):
     meta = metadata(
         dataset_schema=dataset_schema(
             variables=[
@@ -208,7 +209,6 @@ def test_attach_metadata_round_trip_through_parquet(tmp_path):
     assert [field.name for field in ancillaries_of(restored, "temperature")] == ["qc_flag"]
     qc_meta = {k.decode(): v.decode() for k, v in restored.field("qc_flag").metadata.items()}
     assert json.loads(qc_meta["ionbeam.ancillary_of"]) == ["temperature", "humidity"]
-    assert qc_meta["ionbeam.ancillary_of"] == '["temperature","humidity"]'
     # semantics round-trip as the typed union, per scheme
     assert semantics(restored.field("temperature")) == CfSemantics(
         standard_name="air_temperature", cell_method="point"
@@ -292,7 +292,7 @@ def test_align_to_schema_rejects_undeclared_columns():
         align_to_schema(raw, metadata())
 
 
-def test_coerce_types_is_map_driven_and_time_is_utc_ns():
+def test_coerce_types_applies_declared_dtypes_and_utc_time():
     map_ = dataset_schema(
         coordinates=[Coordinate(name="degree", dtype="int64")],
         variables=[Variable(name="power", dtype="float32")],

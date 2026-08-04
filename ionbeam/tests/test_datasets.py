@@ -1,6 +1,9 @@
 # SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
 # SPDX-License-Identifier: Apache-2.0
 
+"""Per-dataset build configuration: registry defaults, overrides, and the
+day-nesting rule for aggregation spans."""
+
 from datetime import timedelta
 
 import pytest
@@ -17,10 +20,8 @@ def test_registry_entry_inherits_defaults_and_overrides_per_key():
     )
 
     netatmo = registry.get("netatmo")
-    # inherited from defaults; the per-key override leaves these unchanged
     assert netatmo.aggregation_span == timedelta(hours=1)
     assert netatmo.rebuild_debounce == timedelta(minutes=10)
-    # the override itself
     assert netatmo.dedup_ingestion is True
 
 

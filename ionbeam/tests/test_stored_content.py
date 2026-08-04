@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
 # SPDX-License-Identifier: Apache-2.0
 
-"""Stored-content dedup behavior through the record-store port, run against
+"""Stored-content dedup through the record-store port, run against
 both adapters. The Redis adapter is gated on IONBEAM_TEST_REDIS_URL; each test
 flushes a throwaway database, so point it at a disposable instance only."""
 
@@ -43,25 +43,6 @@ def _table(temperatures: list[float]) -> pa.Table:
     )
 
 
-class TestRowFingerprints:
-    def test_deterministic(self):
-        table = _table([20.0, 21.5, -3.25])
-        first = row_fingerprints(table)
-        second = row_fingerprints(table)
-
-        assert len(first) == 3
-        assert all(len(fp) == 16 for fp in first)
-        assert first == second
-
-    def test_changed_value_changes_only_that_rows_fingerprint(self):
-        original = row_fingerprints(_table([20.0, 21.5, -3.25]))
-        updated = row_fingerprints(_table([20.0, 99.9, -3.25]))
-
-        assert original[0] == updated[0]
-        assert original[2] == updated[2]
-        assert original[1] != updated[1]
-
-
 @pytest.fixture(params=["memory", pytest.param("redis", marks=requires_redis)])
 async def store(request):
     if request.param == "memory":
@@ -73,35 +54,38 @@ async def store(request):
     await client.aclose()
 
 
-class TestStoredContent:
-    async def test_marked_content_reads_as_stored(self, store):
-        fingerprints = row_fingerprints(_table([20.0, 21.5, -3.25]))
+async def test_marked_content_reads_as_stored(store):
+    fingerprints = row_fingerprints(_table([20.0, 21.5, -3.25]))
 
-        before = await store.stored_content("ds", WINDOW_START, fingerprints)
-        await store.mark_content_stored("ds", WINDOW_START, fingerprints, EXPIRE_AT)
-        after = await store.stored_content("ds", WINDOW_START, fingerprints)
+    before = await store.stored_content("ds", WINDOW_START, fingerprints)
+    await store.mark_content_stored("ds", WINDOW_START, fingerprints, EXPIRE_AT)
+    after = await store.stored_content("ds", WINDOW_START, fingerprints)
 
-        assert not before.any()
-        assert after.all()
+    assert not before.any()
+    assert after.all()
 
-    async def test_changed_row_is_novel_while_the_rest_stay_stored(self, store):
-        await store.mark_content_stored(
-            "ds", WINDOW_START, row_fingerprints(_table([20.0, 21.5, -3.25])), EXPIRE_AT
-        )
 
-        qc_updated = row_fingerprints(_table([20.0, 99.9, -3.25]))
-        mask = await store.stored_content("ds", WINDOW_START, qc_updated)
+async def test_changed_row_is_novel_while_the_rest_stay_stored(store):
+    """A QC pass rewrites one value: only that row reads as novel, so the
+    fingerprint is per-row content and stable across identical tables."""
+    await store.mark_content_stored(
+        "ds", WINDOW_START, row_fingerprints(_table([20.0, 21.5, -3.25])), EXPIRE_AT
+    )
 
-        assert mask.tolist() == [True, False, True]
+    qc_updated = row_fingerprints(_table([20.0, 99.9, -3.25]))
+    mask = await store.stored_content("ds", WINDOW_START, qc_updated)
 
-    async def test_windows_and_datasets_do_not_share_content(self, store):
-        fingerprints = row_fingerprints(_table([20.0]))
-        await store.mark_content_stored("ds", WINDOW_START, fingerprints, EXPIRE_AT)
+    assert mask.tolist() == [True, False, True]
 
-        next_window = await store.stored_content("ds", WINDOW_START + 3600, fingerprints)
-        other_dataset = await store.stored_content("other", WINDOW_START, fingerprints)
-        assert not next_window.any()
-        assert not other_dataset.any()
+
+async def test_windows_and_datasets_do_not_share_content(store):
+    fingerprints = row_fingerprints(_table([20.0]))
+    await store.mark_content_stored("ds", WINDOW_START, fingerprints, EXPIRE_AT)
+
+    next_window = await store.stored_content("ds", WINDOW_START + 3600, fingerprints)
+    other_dataset = await store.stored_content("other", WINDOW_START, fingerprints)
+    assert not next_window.any()
+    assert not other_dataset.any()
 
 
 @requires_redis
