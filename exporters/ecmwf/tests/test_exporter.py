@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -36,7 +37,7 @@ from ecmwf import (
     ReportIdentity,
     VarNoMapping,
 )
-from ecmwf.exporter import analysis_time
+from ecmwf.exporter import DTS_TOKEN_VAR, DataTransferService, analysis_time
 
 # Bare quantities: the declarations in the fixtures carry level/cell_method/
 # period, and matching must be agnostic to that source flavor.
@@ -707,6 +708,41 @@ async def test_long_station_ids_become_stable_digests(
     assert len(digest) == 8 and not long_id.startswith(digest)
 
 
+@pytest.fixture
+def dts_api():
+    """A stand-in DTS API recording the transfers it is asked for; ``refuse``
+    turns it into an unavailable one."""
+    import json as json_
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    asked: list[dict] = []
+    state = {"refuse": False}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            asked.append(
+                {
+                    "path": self.path,
+                    "authorization": self.headers.get("Authorization"),
+                    "body": json_.loads(body),
+                }
+            )
+            self.send_response(503 if state["refuse"] else 202)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}", asked, state
+    server.shutdown()
+
+
 @pytest.fixture(scope="module")
 def s3_endpoint():
     from moto.server import ThreadedMotoServer
@@ -719,16 +755,20 @@ def s3_endpoint():
 
 
 async def test_s3_output_delivers_cycle_files(
-    s3_endpoint, monkeypatch, tmp_path, connection, publish
+    s3_endpoint, dts_api, monkeypatch, tmp_path, connection, publish
     ):
     """The delivered cycle file lands at the S3 prefix root, the union of the
-    cycle's window builds."""
+    cycle's window builds, and each publish requests its transfer by object
+    key."""
     import pyarrow.fs as pafs
 
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.setenv("AWS_ENDPOINT_URL_S3", s3_endpoint)
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+
+    dts_url, asked, dts_state = dts_api
+    monkeypatch.setenv(DTS_TOKEN_VAR, "robot-token")
 
     fs = pafs.S3FileSystem(
         endpoint_override=s3_endpoint, region="us-east-1", allow_bucket_creation=True
@@ -740,7 +780,13 @@ async def test_s3_output_delivers_cycle_files(
 
     exporter = ODBExporter(
         ODBExporterConfig(
-            output_path="s3://odb-test/odb", assembly_quiesce=timedelta(0)
+            output_path="s3://odb-test/odb",
+            assembly_quiesce=timedelta(0),
+            dts=DataTransferService(
+                api_url=f"{dts_url}/api/v2",
+                source="ionbeam-odb",
+                destination="ionbeam-perm",
+            ),
         ),
         variable_map=TEST_VARIABLE_MAP,
     )
@@ -755,3 +801,28 @@ async def test_s3_output_delivers_cycle_files(
     odb_df = pyodc.read_odb(local, single=True)
     assert len(odb_df) == 8  # 4 mapped values per window, two windows
     assert set(odb_df["varno@body"]) == {39, 108, 112}
+
+    assert asked and all(
+        request["path"] == "/api/v2/dataset-transfers"
+        and request["authorization"] == "Bearer robot-token"
+        and request["body"]
+        == {
+            "source": {
+                "id": "ionbeam-odb",
+                "query": {"target": "odb/test_20250101_06.odb"},
+            },
+            "destination": {"id": "ionbeam-perm"},
+        }
+        for request in asked
+    )
+
+    built_before = fs.open_input_stream(
+        "odb-test/odb/cycles/test/20250101_06.built"
+    ).read()
+    dts_state["refuse"] = True
+    with pytest.raises(httpx.HTTPStatusError):
+        exporter.export_handler(connection, _event(T0, T0 + timedelta(hours=1)))
+    assert (
+        fs.open_input_stream("odb-test/odb/cycles/test/20250101_06.built").read()
+        == built_before
+    )

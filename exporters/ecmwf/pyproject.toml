@@ -12,6 +12,7 @@ dependencies = [
     "cf-units>=3.3.0",
     "pyodc>=1.6.0",
     "click>=8.1.0",
+    "httpx>=0.28.0",
 ]
 
 [tool.uv.sources]

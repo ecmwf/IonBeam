@@ -29,12 +29,13 @@ from typing import BinaryIO, Dict, Generator, List, Optional
 
 import cf_units
 import codc
+import httpx
 import pandas as pd
 import pyarrow as pa
 import pyarrow.fs as pafs
 import structlog
 from pyarrow import flight
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from ionbeam_client import AvailableDataset
 from ionbeam_client.models import CfSemantics, Semantics
@@ -70,11 +71,26 @@ class ReportIdentity(BaseModel):
     groupid: int = 17  # conventional data
 
 
+class DataTransferService(BaseModel):
+    """The service that moves a published cycle onward to sites that cannot
+    reach this object store."""
+
+    api_url: str
+    # DTS datastore ids: the one exposing this exporter's bucket, and the one
+    # the cycle is delivered into.
+    source: str
+    destination: str
+    timeout: float = 30.0
+
+
 class ODBExporterConfig(BaseModel):
     """Configuration for ODB exporter."""
 
     # A local directory or an S3 prefix (s3://bucket/prefix).
     output_path: str
+    # Unset leaves cycles where they are published, for deployments with no
+    # onward delivery.
+    dts: Optional[DataTransferService] = None
     # schemes this exporter registers for; None accepts any. A dataset whose
     # primary variables declare no semantics in these schemes is skipped whole.
     scheme_filter: Optional[List[str]] = None
@@ -96,8 +112,36 @@ class ODBExporterConfig(BaseModel):
     def _path_to_str(cls, value):
         return str(value)
 
+    @model_validator(mode="after")
+    def _transfers_need_an_object_store(self) -> "ODBExporterConfig":
+        if self.dts is not None and not self.output_path.startswith("s3://"):
+            raise ValueError(
+                "dts addresses cycles by object key, so output_path must be an "
+                f"s3:// prefix; got {self.output_path}"
+            )
+        return self
+
 
 _COPY_CHUNK = 1 << 20
+
+DTS_TOKEN_VAR = "DTS_API_TOKEN"
+
+
+def request_transfer(service: DataTransferService, object_key: str) -> None:
+    """Ask for one published cycle to be transferred, overwriting whatever was
+    transferred for that cycle before. Raises on refusal: the caller has
+    published but not stamped, so the redelivered event rebuilds and asks
+    again."""
+    response = httpx.post(
+        f"{service.api_url}/dataset-transfers",
+        json={
+            "source": {"id": service.source, "query": {"target": object_key}},
+            "destination": {"id": service.destination},
+        },
+        headers={"Authorization": f"Bearer {os.environ[DTS_TOKEN_VAR]}"},
+        timeout=service.timeout,
+    )
+    response.raise_for_status()
 
 
 class OdbStore:
@@ -122,6 +166,11 @@ class OdbStore:
 
     def cycle_key(self, dataset: str, analysis: datetime) -> str:
         return f"{self.root}/{dataset}_{analysis:%Y%m%d_%H}.odb"
+
+    def object_key(self, cycle_key: str) -> str:
+        """A cycle's key within its bucket, which is how anything reading the
+        bucket addresses it — ``self.root`` leads with the bucket name."""
+        return cycle_key.split("/", 1)[1]
 
     def _stamp_key(self, dataset: str, analysis: datetime, kind: str) -> str:
         return f"{self.root}/cycles/{dataset}/{analysis:%Y%m%d_%H}.{kind}"
@@ -673,6 +722,9 @@ class ODBExporter:
             out.seek(0)
             cycle_key = self.store.cycle_key(dataset, analysis)
             self.store.publish(cycle_key, out)
+
+        if self.config.dts is not None:
+            request_transfer(self.config.dts, self.store.object_key(cycle_key))
 
         self.logger.info(
             "Built cycle", dataset=dataset, cycle=cycle_key, rows=total_rows
