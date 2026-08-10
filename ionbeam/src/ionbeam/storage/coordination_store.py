@@ -3,7 +3,7 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import redis.asyncio as redis
@@ -41,8 +41,12 @@ class CoordinationStore(ABC):
         pass
 
     @abstractmethod
-    async def get_ingestion_records(self, dataset: str) -> List[IngestionRecord]:
-        """Get all ingestion records for a dataset."""
+    async def get_ingestion_records(
+        self, dataset: str, record_ids: Sequence[str]
+    ) -> List[IngestionRecord]:
+        """The named records. A build folds a known record set, so the read is
+        keyed: a dataset's whole population spans the retention horizon and is
+        far larger than any one window's."""
         pass
 
     @abstractmethod
@@ -51,8 +55,12 @@ class CoordinationStore(ABC):
         pass
 
     @abstractmethod
-    async def get_coverage_claims(self, dataset: str) -> List[CoverageClaim]:
-        """Get all coverage claims for a dataset."""
+    async def get_coverage_spans(
+        self, dataset: str, start: datetime, end: datetime
+    ) -> List[Tuple[datetime, datetime]]:
+        """The swept intervals overlapping ``[start, end]``. A build decision is
+        a question about one window, so coverage is read over that window rather
+        than over the dataset's whole history."""
         pass
 
     @abstractmethod
@@ -173,6 +181,12 @@ class RedisCoordinationStore(CoordinationStore):
             )
             return None
 
+    def _coverage_key(self, dataset: str) -> str:
+        return f"ionbeam:coverage:{dataset}"
+
+    def _coverage_maxspan_key(self, dataset: str) -> str:
+        return f"ionbeam:coverage_maxspan:{dataset}"
+
     def _coverage_claim_key(self, dataset: str, claim_id: str) -> str:
         return f"ionbeam:coverage_claims:{dataset}:{claim_id}"
 
@@ -181,24 +195,52 @@ class RedisCoordinationStore(CoordinationStore):
         await self.client.set(key, record.model_dump_json(), ex=self._ttl)
 
     async def save_coverage_claim(self, dataset: str, claim: CoverageClaim) -> None:
-        key = self._coverage_claim_key(dataset, str(claim.id))
-        await self.client.set(key, claim.model_dump_json(), ex=self._ttl)
+        # Coverage is the union of swept intervals: a claim's identity and
+        # arrival never enter a decision, so the span alone is stored and
+        # repeated sweeps of one interval collapse to a single member.
+        start = claim.start_time.timestamp()
+        end = claim.end_time.timestamp()
+        floor = datetime.now(timezone.utc).timestamp() - self._ttl
+        key = self._coverage_key(dataset)
+        maxspan_key = self._coverage_maxspan_key(dataset)
 
-    async def get_coverage_claims(self, dataset: str) -> List[CoverageClaim]:
-        pattern = f"ionbeam:coverage_claims:{dataset}:*"
-        keys = [key async for key in self.client.scan_iter(match=pattern, count=500)]
-        if not keys:
-            return []
-        values = await self.client.mget(keys)
-        return [
-            CoverageClaim.model_validate_json(value.decode("utf-8"))
-            for value in values
-            if value is not None
-        ]
+        pipe = self.client.pipeline()
+        pipe.zadd(key, {f"{start}|{end}": start})
+        pipe.zremrangebyscore(key, "-inf", floor)
+        pipe.expire(key, self._ttl)
+        # The widest span seen bounds how far back a read must look for an
+        # interval that starts before a window and reaches into it. GT keeps it
+        # monotonic without a read-modify-write between replicas.
+        pipe.zadd(maxspan_key, {"max": end - start}, gt=True)
+        pipe.expire(maxspan_key, self._ttl)
+        await pipe.execute()
 
-    async def get_ingestion_records(self, dataset: str) -> List[IngestionRecord]:
-        pattern = f"ionbeam:ingestion_records:{dataset}:*"
-        keys = [key async for key in self.client.scan_iter(match=pattern, count=500)]
+    async def get_coverage_spans(
+        self, dataset: str, start: datetime, end: datetime
+    ) -> List[Tuple[datetime, datetime]]:
+        maxspan = await self.client.zscore(self._coverage_maxspan_key(dataset), "max")
+        lo = start.timestamp() - (maxspan or 0.0)
+        members = await self.client.zrangebyscore(
+            self._coverage_key(dataset), lo, end.timestamp()
+        )
+        spans: List[Tuple[datetime, datetime]] = []
+        for member in members:
+            span_start, _, span_end = member.decode("utf-8").partition("|")
+            span_start, span_end = float(span_start), float(span_end)
+            if span_end < start.timestamp():
+                continue
+            spans.append(
+                (
+                    datetime.fromtimestamp(span_start, timezone.utc),
+                    datetime.fromtimestamp(span_end, timezone.utc),
+                )
+            )
+        return spans
+
+    async def get_ingestion_records(
+        self, dataset: str, record_ids: Sequence[str]
+    ) -> List[IngestionRecord]:
+        keys = [self._ingestion_record_key(dataset, rid) for rid in record_ids]
         if not keys:
             return []
 

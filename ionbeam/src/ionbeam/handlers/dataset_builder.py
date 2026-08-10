@@ -187,7 +187,9 @@ class DatasetBuilder:
                 await self._settle(window)
                 return
 
-            records = await self.record_store.get_ingestion_records(window.dataset)
+            records = await self.record_store.get_ingestion_records(
+                window.dataset, desired.ids
+            )
             if not records:
                 self.logger.warning("No metadata available", window=window.dataset_key)
                 await self._defer_window(window, "missing_metadata")

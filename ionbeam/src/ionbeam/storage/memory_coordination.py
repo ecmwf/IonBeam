@@ -3,7 +3,7 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -26,7 +26,7 @@ class InMemoryCoordinationStore(CoordinationStore):
 
     def __init__(self, retention: timedelta = timedelta(days=7)):
         self._records: dict[str, IngestionRecord] = {}
-        self._claims: dict[str, dict[str, CoverageClaim]] = {}
+        self._claims: dict[str, set[tuple[datetime, datetime]]] = {}
         self._registered_metadata: dict[str, RegisteredDatasetMetadata] = {}
         self._desired_records: dict[str, set[str]] = {}
         self._window_states: dict[str, WindowBuildState] = {}
@@ -42,16 +42,25 @@ class InMemoryCoordinationStore(CoordinationStore):
     async def save_ingestion_record(self, record: IngestionRecord) -> None:
         self._records[f"ingestion_records:{record.metadata.name}:{record.id}"] = record
 
-    async def get_ingestion_records(self, dataset: str) -> List[IngestionRecord]:
-        prefix = f"ingestion_records:{dataset}:"
-        return [record for key, record in self._records.items() if key.startswith(prefix)]
+    async def get_ingestion_records(
+        self, dataset: str, record_ids: Sequence[str]
+    ) -> List[IngestionRecord]:
+        keys = (f"ingestion_records:{dataset}:{rid}" for rid in record_ids)
+        return [self._records[key] for key in keys if key in self._records]
 
     async def save_coverage_claim(self, dataset: str, claim: CoverageClaim) -> None:
-        self._claims.setdefault(dataset, {})[str(claim.id)] = claim
+        self._claims.setdefault(dataset, set()).add(
+            (claim.start_time, claim.end_time)
+        )
 
-    async def get_coverage_claims(self, dataset: str) -> List[CoverageClaim]:
-        return list(self._claims.get(dataset, {}).values())
-
+    async def get_coverage_spans(
+        self, dataset: str, start: datetime, end: datetime
+    ) -> List[Tuple[datetime, datetime]]:
+        return [
+            span
+            for span in self._claims.get(dataset, set())
+            if span[1] >= start and span[0] <= end
+        ]
     async def get_desired_record_ids(self, window: Window) -> List[str]:
         return sorted(self._desired_records.get(window.dataset_key, set()))
 

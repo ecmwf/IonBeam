@@ -145,32 +145,35 @@ class RecordSet:
 
 @dataclass
 class CoverageAnalysis:
-    claims: List[CoverageClaim]
+    """Coverage over some interval, as the spans that were swept. A decision
+    reads only the spans overlapping the window it is deciding, so gaps here
+    are those inside the analysed interval, not the dataset's whole history."""
+
+    spans: List[Tuple[datetime, datetime]]
     overall_start: Optional[datetime]
     overall_end: Optional[datetime]
     gaps: List[Tuple[datetime, datetime]]
 
     @classmethod
-    def of(cls, claims: List[CoverageClaim]) -> "CoverageAnalysis":
-        """Overall span and internal gaps of a dataset's coverage claims."""
-        if not claims:
+    def of(cls, spans: List[Tuple[datetime, datetime]]) -> "CoverageAnalysis":
+        """Overall span and internal gaps of a set of swept intervals."""
+        if not spans:
             return cls([], None, None, [])
 
-        sorted_claims = sorted(claims, key=lambda e: (e.start_time, e.end_time))
-        overall_start = sorted_claims[0].start_time
-        overall_end = max(e.end_time for e in sorted_claims)
+        ordered = sorted(spans)
+        overall_start = ordered[0][0]
+        overall_end = max(end for _, end in ordered)
 
         gaps = []
-        coverage_end = sorted_claims[0].end_time
+        coverage_end = ordered[0][1]
         min_gap = timedelta(seconds=1)
 
-        for claim in sorted_claims[1:]:
-            if claim.start_time > coverage_end:
-                if claim.start_time - coverage_end > min_gap:
-                    gaps.append((coverage_end, claim.start_time))
-            coverage_end = max(coverage_end, claim.end_time)
+        for span_start, span_end in ordered[1:]:
+            if span_start > coverage_end and span_start - coverage_end > min_gap:
+                gaps.append((coverage_end, span_start))
+            coverage_end = max(coverage_end, span_end)
 
-        return cls(sorted_claims, overall_start, overall_end, gaps)
+        return cls(ordered, overall_start, overall_end, gaps)
 
     def has_gap_in_window(self, window: Window) -> bool:
         return any(
@@ -178,13 +181,13 @@ class CoverageAnalysis:
             for gap_start, gap_end in self.gaps
         )
 
-    def claims_in_window(self, window: Window) -> List[CoverageClaim]:
-        return [e for e in self.claims if window.overlaps(e.start_time, e.end_time)]
+    def spans_in_window(self, window: Window) -> List[Tuple[datetime, datetime]]:
+        return [span for span in self.spans if window.overlaps(*span)]
 
     def fully_covers(self, window: Window) -> bool:
-        covering = self.claims_in_window(window)
+        covering = self.spans_in_window(window)
         if not covering:
             return False
-        earliest = min(e.start_time for e in covering)
-        latest = max(e.end_time for e in covering)
+        earliest = min(start for start, _ in covering)
+        latest = max(end for _, end in covering)
         return earliest <= window.start and latest >= window.end

@@ -335,3 +335,39 @@ async def test_reconnecting_leaves_one_consumer_per_subscriber():
     consumers = await client.xinfo_consumers("ionbeam:datasets", "odb")
     assert [c["name"] for c in consumers] == [b"exporter-1"]
     await client.aclose()
+
+
+@requires_redis
+async def test_coverage_read_finds_a_span_starting_long_before_the_window():
+    """Coverage is read over the window being decided, and a sweep can start
+    well before it — a long backfill covering days reaches into an hour-long
+    window whose range it does not begin in."""
+    from datetime import timedelta as _td
+
+    from ionbeam.provenance import CoverageClaim as _Claim
+    from ionbeam.storage.coordination_store import RedisCoordinationStore
+
+    client = redis.from_url(REDIS_URL)
+    await client.flushdb()
+    store = RedisCoordinationStore(client, retention=_td(days=21))
+
+    # inside the retention floor, which the write prunes below
+    recent = datetime.now(timezone.utc) - _td(days=5)
+    backfill_start = recent
+    backfill_end = recent + _td(days=4)
+    await store.save_coverage_claim(
+        "weather",
+        _Claim(
+            id=uuid4(),
+            start_time=backfill_start,
+            end_time=backfill_end,
+            arrived_at=backfill_end,
+        ),
+    )
+
+    window_start = recent + _td(days=3)
+    spans = await store.get_coverage_spans(
+        "weather", window_start, window_start + _td(hours=1)
+    )
+    assert spans == [(backfill_start, backfill_end)]
+    await client.aclose()

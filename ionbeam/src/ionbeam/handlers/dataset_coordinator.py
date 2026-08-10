@@ -186,8 +186,13 @@ class DatasetCoordinator:
                 window, [str(window_record.id)]
             )
 
+        windows = self._spanned_windows(event, production.aggregation_span)
         coverage = self._analyze_coverage(
-            await self.record_store.get_coverage_claims(dataset)
+            await self.record_store.get_coverage_spans(
+                dataset,
+                min(window.start for window in windows),
+                max(window.end for window in windows),
+            )
         )
         gate = Gate(
             now=datetime.now(timezone.utc),
@@ -196,11 +201,13 @@ class DatasetCoordinator:
             retention=self.config.retention,
         )
 
-        for window in self._spanned_windows(event, production.aggregation_span):
+        for window in windows:
             await self._process_window(window, coverage, gate)
 
-    def _analyze_coverage(self, claims: list[CoverageClaim]) -> CoverageAnalysis:
-        coverage = CoverageAnalysis.of(claims)
+    def _analyze_coverage(
+        self, spans: list[tuple[datetime, datetime]]
+    ) -> CoverageAnalysis:
+        coverage = CoverageAnalysis.of(spans)
         for gap_start, gap_end in coverage.gaps:
             self.logger.warning(
                 "Data gap detected",
