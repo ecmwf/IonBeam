@@ -69,7 +69,7 @@ class EventBus(ABC):
 
     @abstractmethod
     async def subscribe_triggers(
-        self, source_name: str
+        self, source_name: str, subscriber: Optional[str] = None
     ) -> Subscription[StartSourceCommand]:
         ...
 
@@ -79,6 +79,9 @@ class EventBus(ABC):
 
     @abstractmethod
     async def subscribe_datasets(
-        self, exporter_name: str, datasets: Optional[Set[str]] = None
+        self,
+        exporter_name: str,
+        datasets: Optional[Set[str]] = None,
+        subscriber: Optional[str] = None,
     ) -> Subscription[DataSetAvailableEvent]:
         """Subscribe to dataset availability, optionally filtered by dataset name."""

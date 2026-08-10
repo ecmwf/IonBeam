@@ -248,25 +248,38 @@ class IonbeamFlightServer(flight.FlightServerBase):
         op = cmd.get("op")
         if op == "await_triggers":
             with self._metrics.track_subscription(op):
-                self._stream_triggers(context, cmd["source_name"], reader, writer)
+                self._stream_triggers(
+                    context, cmd["source_name"], cmd.get("subscriber"), reader, writer
+                )
         elif op == "await_datasets":
             with self._metrics.track_subscription(op):
                 datasets = set(cmd["datasets"]) if cmd.get("datasets") else None
                 self._stream_datasets(
-                    context, cmd["exporter_name"], datasets, reader, writer
+                    context,
+                    cmd["exporter_name"],
+                    datasets,
+                    cmd.get("subscriber"),
+                    reader,
+                    writer,
                 )
         else:
             with self._metrics.track("unknown"):
                 raise flight.FlightServerError(f"do_exchange unknown op {op!r}")
 
-    def _stream_triggers(self, context, source_name, reader, writer):
-        subscription = self._run(self._core.subscribe_triggers(source_name))
+    def _stream_triggers(self, context, source_name, subscriber, reader, writer):
+        subscription = self._run(
+            self._core.subscribe_triggers(source_name, subscriber)
+        )
         self._pump(
             context, subscription, reader, writer, TRIGGER_SCHEMA, self._trigger_batch
         )
 
-    def _stream_datasets(self, context, exporter_name, datasets, reader, writer):
-        subscription = self._run(self._core.subscribe_datasets(exporter_name, datasets))
+    def _stream_datasets(
+        self, context, exporter_name, datasets, subscriber, reader, writer
+    ):
+        subscription = self._run(
+            self._core.subscribe_datasets(exporter_name, datasets, subscriber)
+        )
         self._pump(
             context,
             subscription,

@@ -53,7 +53,9 @@ class InMemoryEventBus(EventBus):
         for sub in list(self._trigger_subs.get(command.source_name, [])):
             sub.deliver(command)
 
-    async def subscribe_triggers(self, source_name: str) -> Subscription:
+    async def subscribe_triggers(
+        self, source_name: str, subscriber: Optional[str] = None
+    ) -> Subscription:
         def unregister(sub):
             self._trigger_subs.get(source_name, []).remove(sub)
 
@@ -67,7 +69,10 @@ class InMemoryEventBus(EventBus):
                 sub.deliver(event)
 
     async def subscribe_datasets(
-        self, exporter_name: str, datasets: Optional[Set[str]] = None
+        self,
+        exporter_name: str,
+        datasets: Optional[Set[str]] = None,
+        subscriber: Optional[str] = None,
     ) -> Subscription:
         entry_holder = {}
 

@@ -74,9 +74,15 @@ def _trigger_stream(source_name: str) -> str:
 class _StreamSubscription(Subscription[T], Generic[T]):
     """One consumer in a consumer group, reading a stream with a blocking cursor.
 
-    Reads new entries (``>``) but first reclaims any left pending by a dead
-    consumer, so nothing read by an interrupted subscriber is lost. An entry is
-    acked only after the caller confirms delivery via :meth:`ack`."""
+    Reads its own pending entries first, then new ones (``>``), and reclaims any
+    left pending by a consumer that stopped, so nothing read by an interrupted
+    subscriber is lost. An entry is acked only after the caller confirms
+    delivery via :meth:`ack`.
+
+    ``consumer`` names the subscriber process, not this connection: a subscriber
+    that reconnects takes back its own pending entries immediately, where a
+    per-connection name could only recover them through the reclaim idle
+    threshold. Replicas pass distinct names and so hold distinct entries."""
 
     def __init__(
         self,
@@ -87,17 +93,19 @@ class _StreamSubscription(Subscription[T], Generic[T]):
         metrics: EventBusMetrics,
         matches: Optional[Callable[[T], bool]] = None,
         reclaim_min_idle_ms: int = _RECLAIM_MIN_IDLE_MS,
+        consumer: Optional[str] = None,
     ):
         self._client = client
         self._stream = stream
         self._group = group
-        self._consumer = uuid4().hex
+        self._consumer = consumer or uuid4().hex
         self._parse = parse
         self._metrics = metrics
         self._matches = matches
         self._reclaim_min_idle_ms = reclaim_min_idle_ms
         self._delivered_unacked: Optional[bytes] = None
         self._reclaim_cursor = b"0-0"
+        self._own_pending_drained = False
 
     async def next(self, timeout: float) -> Optional[T]:
         loop = asyncio.get_running_loop()
@@ -121,6 +129,17 @@ class _StreamSubscription(Subscription[T], Generic[T]):
             await self.ack()
 
     async def _read_new(self, block_ms: int):
+        # Entries this consumer was delivered but never acked — a reconnect
+        # inherits them under the same name. Reading id 0 returns them without
+        # blocking; an empty read means the backlog is drained for good.
+        if not self._own_pending_drained:
+            entries = await self._client.xreadgroup(
+                self._group, self._consumer, {self._stream: "0"}, count=1
+            )
+            messages = entries[0][1] if entries else []
+            if messages:
+                return messages[0]
+            self._own_pending_drained = True
         entries = await self._client.xreadgroup(
             self._group,
             self._consumer,
@@ -209,7 +228,7 @@ class RedisStreamsEventBus(EventBus):
         await self._publish(_trigger_stream(command.source_name), command.model_dump_json())
 
     async def subscribe_triggers(
-        self, source_name: str
+        self, source_name: str, subscriber: Optional[str] = None
     ) -> Subscription[StartSourceCommand]:
         stream = _trigger_stream(source_name)
         await self._ensure_group(stream, source_name)
@@ -221,13 +240,17 @@ class RedisStreamsEventBus(EventBus):
             StartSourceCommand.model_validate_json,
             self._metrics,
             reclaim_min_idle_ms=self._reclaim_min_idle_ms,
+            consumer=subscriber,
         )
 
     async def publish_dataset_available(self, event: DataSetAvailableEvent) -> None:
         await self._publish(DATASET_STREAM, event.model_dump_json())
 
     async def subscribe_datasets(
-        self, exporter_name: str, datasets: Optional[Set[str]] = None
+        self,
+        exporter_name: str,
+        datasets: Optional[Set[str]] = None,
+        subscriber: Optional[str] = None,
     ) -> Subscription[DataSetAvailableEvent]:
         await self._ensure_group(DATASET_STREAM, exporter_name)
         await self._reap_dead_consumers(DATASET_STREAM, exporter_name)
@@ -240,6 +263,7 @@ class RedisStreamsEventBus(EventBus):
             self._metrics,
             matches,
             reclaim_min_idle_ms=self._reclaim_min_idle_ms,
+            consumer=subscriber,
         )
 
     async def _publish(self, stream: str, payload: str) -> None:

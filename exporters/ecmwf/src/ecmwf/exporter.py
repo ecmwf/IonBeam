@@ -606,6 +606,12 @@ class ODBExporter:
         cycle is handled (whether or not it yielded rows), ``False`` when its
         range holds no current build yet — the caller leaves such a cycle
         unstamped so it retries."""
+        # odc holds its settings in a per-thread singleton whose integers-as-
+        # doubles default is on, and codc clears it only for the thread that
+        # imported it. An encode on any other thread reinterprets the int64
+        # buffers as doubles, collapsing every integer column to a constant 0
+        # without raising. Builds run on the client's subscription thread.
+        codc.lib.lib.odc_integer_behaviour(codc.lib.lib.ODC_INTEGERS_AS_LONGS)
         descriptor = flight.FlightDescriptor.for_command(
             json.dumps(
                 {

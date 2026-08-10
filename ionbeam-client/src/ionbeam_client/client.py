@@ -187,6 +187,12 @@ class IonbeamClient:
         self._subscriptions: List[_FlightSubscription] = []
         self._registered_datasets: dict[str, str] = {}
         self._connected = False
+        # Names this process to the server's consumer group for the lifetime of
+        # the client, across reconnects: a subscription that drops takes back
+        # its own unacked events on reattach instead of waiting out the bus's
+        # reclaim threshold. Replicas generate distinct ids and so never share
+        # pending work.
+        self._subscriber_id = uuid4().hex
 
     async def __aenter__(self) -> "IonbeamClient":
         await self.connect()
@@ -408,7 +414,11 @@ class IonbeamClient:
             _FlightSubscription(
                 name=f"triggers-{source_name}",
                 url=self.config.flight_url,
-                command={"op": "await_triggers", "source_name": source_name},
+                command={
+                    "op": "await_triggers",
+                    "source_name": source_name,
+                    "subscriber": self._subscriber_id,
+                },
                 on_batch=on_batch,
                 retry_delay=self.config.retry_delay,
                 shutdown_timeout=self.config.shutdown_timeout,
@@ -467,7 +477,11 @@ class IonbeamClient:
                 raise
             return str(event.id)
 
-        command = {"op": "await_datasets", "exporter_name": exporter_name}
+        command = {
+            "op": "await_datasets",
+            "exporter_name": exporter_name,
+            "subscriber": self._subscriber_id,
+        }
         if dataset_filter:
             command["datasets"] = sorted(dataset_filter)
 

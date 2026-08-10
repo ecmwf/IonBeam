@@ -293,3 +293,45 @@ async def test_poison_event_is_dropped_after_max_deliveries():
         == 1
     )
     await client.aclose()
+
+
+@requires_redis
+async def test_a_reconnecting_subscriber_takes_back_its_own_pending_event():
+    """A subscriber whose connection drops mid-handler leaves its event pending.
+    Reattaching under the same identity redelivers it at once: the reclaim
+    threshold covers a subscriber that never comes back, and waiting it out
+    would stall every reconnect."""
+    client = redis.from_url(REDIS_URL)
+    await client.flushdb()
+    bus = RedisStreamsEventBus(client, EventBusMetrics(CollectorRegistry()))
+
+    sub = await bus.subscribe_datasets("odb", subscriber="exporter-1")
+    await bus.publish_dataset_available(_dataset_event("weather"))
+    assert (await sub.next(2.0)).metadata.name == "weather"
+    await sub.close()  # drops without ack
+
+    again = await bus.subscribe_datasets("odb", subscriber="exporter-1")
+    redelivered = await again.next(2.0)
+    assert redelivered.metadata.name == "weather"
+    await again.ack()
+    await again.close()
+    await client.aclose()
+
+
+@requires_redis
+async def test_reconnecting_leaves_one_consumer_per_subscriber():
+    """Reconnects name the same consumer, so a group's consumer list tracks
+    subscribers rather than growing with every dropped connection."""
+    client = redis.from_url(REDIS_URL)
+    await client.flushdb()
+    bus = RedisStreamsEventBus(client, EventBusMetrics(CollectorRegistry()))
+
+    for _ in range(3):
+        sub = await bus.subscribe_datasets("odb", subscriber="exporter-1")
+        await bus.publish_dataset_available(_dataset_event("weather"))
+        assert (await sub.next(2.0)).metadata.name == "weather"
+        await sub.close()  # drops without ack, leaving the entry pending
+
+    consumers = await client.xinfo_consumers("ionbeam:datasets", "odb")
+    assert [c["name"] for c in consumers] == [b"exporter-1"]
+    await client.aclose()

@@ -117,14 +117,19 @@ class IonbeamCore:
         return window_end + self._builder.config.retention
 
     async def subscribe_triggers(
-        self, source_name: str
+        self, source_name: str, subscriber: Optional[str] = None
     ) -> Subscription[StartSourceCommand]:
-        return await self._event_bus.subscribe_triggers(source_name)
+        return await self._event_bus.subscribe_triggers(source_name, subscriber)
 
     async def subscribe_datasets(
-        self, exporter_name: str, datasets: Optional[Set[str]] = None
+        self,
+        exporter_name: str,
+        datasets: Optional[Set[str]] = None,
+        subscriber: Optional[str] = None,
     ) -> Subscription[DataSetAvailableEvent]:
-        return await self._event_bus.subscribe_datasets(exporter_name, datasets)
+        return await self._event_bus.subscribe_datasets(
+            exporter_name, datasets, subscriber
+        )
 
     async def trigger_source(
         self,

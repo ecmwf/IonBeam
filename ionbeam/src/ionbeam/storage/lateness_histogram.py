@@ -15,8 +15,8 @@ import math
 import numpy as np
 
 BASE = 1.2
-# BASE**(MAX_BUCKET + 1) ≈ 10 days; anything later shares the top bucket
-MAX_BUCKET = 74
+# BASE**(MAX_BUCKET + 1) ≈ 30 days; anything later shares the top bucket
+MAX_BUCKET = 80
 
 _LOG_BASE = math.log(BASE)
 

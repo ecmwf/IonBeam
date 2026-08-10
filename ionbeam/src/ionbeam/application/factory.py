@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import signal
+import socket
 import threading
 from datetime import timedelta
 from typing import NamedTuple
@@ -17,6 +18,7 @@ import yaml
 from prometheus_client import (
     CollectorRegistry,
     GCCollector,
+    Info,
     PlatformCollector,
     ProcessCollector,
     start_http_server,
@@ -84,11 +86,32 @@ def parse_retention(value: str) -> timedelta:
     return timedelta(**{_RETENTION_UNITS[match.group(2)]: int(match.group(1))})
 
 
+def reject_windows_beyond_retention(
+    schedules: list[SourceSchedule], retention: timedelta
+) -> None:
+    """InfluxDB expires rows by observation time, and accepts a write of already
+    expired rows with a success status. A window reaching past retention would
+    therefore fetch and write data that no query can ever return, so a schedule
+    configured that way fails startup rather than losing data quietly."""
+    for schedule in schedules:
+        reach = schedule.window_lag + schedule.window_size
+        if reach >= retention:
+            raise ValueError(
+                f"{schedule.source_name} window reaches {reach} back, beyond the "
+                f"{retention} retention; rows that old are dropped on write"
+            )
+
+
 def build(config: dict) -> Ionbeam:
     metrics_registry = CollectorRegistry()
     ProcessCollector(registry=metrics_registry)
     PlatformCollector(registry=metrics_registry)
     GCCollector(registry=metrics_registry)
+    # the hostname is the pod name in k8s — names this replica's series for
+    # scrapers that address pods by IP
+    Info("ionbeam_instance", "Identity of this replica", registry=metrics_registry).info(
+        {"pod": socket.gethostname()}
+    )
 
     coordination = config["coordination"]
     redis_client = (
@@ -180,6 +203,7 @@ def build(config: dict) -> Ionbeam:
         if scheduler_config.get("enabled", True)
         else []
     )
+    reject_windows_beyond_retention(schedules, retention)
     return Ionbeam(core, metrics_registry, trigger_claims, schedules)
 
 

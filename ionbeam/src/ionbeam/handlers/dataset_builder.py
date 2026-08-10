@@ -5,6 +5,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
@@ -49,7 +50,11 @@ def collapse_revisions(
     highest-precedence (latest-arrived) record, ``rank`` giving each row its
     record's precedence. Applies the store's (tags, time) upsert deterministically
     over an explicit record set: a correction replaces the whole row, its columns
-    coming from the correcting record."""
+    coming from the correcting record.
+
+    The result is sorted by ``identity_columns`` in the order given; any order
+    groups an identity's revisions adjacently, so a caller that leads with the
+    time column gets a time-ascending result and needs no second sort."""
     if table.num_rows == 0:
         return table
     combined = table.append_column("__rank", rank).append_column(
@@ -81,6 +86,17 @@ def collapse_revisions(
     return ordered.filter(pa.array(keep)).drop_columns(["__rank", "__row"])
 
 
+@dataclass
+class _ChunkStats:
+    """Totals a chunked pass accumulates as it streams."""
+
+    rows: int = 0
+    peak_chunk_rows: int = 0
+    drain_s: float = 0.0
+    collapse_s: float = 0.0
+    drained: set[str] = field(default_factory=set)
+
+
 class IncompleteRecordSet(Exception):
     """The window's desired record set cannot be composed from the hot store:
     an expired registration leaves arrival order unknowable, or a record's
@@ -96,6 +112,9 @@ class DatasetBuilderConfig(BaseModel):
     enabled: bool = True
     poll_interval_seconds: float = 3.0
     concurrency: int = 1
+    # A window is read one chunk at a time, bounding a build's memory by the rows
+    # a chunk spans rather than the whole window. ``concurrency`` multiplies it.
+    chunk_span: timedelta = timedelta(minutes=5)
     retention: timedelta = timedelta(days=7)  # the hot-store horizon and final floor
     # A failing build re-enqueues with exponential backoff, then parks on the
     # dead-letter set after max_build_attempts. 12 attempts at a 600s cap spans
@@ -317,6 +336,10 @@ class DatasetBuilder:
                 "expired_records", f"desired records unregistered for {window.dataset_key}"
             )
 
+        # Time leads the identity so each collapsed chunk comes out
+        # time-ascending, making the concatenated window sorted by construction.
+        identity = [time_column] + [tag.name for tag in metadata.dataset_schema.tags]
+
         def collapse_and_project(raw_batches: list[pa.RecordBatch]) -> list[pa.RecordBatch]:
             """A record-scoped read holds every record's revision of the same
             identity; collapse to the latest-arrived before shaping."""
@@ -325,51 +348,72 @@ class DatasetBuilder:
                 raw.column(RECORD_ID_COLUMN),
                 value_set=pa.array(ordered_ids, type=pa.string()),
             )
-            identity = [tag.name for tag in metadata.dataset_schema.tags] + [time_column]
             collapsed = collapse_revisions(raw, identity, rank)
             return [project(batch) for batch in collapsed.to_batches(max_chunksize=131072)]
 
-        async def dataset_batches():
-            async for batch in self.timeseries_db.query_measurement_data(
-                measurement=window.dataset,
-                start_time=window.start,
-                end_time=window.end,
-                timestamp_column=time_column,
-                record_ids=ordered_ids,
-            ):
-                yield batch  # raw: the collapse needs record_id, which shaping drops
+        # An identity carries its timestamp, so every revision of a row shares a
+        # chunk: collapsing chunk-by-chunk gives the same result as collapsing the
+        # whole window, while holding only one chunk's rows at a time.
+        chunk_starts: list[datetime] = []
+        chunk_start = window.start
+        while chunk_start < window.end:
+            chunk_starts.append(chunk_start)
+            chunk_start = min(chunk_start + self.config.chunk_span, window.end)
 
-        # The query is unsorted (see InfluxTimeSeriesDatabase._open_reader);
-        # the window is sorted below, in the builder's memory.
-        drain_start = time.perf_counter()
-        collected = [batch async for batch in dataset_batches()]
-        drained = {
-            record_id
-            for batch in collected
-            for record_id in pc.unique(batch.column(RECORD_ID_COLUMN)).to_pylist()
-        }
-        if not drained.issuperset(ordered_ids):
-            # Every desired record put rows in this window when it was made.
-            # Rows the tag filter cannot reach mean the hot store lost or
-            # expired them.
-            missing = len(set(ordered_ids) - drained)
-            raise IncompleteRecordSet(
-                "missing_record_rows",
-                f"{missing} desired records have no reachable rows in {window.dataset_key}",
-            )
-        if collected:
-            collected = await asyncio.to_thread(collapse_and_project, collected)
-        drain_s = time.perf_counter() - drain_start
+        async def collapsed_chunks(stats: _ChunkStats):
+            """Every chunk's collapsed, projected batches, in window order."""
+            for chunk_start in chunk_starts:
+                chunk_end = min(chunk_start + self.config.chunk_span, window.end)
 
-        sort_start = time.perf_counter()
-        window_table = await asyncio.to_thread(
-            lambda: pa.Table.from_batches(collected, schema=geo_schema).sort_by(
-                [(time_column, "ascending")]
-            )
-        )
-        sort_s = time.perf_counter() - sort_start
+                drain_start = time.perf_counter()
+                collected = [
+                    batch
+                    async for batch in self.timeseries_db.query_measurement_data(
+                        measurement=window.dataset,
+                        start_time=chunk_start,
+                        end_time=chunk_end,
+                        timestamp_column=time_column,
+                        record_ids=ordered_ids,
+                    )
+                ]  # raw: the collapse needs record_id, which shaping drops
+                stats.drain_s += time.perf_counter() - drain_start
+                if not collected:
+                    continue
 
-        total_rows = window_table.num_rows
+                stats.peak_chunk_rows = max(
+                    stats.peak_chunk_rows, sum(batch.num_rows for batch in collected)
+                )
+                stats.drained.update(
+                    record_id
+                    for batch in collected
+                    for record_id in pc.unique(batch.column(RECORD_ID_COLUMN)).to_pylist()
+                )
+
+                collapse_start = time.perf_counter()
+                projected = await asyncio.to_thread(collapse_and_project, collected)
+                stats.collapse_s += time.perf_counter() - collapse_start
+                del collected
+
+                for batch in projected:
+                    stats.rows += batch.num_rows
+                    yield batch
+
+            if not stats.drained.issuperset(ordered_ids):
+                # Every desired record put rows in this window when it was made.
+                # Rows the tag filter cannot reach mean the hot store lost or
+                # expired them.
+                missing = len(set(ordered_ids) - stats.drained)
+                raise IncompleteRecordSet(
+                    "missing_record_rows",
+                    f"{missing} desired records have no reachable rows in {window.dataset_key}",
+                )
+
+        # The footer stamps the row count, so the window is counted before it is
+        # written. Both passes hold one chunk at a time.
+        counted = _ChunkStats()
+        async for _ in collapsed_chunks(counted):
+            pass
+        total_rows = counted.rows
         self._metrics.observe_rows_exported(window.dataset, total_rows)
 
         locations = [build_file_key(window, version, desired_hash)]
@@ -385,7 +429,7 @@ class DatasetBuilder:
             locations=locations,
             records=self._manifest_records(records, desired),
         )
-        window_table = window_table.replace_schema_metadata(
+        build_schema = geo_schema.with_metadata(
             {
                 **(geo_schema.metadata or {}),
                 BUILD.encode(): build.model_dump_json().encode(),
@@ -393,15 +437,11 @@ class DatasetBuilder:
         )
 
         write_start = time.perf_counter()
-
-        async def window_batches():
-            for batch in window_table.to_batches(max_chunksize=131072):
-                yield batch
-
+        stats = _ChunkStats()
         await self.arrow_store.write_record_batches(
             locations[0],
-            window_batches(),
-            schema=window_table.schema,
+            collapsed_chunks(stats),
+            schema=build_schema,
             sorted_by=time_column,
         )
         write_s = time.perf_counter() - write_start
@@ -409,10 +449,12 @@ class DatasetBuilder:
         self.logger.info(
             "Build stage timings",
             window=window.dataset_key,
-            drain_s=round(drain_s, 2),
-            sort_s=round(sort_s, 2),
+            drain_s=round(stats.drain_s, 2),
+            collapse_s=round(stats.collapse_s, 2),
             write_s=round(write_s, 2),
             rows=total_rows,
+            chunks=len(chunk_starts),
+            peak_chunk_rows=stats.peak_chunk_rows,
             files=len(locations),
         )
 
