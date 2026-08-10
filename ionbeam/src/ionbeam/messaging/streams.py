@@ -130,16 +130,30 @@ class _StreamSubscription(Subscription[T], Generic[T]):
 
     async def _read_new(self, block_ms: int):
         # Entries this consumer was delivered but never acked — a reconnect
-        # inherits them under the same name. Reading id 0 returns them without
-        # blocking; an empty read means the backlog is drained for good.
+        # inherits them under the same name. They are re-claimed rather than
+        # read at id 0: claiming counts the delivery, so an entry whose handler
+        # keeps dying still reaches the dead-letter bound instead of looping.
         if not self._own_pending_drained:
-            entries = await self._client.xreadgroup(
-                self._group, self._consumer, {self._stream: "0"}, count=1
+            own = await self._client.xpending_range(
+                self._stream,
+                self._group,
+                min="-",
+                max="+",
+                count=1,
+                consumername=self._consumer,
             )
-            messages = entries[0][1] if entries else []
-            if messages:
-                return messages[0]
-            self._own_pending_drained = True
+            if not own:
+                self._own_pending_drained = True
+            else:
+                claimed = await self._client.xclaim(
+                    self._stream,
+                    self._group,
+                    self._consumer,
+                    min_idle_time=0,
+                    message_ids=[own[0]["message_id"]],
+                )
+                if claimed:
+                    return await self._guard_deliveries(*claimed[0])
         entries = await self._client.xreadgroup(
             self._group,
             self._consumer,
@@ -166,6 +180,12 @@ class _StreamSubscription(Subscription[T], Generic[T]):
             return None
         entry_id, fields = messages[0]
         self._metrics.reclaimed(self._stream, self._group)
+        return await self._guard_deliveries(entry_id, fields)
+
+    async def _guard_deliveries(self, entry_id, fields):
+        """The entry, unless its handler has failed enough times to call it
+        poison — those park on the dead-letter stream so they stop blocking
+        everything queued behind them."""
         pending = await self._client.xpending_range(
             self._stream, self._group, min=entry_id, max=entry_id, count=1
         )

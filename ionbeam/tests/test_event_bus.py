@@ -16,6 +16,7 @@ import redis.asyncio as redis
 from ionbeam_client.models import DatasetMetadata
 from prometheus_client import CollectorRegistry
 
+from ionbeam.messaging.streams import DATASET_STREAM, DEAD_LETTER_STREAM
 from ionbeam.messaging import (
     DataSetAvailableEvent,
     InMemoryEventBus,
@@ -370,4 +371,33 @@ async def test_coverage_read_finds_a_span_starting_long_before_the_window():
         "weather", window_start, window_start + _td(hours=1)
     )
     assert spans == [(backfill_start, backfill_end)]
+    await client.aclose()
+
+
+@requires_redis
+async def test_a_poison_event_a_subscriber_keeps_inheriting_still_parks():
+    """A subscriber that reconnects takes back its own pending entry. If its
+    handler never gets through that entry, redelivery must still count toward
+    the dead-letter bound — otherwise the entry blocks the stream forever."""
+    client = redis.from_url(REDIS_URL)
+    await client.flushdb()
+    bus = RedisStreamsEventBus(client, EventBusMetrics(CollectorRegistry()))
+
+    # subscribe first: a group starts at the stream tip, so an event published
+    # before it exists is never delivered
+    sub = await bus.subscribe_datasets("odb", subscriber="exporter-1")
+    await bus.publish_dataset_available(_dataset_event("weather"))
+    assert (await sub.next(2.0)) is not None
+    await sub.close()  # handler "died" — never acked
+
+    for _ in range(12):
+        sub = await bus.subscribe_datasets("odb", subscriber="exporter-1")
+        event = await sub.next(1.0)
+        await sub.close()
+        if event is None:
+            break  # parked: nothing left to inherit
+
+    assert await client.xlen(DEAD_LETTER_STREAM) == 1
+    summary = await client.xpending(DATASET_STREAM, "odb")
+    assert summary["pending"] == 0
     await client.aclose()
