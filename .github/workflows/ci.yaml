@@ -181,27 +181,6 @@ jobs:
             type=gha,scope=dist
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
-  publish-to-pypi:
-    needs: [determine-version, build-python-packages]
-    if: |
-      github.event_name == 'release' ||
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-      - name: Download wheels
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-${{ needs.determine-version.outputs.version }}
-          path: dist
-      - name: Publish to private PyPI
-        run: |
-          uv publish dist/ionbeam-*.whl dist/ionbeam_client-*.whl \
-            --publish-url https://get.ecmwf.int/repository/pypi-private-hosted/ \
-            --username ${{ secrets.GET_UPLOAD_USER }} \
-            --password ${{ secrets.GET_UPLOAD_PASSWORD }}
-
   upload-release-assets:
     if: github.event_name == 'release'
     needs: [determine-version, build-python-packages]
@@ -221,7 +200,7 @@ jobs:
 
   image-summary:
     if: github.event_name == 'pull_request'
-    needs: [determine-version, build-docker-images, publish-to-pypi]
+    needs: [determine-version, build-docker-images]
     runs-on: ubuntu-latest
     steps:
       - name: Find existing artifacts comment
@@ -239,11 +218,6 @@ jobs:
           edit-mode: replace
           body: |
             ### Build Artifacts
-            **PyPI**
-            ```
-            pip install ionbeam-client==${{ needs.determine-version.outputs.version }} --extra-index-url https://get.ecmwf.int/repository/pypi-private-hosted/simple/
-            pip install ionbeam==${{ needs.determine-version.outputs.version }} --extra-index-url https://get.ecmwf.int/repository/pypi-private-hosted/simple/
-            ```
             **Docker**
             ```
             docker pull eccr.ecmwf.int/ionbeam-next/ionbeam:${{ needs.determine-version.outputs.version }}

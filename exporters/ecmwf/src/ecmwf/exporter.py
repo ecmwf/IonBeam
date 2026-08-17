@@ -127,11 +127,11 @@ _COPY_CHUNK = 1 << 20
 DTS_TOKEN_VAR = "DTS_API_TOKEN"
 
 
-def request_transfer(service: DataTransferService, object_key: str) -> None:
+def request_transfer(service: DataTransferService, object_key: str) -> str:
     """Ask for one published cycle to be transferred, overwriting whatever was
-    transferred for that cycle before. Raises on refusal: the caller has
-    published but not stamped, so the redelivered event rebuilds and asks
-    again."""
+    transferred for that cycle before, and answer the transfer's id. Raises on
+    refusal: the caller has published but not stamped, so the redelivered event
+    rebuilds and asks again."""
     response = httpx.post(
         f"{service.api_url}/dataset-transfers",
         json={
@@ -142,6 +142,7 @@ def request_transfer(service: DataTransferService, object_key: str) -> None:
         timeout=service.timeout,
     )
     response.raise_for_status()
+    return response.json()["id"]
 
 
 class OdbStore:
@@ -724,7 +725,15 @@ class ODBExporter:
             self.store.publish(cycle_key, out)
 
         if self.config.dts is not None:
-            request_transfer(self.config.dts, self.store.object_key(cycle_key))
+            object_key = self.store.object_key(cycle_key)
+            transfer = request_transfer(self.config.dts, object_key)
+            self.logger.info(
+                "Requested transfer",
+                dataset=dataset,
+                object_key=object_key,
+                destination=self.config.dts.destination,
+                transfer=transfer,
+            )
 
         self.logger.info(
             "Built cycle", dataset=dataset, cycle=cycle_key, rows=total_rows

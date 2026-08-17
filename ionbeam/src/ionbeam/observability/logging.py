@@ -52,6 +52,7 @@ def setup_logging(level: int = logging.INFO) -> None:
             structlog.stdlib.PositionalArgumentsFormatter(),
             timestamper,
             structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
             ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=LoggerFactory(),

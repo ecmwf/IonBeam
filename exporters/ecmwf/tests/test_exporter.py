@@ -17,6 +17,7 @@ import pyarrow as pa
 import pyarrow.flight as flight
 import pyodc
 import pytest
+from structlog.testing import capture_logs
 
 from ionbeam_client import AvailableDataset
 from ionbeam_client.canonical_stream import canonical_arrow_schema
@@ -708,6 +709,9 @@ async def test_long_station_ids_become_stable_digests(
     assert len(digest) == 8 and not long_id.startswith(digest)
 
 
+DTS_TRANSFER_ID = "3f2a1c64-8c2f-4d1e-9b7a-0f5c2d8e4a10"
+
+
 @pytest.fixture
 def dts_api():
     """A stand-in DTS API recording the transfers it is asked for; ``refuse``
@@ -729,10 +733,11 @@ def dts_api():
                     "body": json_.loads(body),
                 }
             )
+            accepted = json_.dumps({"id": DTS_TRANSFER_ID}).encode()
             self.send_response(503 if state["refuse"] else 202)
-            self.send_header("Content-Length", "2")
+            self.send_header("Content-Length", str(len(accepted)))
             self.end_headers()
-            self.wfile.write(b"{}")
+            self.wfile.write(accepted)
 
         def log_message(self, *args):
             pass
@@ -792,8 +797,11 @@ async def test_s3_output_delivers_cycle_files(
     )
 
     # two windows of the same 06Z cycle; a repeated poke re-delivers idempotently
-    for start in (T0, T0, T0 + timedelta(hours=2)):
-        exporter.export_handler(connection, _event(start, start + timedelta(hours=1)))
+    with capture_logs() as logs:
+        for start in (T0, T0, T0 + timedelta(hours=2)):
+            exporter.export_handler(
+                connection, _event(start, start + timedelta(hours=1))
+            )
 
     cycle_bytes = fs.open_input_stream("odb-test/odb/test_20250101_06.odb").read()
     local = tmp_path / "cycle.odb"
@@ -814,6 +822,15 @@ async def test_s3_output_delivers_cycle_files(
             "destination": {"id": "ionbeam-perm"},
         }
         for request in asked
+    )
+
+    reported = [entry for entry in logs if entry["event"] == "Requested transfer"]
+    assert len(reported) == len(asked)
+    assert all(
+        entry["object_key"] == "odb/test_20250101_06.odb"
+        and entry["destination"] == "ionbeam-perm"
+        and entry["transfer"] == DTS_TRANSFER_ID
+        for entry in reported
     )
 
     built_before = fs.open_input_stream(

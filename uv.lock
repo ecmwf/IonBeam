@@ -585,6 +585,7 @@ source = { editable = "exporters/ecmwf" }
 dependencies = [
     { name = "cf-units" },
     { name = "click" },
+    { name = "httpx" },
     { name = "ionbeam-client" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -596,6 +597,7 @@ dependencies = [
 requires-dist = [
     { name = "cf-units", specifier = ">=3.3.0" },
     { name = "click", specifier = ">=8.1.0" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "ionbeam-client", editable = "ionbeam-client" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pyarrow", specifier = ">=19.0.0" },
