@@ -10,14 +10,9 @@ dependencies = [
     "pandas>=2.2.3",
     "pyarrow>=19.0.0",
     "cf-units>=3.3.0",
-    "pyodc==1.5.0",
+    "pyodc>=1.6.0",
     "click>=8.1.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
+    "httpx>=0.28.0",
 ]
 
 [tool.uv.sources]
@@ -26,5 +21,6 @@ ionbeam-client = { workspace = true }
 [project.scripts]
 ecmwf-exporter = "ecmwf:main"
 
-[project.entry-points."ionbeam.cli_plugins"]
-ecmwf = "ecmwf.app:main"
+[build-system]
+requires = ["uv_build>=0.9.4,<0.10.0"]
+build-backend = "uv_build"

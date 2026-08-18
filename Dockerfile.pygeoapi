@@ -1,5 +1,0 @@
-# Use the existing image as the base
-FROM geopython/pygeoapi:latest
-
-RUN python3 -m venv --system-site-packages /venv \
-    && /venv/bin/python3 -m pip install --no-cache-dir geopandas pyarrow \

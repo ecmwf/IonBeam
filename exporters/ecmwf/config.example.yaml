@@ -2,78 +2,30 @@ exporter_name: "odb"
 
 dataset_filter:
   - "netatmo"
-  - "netatmo_mqtt"
 
 ionbeam:
-  amqp_url: "amqp://guest:guest@localhost:5672/"
-  connection_timeout: 30
-  write_batch_size: 65536
+  flight_url: "grpc://localhost:8815"
 
 odb_exporter:
+  # A local directory or an S3 prefix; cycles encode via a local temp file and
+  # stream to the store, so S3 output needs no persistent volume. S3 reads the
+  # standard AWS env for credentials and AWS_ENDPOINT_URL_S3 for the endpoint.
+  #   output_path: "s3://ionbeam/odb"
   output_path: "./data/odb"
-  
-  # Mapping of ODB varno to canonical variables
-  # See: https://confluence.ecmwf.int/display/UDOC/ODB+variable+numbers
-  variable_map:
-    - varno: 107
-      mapped_from:
-        - standard_name: "surface_air_pressure"
-          level: 2.0
-          method: "point"
-          period: "PT0S"
-    
-    - varno: 108
-      mapped_from:
-        - standard_name: "air_pressure_at_mean_sea_level"
-          level: 2.0
-          method: "mean"
-          period: "PT1H"
-    
-    - varno: 39
-      mapped_from:
-        - standard_name: "air_temperature"
-          level: 2.0
-          method: "point"
-          period: "PT0S"
-    
-    - varno: 40
-      mapped_from:
-        - standard_name: "dew_point_temperature"
-          level: 2.0
-          method: "point"
-          period: "PT0S"
-    
-    - varno: 58
-      mapped_from:
-        - standard_name: "relative_humidity"
-          level: 2.0
-          method: "point"
-          period: "PT0S"
-    
-    - varno: 62
-      mapped_from:
-        - standard_name: "visibility_in_air"
-          level: 2.0
-          method: "point"
-          period: "PT0S"
-    
-    - varno: 111
-      mapped_from:
-        - standard_name: "wind_from_direction"
-          level: 10.0
-          method: "mean"
-          period: "PT5M"
-    
-    - varno: 112
-      mapped_from:
-        - standard_name: "wind_speed"
-          level: 10.0
-          method: "mean"
-          period: "PT5M"
-    
-    - varno: 261
-      mapped_from:
-        - standard_name: "wind_speed_of_gust"
-          level: 10.0
-          method: "mean"
-          period: "PT5M"
+
+  # Only datasets declaring variables in these schemes are exported; unset
+  # accepts any. The semantics -> varno map itself is code (ecmwf.varno_map),
+  # not configuration.
+  scheme_filter:
+    - "cf"
+
+  # Per-dataset ODB report provenance; an unlisted dataset gets the crowd-AWS
+  # defaults (reportype 16090, codetype 179, obstype 1, groupid 17).
+  report_identity: {}
+
+  # A cycle file builds once the analysis cycle has closed plus this margin
+  # (the data cutoff) and no new event has touched it for the quiesce period —
+  # so a straggler burst or replayed backlog settles first and costs one
+  # rebuild, not one per event.
+  assembly_cutoff: "PT1H"
+  assembly_quiesce: "PT10M"

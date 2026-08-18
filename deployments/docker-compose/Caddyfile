@@ -1,5 +1,0 @@
-localhost {
-    handle_path /edr/* {
-        reverse_proxy pygeoapi:80
-    }
-}

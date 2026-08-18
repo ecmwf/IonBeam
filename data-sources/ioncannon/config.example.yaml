@@ -1,7 +1,7 @@
 source_name: "ioncannon"
 
 ionbeam:
-  amqp_url: "amqp://guest:guest@localhost:5672/"
+  flight_url: "grpc://localhost:8815"
 
 ioncannon:
   # Number of synthetic stations to generate

@@ -1,21 +1,16 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
 from .ingestion import IngestionMetrics
 from .coordinator import CoordinatorMetrics
 from .builder import BuilderMetrics
-from .scheduler import SchedulerMetrics
-from .health import HealthMetrics
+from .event_bus import EventBusMetrics
+from .flight import FlightMetrics
 
 __all__ = [
     "IngestionMetrics",
     "CoordinatorMetrics",
     "BuilderMetrics",
-    "SchedulerMetrics",
-    "HealthMetrics",
+    "EventBusMetrics",
+    "FlightMetrics",
 ]

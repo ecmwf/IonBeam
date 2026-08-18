@@ -7,12 +7,11 @@ dependencies = []
 
 [tool.uv.workspace]
 members = [
-    "ionbeam-cli",
     "ionbeam-client",
     "ionbeam",
     "ionbeam-legacy-api",
     "data-sources/*",
-    "exporters/*"
+    "exporters/*",
 ]
 
 [tool.uv]
@@ -29,16 +28,24 @@ constraint-dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = [
-    "ionbeam/tests",
     "ionbeam-client/tests",
+    "ionbeam/tests",
     "exporters/ecmwf/tests",
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [dependency-groups]
+# The packages under test; uv installs no workspace member without a declared edge.
 dev = [
+    "cf-units>=3.3.0",  # the client's unit-validation tests exercise the optional checks
+    "moto[server]>=5.0.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
     "ruff>=0.14.5",
+    "ionbeam",
+    "ionbeam-client",
+    "ecmwf",
 ]
 docs = [
     "sphinx>=8.2.3",
@@ -46,6 +53,21 @@ docs = [
     "pydata-sphinx-theme>=0.16.1",
     "ionbeam-client",
 ]
+# Contents of the data-sources image (Dockerfile).
+data-sources = [
+    "acronet",
+    "eumetnet",
+    "ioncannon",
+    "meteotracker",
+    "sensor-community",
+]
 
 [tool.uv.sources]
+ionbeam = { workspace = true }
 ionbeam-client = { workspace = true }
+acronet = { workspace = true }
+eumetnet = { workspace = true }
+ioncannon = { workspace = true }
+meteotracker = { workspace = true }
+sensor-community = { workspace = true }
+ecmwf = { workspace = true }

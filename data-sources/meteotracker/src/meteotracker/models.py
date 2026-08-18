@@ -1,21 +1,19 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
-from dataclasses import dataclass, field
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class MeteoTrackerConfig(BaseModel):
+class MeteoTrackerConfig(BaseSettings):
+    # Non-secret fields come from the config file; credentials (username,
+    # password) come from METEOTRACKER_* env vars — a k8s Secret via envFrom,
+    # since the Helm chart never renders secrets into the ConfigMap.
+    model_config = SettingsConfigDict(env_prefix="METEOTRACKER_", extra="ignore")
+
     base_url: str = "https://app.meteotracker.com/api/"
     token_endpoint: str = "https://app.meteotracker.com/auth/login/api"
-    refresh_endpoint: str = "https://app.meteotracker.com/auth/refreshtoken"
     timeout: int = 30
     max_retries: int = 3
     headers: dict[str, str] | None = None
@@ -34,30 +32,22 @@ class MeteoTrackerConfig(BaseModel):
 
 
 SessionId = str
-Location = str
-Username = str
 
 
-@dataclass
 class MT_Session:
     """Represents a single MeteoTracker trip"""
 
     id: SessionId
     n_points: int
-    offset_tz: str
     start_time: datetime
     author: str
-    raw_json: dict = field(repr=False)
     end_time: datetime | None
     columns: list[str]
-    living_lab: str | None = None
 
     def __init__(self, **d):
         self.id = SessionId(d["_id"])
         self.n_points = int(d["nPoints"])
-        self.offset_tz = d["offsetTZ"]
         self.start_time = datetime.fromisoformat(d["startTime"])
         self.end_time = datetime.fromisoformat(d["endTime"]) if "endTime" in d else None
         self.columns = [k for k in d if isinstance(d[k], dict) and "avgVal" in d[k]]
         self.author = d["by"]
-        self.raw_json = d

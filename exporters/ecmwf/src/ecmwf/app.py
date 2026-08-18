@@ -1,14 +1,7 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
 import asyncio
-import os
-import pathlib
 import signal
 
 import click
@@ -16,44 +9,28 @@ import structlog
 import yaml
 
 from ionbeam_client import IonbeamClient, IonbeamClientConfig
-from ionbeam_client.models import CanonicalStandard
 
-from .exporter import ODBExporter, ODBExporterConfig, VarNoMapping
+from .exporter import ODBExporter, ODBExporterConfig
 
 
 logger = structlog.get_logger(__name__)
 
 
-def load_config(config_path: str) -> dict:
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
-
-
-async def run_app():
-    config_path = os.getenv("ECMWF_CONFIG_PATH", "config.yaml")
+async def run_app(config_path: str):
     logger.info("Loading configuration", config_path=config_path)
 
-    config_dict = load_config(config_path)
+    with open(config_path, "r") as f:
+        config_dict = yaml.safe_load(f)
 
     ionbeam_config = IonbeamClientConfig(**config_dict.get("ionbeam", {}))
 
     odb_config_dict = config_dict.get("odb_exporter", {})
 
-    variable_map = []
-    for mapping in odb_config_dict.get("variable_map", []):
-        variable_map.append(
-            VarNoMapping(
-                varno=mapping["varno"],
-                mapped_from=[
-                    CanonicalStandard(**canonical)
-                    for canonical in mapping["mapped_from"]
-                ],
-            )
-        )
-
     odb_config = ODBExporterConfig(
-        output_path=pathlib.Path(odb_config_dict.get("output_path", "./data/odb")),
-        variable_map=variable_map,
+        **{
+            "output_path": "./data/odb",
+            **{k: v for k, v in odb_config_dict.items() if v is not None},
+        }
     )
 
     exporter = ODBExporter(odb_config)
@@ -70,12 +47,15 @@ async def run_app():
 
     shutdown_event = asyncio.Event()
 
-    def signal_handler(signum, frame):
+    def request_shutdown(signum: int) -> None:
         logger.info("Received shutdown signal", signal=signum)
         shutdown_event.set()
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # loop-aware handlers: a raw signal.signal handler sets the event without
+    # waking the selector, stalling shutdown until the next dataset event
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, request_shutdown, sig)
 
     logger.info(
         "Starting ECMWF ODB exporter",
@@ -94,11 +74,16 @@ async def run_app():
 
 
 @click.command()
-@click.option("--config", "-c", default="config.yaml", help="Path to config file")
+@click.option(
+    "--config",
+    "-c",
+    envvar="ECMWF_CONFIG_PATH",
+    default="config.yaml",
+    help="Path to config file",
+)
 def main(config):
     """ECMWF ODB exporter - Export Ionbeam datasets to ECMWF ODB format."""
-    os.environ["ECMWF_CONFIG_PATH"] = config
-    asyncio.run(run_app())
+    asyncio.run(run_app(config))
 
 
 if __name__ == "__main__":

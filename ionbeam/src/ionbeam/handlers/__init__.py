@@ -1,25 +1,22 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
-"""Event handlers for ionbeam."""
+"""Domain handlers for ionbeam."""
 
-from .ingestion_handler import IngestionHandler, IngestionConfig
-from .dataset_coordinator_handler import (
-    DatasetCoordinatorHandler,
+from .canonicalize import CanonicalBatch, canonicalize
+from .ingestion import Ingestion
+from .dataset_coordinator import (
+    DatasetCoordinator,
     DatasetCoordinatorConfig,
 )
-from .dataset_builder_handler import DatasetBuilderHandler, DatasetBuilderConfig
+from .dataset_builder import DatasetBuilder, DatasetBuilderConfig
 
 __all__ = [
-    "IngestionHandler",
-    "IngestionConfig",
-    "DatasetCoordinatorHandler",
+    "CanonicalBatch",
+    "canonicalize",
+    "Ingestion",
+    "DatasetCoordinator",
     "DatasetCoordinatorConfig",
-    "DatasetBuilderHandler",
+    "DatasetBuilder",
     "DatasetBuilderConfig",
 ]

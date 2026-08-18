@@ -1,12 +1,7 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
-from prometheus_client import Counter, Gauge, Histogram, CollectorRegistry
+from prometheus_client import CollectorRegistry, Counter, Gauge
 
 
 class CoordinatorMetrics:
@@ -25,18 +20,17 @@ class CoordinatorMetrics:
             registry=registry,
         )
 
-        self._queue_size = Gauge(
-            name="ionbeam_coordinator_queue_size",
-            documentation="Current coordinator queue size (number of window tasks)",
+        self._sealed_arrivals_dropped_total = Counter(
+            name="ionbeam_coordinator_sealed_arrivals_dropped_total",
+            documentation="Total late records dropped because the window was already final",
             labelnames=["dataset"],
             registry=registry,
         )
 
-        self._duration_seconds = Histogram(
-            name="ionbeam_coordinator_duration_seconds",
-            documentation="Coordinator operation duration",
+        self._lateness_p95_seconds = Gauge(
+            name="ionbeam_coordinator_lateness_p95_seconds",
+            documentation="Measured p95 of data-arrival lateness driving the build gate",
             labelnames=["dataset"],
-            buckets=[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0],
             registry=registry,
         )
 
@@ -46,8 +40,8 @@ class CoordinatorMetrics:
     def window_enqueued(self, dataset: str) -> None:
         self._windows_enqueued_total.labels(dataset=dataset).inc()
 
-    def set_queue_size(self, dataset: str, size: int) -> None:
-        self._queue_size.labels(dataset=dataset).set(size)
+    def sealed_arrival_dropped(self, dataset: str) -> None:
+        self._sealed_arrivals_dropped_total.labels(dataset=dataset).inc()
 
-    def observe_duration(self, dataset: str, seconds: float) -> None:
-        self._duration_seconds.labels(dataset=dataset).observe(seconds)
+    def observe_lateness_p95(self, dataset: str, seconds: float) -> None:
+        self._lateness_p95_seconds.labels(dataset=dataset).set(seconds)

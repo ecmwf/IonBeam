@@ -1,37 +1,50 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
 """Acronet data source client implementation."""
 
-import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any, AsyncIterator, Callable, Iterable
+from typing import Any, AsyncIterator, Callable, Iterable, Optional
+from uuid import UUID
 
 import httpx
+from httpx_retries import Retry, RetryTransport
 import numpy as np
 import pandas as pd
 import structlog
-
 from ionbeam_client import IonbeamClient
+from ionbeam_client.canonical_stream import canonical_record_batches
 from ionbeam_client.models import (
+    CfSemantics,
+    DatasetSchema,
     IngestionMetadata,
-    DatasetMetadata,
-    DataIngestionMap,
-    TimeAxis,
-    LatitudeAxis,
-    LongitudeAxis,
-    CanonicalVariable,
-    MetadataVariable,
+    Tag,
+    TimeCoordinate,
+    Variable,
+    cf,
+    geographic_point_coordinates,
 )
-from ionbeam_client.arrow_tools import dataframes_to_record_batches, schema_from_ingestion_map
 
 from .models import AcronetConfig, SensorCatalogEntry
+
+# Acronet sensor class -> the canonical column it lands in.
+SENSOR_CLASSES = {
+    "PLUVIOMETRO": "precipitation_amount",
+    "TERMOMETRO": "air_temperature",
+    "IGROMETRO": "relative_humidity",
+    "DIREZIONEVENTO": "wind_from_direction",
+    "ANEMOMETRO": "wind_speed",
+    "BAROMETRO": "air_pressure",
+    "RADIOMETRO": "surface_downwelling_shortwave_flux_in_air",
+    "ANEMOMETRO_RAFFICA": "wind_speed_of_gust",
+    "TERMOMETRO_MIN": "minimum_air_temperature",
+    "TERMOMETRO_MAX": "maximum_air_temperature",
+    "BATTERIA": "battery_level",
+    "TERMOMETRO_INTERNA": "indoor_air_temperature",
+    "DIREZIONEVENTO_RAFFICA": "wind_from_direction_of_gust",
+    "SIGNAL_STRENGTH": "signal_strength",
+}
 
 
 class AcronetSource:
@@ -45,6 +58,8 @@ class AcronetSource:
         "m/s": "m s-1",
         "W/m^2": "W m-2",
         "Knots": "m s-1",
+        "%": "percent",
+        "CSQ": "1",
     }
 
     UNIT_CONVERSIONS: dict[str, Callable[[np.ndarray], np.ndarray]] = {
@@ -56,112 +71,68 @@ class AcronetSource:
         self.logger = structlog.get_logger(__name__)
 
         self.metadata = IngestionMetadata(
-            dataset=DatasetMetadata(
-                name="acronet",
-                description="IoT observations collected from the CIMA Acronet network.",
-                aggregation_span=timedelta(days=1),
-                subject_to_change_window=timedelta(days=0),
-                source_links=[],
-                keywords=["acronet", "iot", "weather"],
-            ),
-            ingestion_map=DataIngestionMap(
-                datetime=TimeAxis(from_col="time"),
-                lat=LatitudeAxis(
-                    from_col="lat", standard_name="latitude", cf_unit="degrees_north"
-                ),
-                lon=LongitudeAxis(
-                    from_col="lon", standard_name="longitude", cf_unit="degrees_east"
-                ),
-                canonical_variables=[
-                    CanonicalVariable(
-                        column="PLUVIOMETRO",
-                        standard_name="precipitation_amount",
-                        cf_unit="mm",
+            # min/max temperature are CF air_temperature under a cell_method;
+            # station telemetry (battery, signal, indoor temperature, gust
+            # direction) carries no CF claim — those names are not in the CF table.
+            version=2,
+            name="acronet",
+            dataset_schema=DatasetSchema(
+                time=TimeCoordinate(),
+                coordinates=geographic_point_coordinates(),
+                variables=[
+                    cf("precipitation_amount", "mm"),
+                    cf("air_temperature", "degC"),
+                    cf("relative_humidity", "percent"),
+                    cf("wind_from_direction", "degree"),
+                    cf("wind_speed", "m s-1"),
+                    cf("air_pressure", "hPa"),
+                    cf("surface_downwelling_shortwave_flux_in_air", "W m-2"),
+                    cf("wind_speed_of_gust", "m s-1"),
+                    Variable(
+                        name="minimum_air_temperature",
+                        semantics=CfSemantics(
+                            standard_name="air_temperature", cell_method="minimum"
+                        ),
+                        unit="degC",
                     ),
-                    CanonicalVariable(
-                        column="TERMOMETRO",
-                        standard_name="air_temperature",
-                        cf_unit="degC",
+                    Variable(
+                        name="maximum_air_temperature",
+                        semantics=CfSemantics(
+                            standard_name="air_temperature", cell_method="maximum"
+                        ),
+                        unit="degC",
                     ),
-                    CanonicalVariable(
-                        column="IGROMETRO",
-                        standard_name="relative_humidity",
-                        cf_unit="%",
-                    ),
-                    CanonicalVariable(
-                        column="DIREZIONEVENTO",
-                        standard_name="wind_from_direction",
-                        cf_unit="degree",
-                    ),
-                    CanonicalVariable(
-                        column="ANEMOMETRO",
-                        standard_name="wind_speed",
-                        cf_unit="m s-1",
-                    ),
-                    CanonicalVariable(
-                        column="BAROMETRO",
-                        standard_name="air_pressure",
-                        cf_unit="hPa",
-                    ),
-                    CanonicalVariable(
-                        column="RADIOMETRO",
-                        standard_name="surface_downwelling_shortwave_flux_in_air",
-                        cf_unit="W m-2",
-                    ),
-                    CanonicalVariable(
-                        column="BATTERIA",
-                        standard_name="battery_level",
-                        cf_unit="V",
-                    ),
-                    CanonicalVariable(
-                        column="TERMOMETRO_INTERNA",
-                        standard_name="indoor_air_temperature",
-                        cf_unit="degC",
-                    ),
-                    CanonicalVariable(
-                        column="DIREZIONEVENTO_RAFFICA",
-                        standard_name="wind_from_direction_of_gust",
-                        cf_unit="degree",
-                    ),
-                    CanonicalVariable(
-                        column="ANEMOMETRO_RAFFICA",
-                        standard_name="wind_speed_of_gust",
-                        cf_unit="m s-1",
-                    ),
-                    CanonicalVariable(
-                        column="TERMOMETRO_MIN",
-                        standard_name="minimum_air_temperature",
-                        cf_unit="degC",
-                    ),
-                    CanonicalVariable(
-                        column="TERMOMETRO_MAX",
-                        standard_name="maximum_air_temperature",
-                        cf_unit="degC",
-                    ),
-                    CanonicalVariable(
-                        column="SIGNAL_STRENGTH",
-                        standard_name="signal_strength",
-                        cf_unit="CSQ",
-                    ),
+                    Variable(name="battery_level", unit="V"),
+                    Variable(name="indoor_air_temperature", unit="degC"),
+                    Variable(name="wind_from_direction_of_gust", unit="degree"),
+                    Variable(name="signal_strength", unit="1"),
                 ],
-                metadata_variables=[
-                    MetadataVariable(column="station_id"),
-                    MetadataVariable(column="station_name"),
-                    MetadataVariable(column="author"),
+                tags=[
+                    Tag(name="station_id"),
+                    Tag(name="station_name"),
+                    Tag(name="author"),
                 ],
             ),
-            version=1,
         )
 
+        variables_by_name = {
+            var.name: var for var in self.metadata.dataset_schema.variables
+        }
         self._configured_sensor_classes = {
-            var.column: var for var in self.metadata.ingestion_map.canonical_variables
+            sensor_class: variables_by_name[canonical]
+            for sensor_class, canonical in SENSOR_CLASSES.items()
         }
 
         self._access_token: str | None = None
-        self._refresh_token: str | None = None
-        self._token_expiry: datetime | None = None
-
-        self._auth_lock = asyncio.Lock()
+        self._http = httpx.AsyncClient(
+            timeout=config.timeout_seconds,
+            headers=config.headers or {},
+            follow_redirects=True,
+            verify=config.verify_ssl,
+            transport=RetryTransport(
+                retry=Retry(total=config.max_retries, backoff_factor=0.5)
+            ),
+        )
         self._sensors_by_id: dict[str, SensorCatalogEntry] = {}
         self._sensors_by_class: dict[str, list[SensorCatalogEntry]] = {}
         self._available_sensor_classes: set[str] = set()
@@ -172,6 +143,7 @@ class AcronetSource:
         start_time: datetime,
         end_time: datetime,
         client: IonbeamClient,
+        ingestion_id: Optional[UUID] = None,
     ) -> None:
         """Fetch and ingest Acronet data for the given time window."""
         await self._ensure_sensor_inventory()
@@ -183,9 +155,6 @@ class AcronetSource:
             )
             return
 
-        # Create schema from ingestion map to enforce column ordering
-        schema = schema_from_ingestion_map(self.metadata.ingestion_map)
-        
         async def dataframe_stream() -> AsyncIterator[pd.DataFrame]:
             station_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
             failed_sensors: dict[str, int] = defaultdict(int)
@@ -263,7 +232,7 @@ class AcronetSource:
                                     "lat": sensor.latitude,
                                     "lon": sensor.longitude,
                                     "author": self.AUTHOR,
-                                    sensor_class: value,
+                                    SENSOR_CLASSES[sensor_class]: value,
                                 }
                             )
 
@@ -296,17 +265,14 @@ class AcronetSource:
 
                 yield station_df
 
-        batch_stream = dataframes_to_record_batches(
-            dataframe_stream(),
-            schema=schema,
-            preserve_index=False,
-        )
+        batch_stream = canonical_record_batches(dataframe_stream(), self.metadata)
 
         await client.ingest(
             batch_stream=batch_stream,
             metadata=self.metadata,
             start_time=start_time,
             end_time=end_time,
+            ingestion_id=ingestion_id,
         )
 
         self.logger.info(
@@ -344,7 +310,7 @@ class AcronetSource:
         if not expected_var:
             return
 
-        expected_unit = expected_var.cf_unit
+        expected_unit = expected_var.unit
         api_unit = sensor.unit
 
         if not api_unit:
@@ -372,10 +338,7 @@ class AcronetSource:
             self._unit_mismatches_logged.add(unit_key)
 
     async def _list_sensor_classes(self) -> list[str]:
-        response = await self._make_request("GET", "sensors/classes")
-        if response is None:
-            return []
-
+        response = await self._get("sensors/classes")
         if not response.text or response.text.strip() == "":
             self.logger.warning("Empty response body from sensors/classes endpoint")
             return []
@@ -404,12 +367,7 @@ class AcronetSource:
             "geowin": ",".join(str(coord) for coord in self.config.geo_window),
         }
 
-        response = await self._make_request(
-            "GET", f"sensors/list/{sensor_class}", params=params
-        )
-        if response is None:
-            return []
-
+        response = await self._get(f"sensors/list/{sensor_class}", params=params)
         payload = response.json()
         entries: list[SensorCatalogEntry] = []
 
@@ -451,12 +409,7 @@ class AcronetSource:
             "date_as_string": True,
         }
 
-        response = await self._make_request(
-            "GET", f"sensors/data/{sensor_class}/all", params=params
-        )
-        if response is None:
-            return []
-
+        response = await self._get(f"sensors/data/{sensor_class}/all", params=params)
         payload = response.json()
         if isinstance(payload, list):
             return payload
@@ -479,223 +432,49 @@ class AcronetSource:
                 break
             current = chunk_end
 
-    async def _make_request(
-        self,
-        method: str,
-        path: str,
-        params: dict[str, Any] | None = None,
-        json_data: dict[str, Any] | None = None,
-        require_auth: bool = True,
-    ) -> httpx.Response | None:
-        url = (
-            path
-            if path.lower().startswith("http")
-            else f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
-        )
+    async def _get(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> httpx.Response:
+        """One authenticated GET; transient failures retry in the transport.
+        A 401 re-authenticates once — a second 401 raises, and any other
+        failure raises so the trigger redelivers the whole fetch."""
+        url = f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
+        if not self._access_token:
+            await self._authenticate()
+        response = await self._http.get(url, params=params or {}, headers=self._auth)
+        if response.status_code == 401:
+            await self._authenticate()
+            response = await self._http.get(url, params=params or {}, headers=self._auth)
+        response.raise_for_status()
+        return response
 
-        if require_auth:
-            await self._ensure_access_token()
-            if not self._access_token:
-                self.logger.error(
-                    "Missing access token for authenticated request", url=url
-                )
-                return None
+    @property
+    def _auth(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._access_token}"}
 
-        for attempt in range(self.config.max_retries + 1):
-            headers = dict(self.config.headers or {})
-            if require_auth and self._access_token:
-                headers["Authorization"] = f"Bearer {self._access_token}"
-
-            try:
-                async with httpx.AsyncClient(
-                    timeout=self.config.timeout_seconds,
-                    headers=headers,
-                    follow_redirects=True,
-                    verify=self.config.verify_ssl,
-                ) as client:
-                    if method.upper() == "GET":
-                        response = await client.get(url, params=params or {})
-                    elif method.upper() == "POST":
-                        response = await client.post(
-                            url, params=params or {}, json=json_data
-                        )
-                    else:
-                        raise ValueError(f"Unsupported HTTP method: {method}")
-
-                    if (
-                        response.status_code == 401
-                        and require_auth
-                        and attempt < self.config.max_retries
-                    ):
-                        self.logger.info(
-                            "Received 401, attempting token refresh",
-                            url=url,
-                            attempt=attempt + 1,
-                        )
-                        if (
-                            await self._refresh_access_token()
-                            or await self._authenticate()
-                        ):
-                            continue
-                        self.logger.error("Unable to refresh authentication", url=url)
-                        return None
-
-                    response.raise_for_status()
-                    return response
-
-            except httpx.TimeoutException:
-                self.logger.warning(
-                    "Request timeout",
-                    url=url,
-                    timeout_seconds=self.config.timeout_seconds,
-                    attempt=attempt + 1,
-                    max_retries=self.config.max_retries,
-                )
-                if attempt == self.config.max_retries:
-                    return None
-                await asyncio.sleep(min(2**attempt, 10))
-
-            except httpx.HTTPStatusError as exc:
-                self.logger.warning(
-                    "HTTP error during request",
-                    url=url,
-                    status=exc.response.status_code,
-                    attempt=attempt + 1,
-                    max_retries=self.config.max_retries,
-                )
-                if attempt == self.config.max_retries:
-                    return None
-                await asyncio.sleep(min(2**attempt, 10))
-
-            except httpx.RequestError as exc:
-                self.logger.warning(
-                    "Network error during request",
-                    url=url,
-                    error=str(exc),
-                    attempt=attempt + 1,
-                    max_retries=self.config.max_retries,
-                )
-                if attempt == self.config.max_retries:
-                    return None
-                await asyncio.sleep(min(2**attempt, 10))
-
-        return None
-
-    async def _ensure_access_token(self) -> None:
-        now = datetime.now(timezone.utc)
+    async def _authenticate(self) -> None:
         if (
-            self._access_token
-            and self._token_expiry
-            and self._token_expiry > now + timedelta(seconds=30)
+            not self.config.username
+            or not self.config.password
+            or not self.config.client_id
         ):
-            return
+            raise RuntimeError("Acronet credentials are not fully configured")
 
-        if self._refresh_token:
-            refreshed = await self._refresh_access_token()
-            if refreshed:
-                return
-
-        await self._authenticate()
-
-    async def _authenticate(self) -> bool:
-        async with self._auth_lock:
-            if (
-                not self.config.username
-                or not self.config.password
-                or not self.config.client_id
-            ):
-                self.logger.error("Acronet credentials are not fully configured")
-                return False
-
-            data = {
+        response = await self._http.post(
+            self.config.token_endpoint,
+            data={
                 "grant_type": "password",
                 "username": self.config.username,
                 "password": self.config.password,
                 "client_id": self.config.client_id,
                 "client_secret": self.config.client_secret,
-            }
-
-            try:
-                async with httpx.AsyncClient(
-                    timeout=self.config.timeout_seconds, verify=self.config.verify_ssl
-                ) as client:
-                    response = await client.post(self.config.token_endpoint, data=data)
-                    response.raise_for_status()
-
-                    payload = response.json()
-                    self._access_token = payload.get("access_token")
-                    self._refresh_token = payload.get("refresh_token")
-
-                    expires_in = int(payload.get("expires_in", 0)) or 0
-                    self._token_expiry = datetime.now(timezone.utc) + timedelta(
-                        seconds=expires_in - 30
-                    )
-
-                    if not self._access_token:
-                        self.logger.error(
-                            "Authentication response missing access token"
-                        )
-                        return False
-
-                    return True
-
-            except Exception as exc:
-                self.logger.error(
-                    "Authentication failed",
-                    error=str(exc),
-                    error_type=type(exc).__name__,
-                )
-                self._access_token = None
-                self._refresh_token = None
-                self._token_expiry = None
-                return False
-
-    async def _refresh_access_token(self) -> bool:
-        async with self._auth_lock:
-            if not self._refresh_token or not self.config.client_id:
-                return False
-
-            data = {
-                "grant_type": "refresh_token",
-                "refresh_token": self._refresh_token,
-                "client_id": self.config.client_id,
-            }
-            if self.config.client_secret:
-                data["client_secret"] = self.config.client_secret
-
-            try:
-                async with httpx.AsyncClient(
-                    timeout=self.config.timeout_seconds, verify=self.config.verify_ssl
-                ) as client:
-                    response = await client.post(self.config.token_endpoint, data=data)
-                    response.raise_for_status()
-
-                    payload = response.json()
-                    self._access_token = payload.get("access_token")
-                    self._refresh_token = payload.get(
-                        "refresh_token", self._refresh_token
-                    )
-                    expires_in = int(payload.get("expires_in", 0)) or 0
-                    self._token_expiry = datetime.now(timezone.utc) + timedelta(
-                        seconds=expires_in - 30
-                    )
-
-                    if not self._access_token:
-                        self.logger.error("Token refresh response missing access token")
-                        return False
-
-                    return True
-
-            except Exception as exc:
-                self.logger.warning(
-                    "Token refresh failed",
-                    error=str(exc),
-                    error_type=type(exc).__name__,
-                )
-                self._access_token = None
-                self._refresh_token = None
-                self._token_expiry = None
-                return False
+            },
+        )
+        response.raise_for_status()
+        token = response.json().get("access_token")
+        if not token:
+            raise RuntimeError("authentication response missing access token")
+        self._access_token = token
 
     @staticmethod
     def _normalize_station_name(name: str) -> str:

@@ -1,237 +1,143 @@
 # syntax=docker/dockerfile:1.7-labs
 
-FROM python:3.12-alpine AS python-base
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
-# bleeding edge repo for eccodes, udunits
-RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories && \
-    apk add --no-cache build-base python3-dev git gdal-dev udunits udunits-dev eccodes
+# Multi-target build. Targets: ionbeam, data-sources, ecmwf-exporter, legacy-api
+#
+#   docker build --target ionbeam .
+#
+# The wheels install into the same python:3.12-slim that runs them, because the
+# `dist` stage below builds them here rather than on a CI runner. CI extracts
+# that stage for the PyPI publish, so the uploaded wheels are the ones shipped
+# in the images:
+#
+#   docker build --target dist --build-arg VERSION=1.2.3 --output type=local,dest=dist .
+#
+# Every dependency in uv.lock installs as a prebuilt wheel on glibc (pyogrio
+# vendors GDAL, cf-units vendors udunits2), so no stage needs a compiler.
+# cf-units wheels are x86_64-only: build the ecmwf-exporter target with
+# --platform linux/amd64 on other hosts.
 
-ENV UDUNITS2_XML_PATH=/usr/share/udunits/udunits2.xml
+FROM python:3.12-slim AS runtime-base
 
-WORKDIR /workspace
+RUN useradd --uid 1000 --user-group --create-home ionbeam
+USER ionbeam
+WORKDIR /app
+ENV PATH="/venv/bin:${PATH}"
 
-# Stage 1: Base with uv and all workspace code
-FROM python-base AS uv-base
+FROM python:3.12-slim AS uv-base
 
-# Copy UV from official image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1
 
-# Copy entire workspace (dockerignore filters out .venv, cache dirs, etc.)
+WORKDIR /workspace
+
+# ============================================================================
+# DIST - workspace wheels and the locked requirements each image installs
+# ============================================================================
+FROM uv-base AS dist-build
+
+# Manifests first: the export layer caches until the lockfile changes.
+COPY --parents pyproject.toml uv.lock **/pyproject.toml /workspace/
+
+# --no-emit-workspace: the wheels supply the members themselves, so these files
+# pin only third-party dependencies, with hashes, per image.
+RUN mkdir -p /dist/requirements && \
+    for pkg in ionbeam ionbeam-legacy-api ecmwf; do \
+        uv export --frozen --no-emit-workspace --no-dev --package "$pkg" \
+            --format requirements-txt -o "/dist/requirements/${pkg}.txt"; \
+    done && \
+    uv export --frozen --no-emit-workspace --no-dev --only-group data-sources \
+        --format requirements-txt -o /dist/requirements/data-sources.txt
+
 COPY . /workspace
 
-# ============================================================================
-# IONBEAM - Main service
-# ============================================================================
-FROM uv-base AS ionbeam-deps
+# Stamped after the export layer so version churn leaves the pins cached. A
+# build without VERSION keeps the placeholder pyproject versions.
+ARG VERSION
+RUN if [ -n "$VERSION" ]; then \
+        find /workspace -maxdepth 3 -name pyproject.toml \
+            -exec sed -i "s/^version = .*/version = \"${VERSION}\"/" {} +; \
+    fi && \
+    uv build --all-packages --wheel --out-dir /dist
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/ionbeam \
-    uv sync --frozen --no-install-project --no-dev --package ionbeam
+# Wheels and requirements alone, for `--output type=local` to the host.
+FROM scratch AS dist
 
-FROM ionbeam-deps AS ionbeam-build
+COPY --from=dist-build /dist/ /
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/ionbeam \
-    uv sync --frozen --no-dev --no-editable --package ionbeam
+FROM uv-base AS installer-base
 
-FROM python-base AS ionbeam
+COPY --from=dist-build /dist/requirements/ /requirements/
 
-WORKDIR /app
-ENV PATH="/venvs/ionbeam/bin:${PATH}"
-COPY --from=ionbeam-build /venvs/ionbeam /venvs/ionbeam
-# # USER app
-CMD ["ionbeam", "start", "--with-builder"]
+FROM installer-base AS ionbeam-install
 
-# ============================================================================
-# DATA SOURCES
-# ============================================================================
+RUN uv venv /venv && uv pip install --python /venv --no-cache -r /requirements/ionbeam.txt
+COPY --from=dist-build /dist/*.whl /wheels/
+RUN uv pip install --python /venv --no-cache --no-deps \
+        /wheels/ionbeam-*.whl /wheels/ionbeam_client-*.whl
 
-# ACRONET
-FROM uv-base AS acronet-deps
+FROM runtime-base AS ionbeam
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/acronet \
-    uv sync --frozen --no-install-project --no-dev --package acronet
-
-FROM acronet-deps AS acronet-build
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/acronet \
-    uv sync --frozen --no-dev --no-editable --package acronet
-
-FROM python-base AS acronet
-
-WORKDIR /app
-ENV PATH="/venvs/acronet/bin:${PATH}"
-COPY --from=acronet-build /venvs/acronet /venvs/acronet
-CMD ["acronet"]
-
-# EUMETNET
-FROM uv-base AS eumetnet-deps
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/eumetnet \
-    uv sync --frozen --no-install-project --no-dev --package eumetnet
-
-FROM eumetnet-deps AS eumetnet-build
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/eumetnet \
-    uv sync --frozen --no-dev --no-editable --package eumetnet
-
-FROM python-base AS eumetnet
-
-WORKDIR /app
-ENV PATH="/venvs/eumetnet/bin:${PATH}"
-COPY --from=eumetnet-build /venvs/eumetnet /venvs/eumetnet
-CMD ["eumetnet"]
-
-# IONCANNON
-FROM uv-base AS ioncannon-deps
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/ioncannon \
-    uv sync --frozen --no-install-project --no-dev --package ioncannon
-
-FROM ioncannon-deps AS ioncannon-build
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/ioncannon \
-    uv sync --frozen --no-dev --no-editable --package ioncannon
-
-FROM python-base AS ioncannon
-
-WORKDIR /app
-ENV PATH="/venvs/ioncannon/bin:${PATH}"
-COPY --from=ioncannon-build /venvs/ioncannon /venvs/ioncannon
-CMD ["ioncannon"]
-
-# METEOGATE
-FROM uv-base AS meteogate-deps
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/meteogate \
-    uv sync --frozen --no-install-project --no-dev --package meteogate
-
-FROM meteogate-deps AS meteogate-build
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/meteogate \
-    uv sync --frozen --no-dev --no-editable --package meteogate
-
-FROM python-base AS meteogate
-
-WORKDIR /app
-ENV PATH="/venvs/meteogate/bin:${PATH}"
-COPY --from=meteogate-build /venvs/meteogate /venvs/meteogate
-CMD ["meteogate"]
-
-# METEOTRACKER
-FROM uv-base AS meteotracker-deps
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/meteotracker \
-    uv sync --frozen --no-install-project --no-dev --package meteotracker
-
-FROM meteotracker-deps AS meteotracker-build
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/meteotracker \
-    uv sync --frozen --no-dev --no-editable --package meteotracker
-
-FROM python-base AS meteotracker
-
-WORKDIR /app
-ENV PATH="/venvs/meteotracker/bin:${PATH}"
-COPY --from=meteotracker-build /venvs/meteotracker /venvs/meteotracker
-CMD ["meteotracker"]
-
-# SENSOR COMMUNITY
-FROM uv-base AS sensor-community-deps
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/sensor-community \
-    uv sync --frozen --no-install-project --no-dev --package sensor-community
-
-FROM sensor-community-deps AS sensor-community-build
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/sensor-community \
-    uv sync --frozen --no-dev --no-editable --package sensor-community
-
-FROM python-base AS sensor-community
-
-WORKDIR /app
-ENV PATH="/venvs/sensor-community/bin:${PATH}"
-COPY --from=sensor-community-build /venvs/sensor-community /venvs/sensor-community
-CMD ["sensor-community"]
+COPY --from=ionbeam-install /venv /venv
+EXPOSE 8815
+CMD ["ionbeam", "start"]
 
 # ============================================================================
-# EXPORTERS
+# DATA SOURCES - union image; the pod picks its component via its command
 # ============================================================================
+FROM installer-base AS data-sources-install
 
-# ECMWF
-FROM uv-base AS ecmwf-deps
+RUN uv venv /venv && uv pip install --python /venv --no-cache -r /requirements/data-sources.txt
+COPY --from=dist-build /dist/*.whl /wheels/
+RUN uv pip install --python /venv --no-cache --no-deps \
+        /wheels/acronet-*.whl \
+        /wheels/eumetnet-*.whl \
+        /wheels/ioncannon-*.whl \
+        /wheels/meteotracker-*.whl \
+        /wheels/sensor_community-*.whl \
+        /wheels/ionbeam_client-*.whl
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/ecmwf \
-    uv sync --frozen --no-install-project --no-dev --package ecmwf
+FROM runtime-base AS data-sources
 
-FROM ecmwf-deps AS ecmwf-build
+COPY --from=data-sources-install /venv /venv
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/ecmwf \
-    uv sync --frozen --no-dev --no-editable --package ecmwf
+# ============================================================================
+# ECMWF EXPORTER
+# ============================================================================
+FROM installer-base AS ecmwf-exporter-install
 
-FROM python-base AS ecmwf
+RUN uv venv /venv && uv pip install --python /venv --no-cache -r /requirements/ecmwf.txt
+COPY --from=dist-build /dist/*.whl /wheels/
+RUN uv pip install --python /venv --no-cache --no-deps \
+        /wheels/ecmwf-*.whl /wheels/ionbeam_client-*.whl
 
-WORKDIR /app
-ENV PATH="/venvs/ecmwf/bin:${PATH}"
-COPY --from=ecmwf-build /venvs/ecmwf /venvs/ecmwf
+FROM runtime-base AS ecmwf-exporter
+
+# cf-units' vendored libudunits2 links libexpat, which slim omits.
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
+USER ionbeam
+
+COPY --from=ecmwf-exporter-install /venv /venv
 CMD ["ecmwf-exporter"]
-
-# PYGEOAPI
-FROM uv-base AS pygeoapi-deps
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/pygeoapi \
-    uv sync --frozen --no-install-project --no-dev --package pygeoapi
-
-FROM pygeoapi-deps AS pygeoapi-build
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/pygeoapi \
-    uv sync --frozen --no-dev --no-editable --package pygeoapi
-
-FROM python-base AS pygeoapi
-
-WORKDIR /app
-ENV PATH="/venvs/pygeoapi/bin:${PATH}"
-COPY --from=pygeoapi-build /venvs/pygeoapi /venvs/pygeoapi
-CMD ["pygeoapi-exporter"]
 
 # ============================================================================
 # LEGACY API
 # ============================================================================
-FROM uv-base AS legacy-api-deps
+FROM installer-base AS legacy-api-install
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/legacy-api \
-    uv sync --frozen --no-install-project --no-dev --package ionbeam-legacy-api
+RUN uv venv /venv && uv pip install --python /venv --no-cache -r /requirements/ionbeam-legacy-api.txt
+COPY --from=dist-build /dist/*.whl /wheels/
+RUN uv pip install --python /venv --no-cache --no-deps \
+        /wheels/ionbeam_legacy_api-*.whl /wheels/ionbeam-*.whl /wheels/ionbeam_client-*.whl
 
-FROM legacy-api-deps AS legacy-api-build
+FROM runtime-base AS legacy-api
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_PROJECT_ENVIRONMENT=/venvs/legacy-api \
-    uv sync --frozen --no-dev --no-editable --package ionbeam-legacy-api
-
-FROM python-base AS legacy-api
-
-WORKDIR /app
-ENV PATH="/venvs/legacy-api/bin:${PATH}"
-COPY --from=legacy-api-build /venvs/legacy-api /venvs/legacy-api
+COPY --from=legacy-api-install /venv /venv
 EXPOSE 8080
 CMD ["ionbeam-legacy-api"]

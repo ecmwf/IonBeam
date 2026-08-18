@@ -1,0 +1,228 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+
+jobs:
+  determine-version:
+    if: github.event_name == 'pull_request' || github.event_name == 'release'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            BASE=$(git describe --tags --match '[0-9]*' --abbrev=0 2>/dev/null || echo "0.0.0")
+            MAJOR=$(echo "$BASE" | cut -d. -f1)
+            MINOR=$(echo "$BASE" | cut -d. -f2)
+            PATCH=$(echo "$BASE" | cut -d. -f3)
+            VERSION="${MAJOR}.${MINOR}.$((PATCH + 1)).dev${{ github.run_number }}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+  reuse:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: REUSE compliance
+        uses: fsfe/reuse-action@v5
+
+  test:
+    runs-on: ubuntu-latest
+    # The Valkey-backed adapters (build queue, event bus, coordination store)
+    # are only covered when IONBEAM_TEST_REDIS_URL points at an instance.
+    services:
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Run tests
+        env:
+          IONBEAM_TEST_REDIS_URL: redis://localhost:6379/15
+        run: |
+          set -o pipefail
+          uv sync --frozen --all-packages --group dev
+          uv run --no-sync pytest | tee pytest-result.log
+      # Fork PRs run with a read-only token that cannot comment.
+      - name: Read test output
+        id: read-test
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          echo 'output<<PYTEST_EOF' >> $GITHUB_OUTPUT
+          tail -c 60000 pytest-result.log >> $GITHUB_OUTPUT
+          echo 'PYTEST_EOF' >> $GITHUB_OUTPUT
+      - name: Find existing test results comment
+        if: always() && steps.read-test.outcome == 'success'
+        uses: peter-evans/find-comment@v3
+        id: find-test-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '### Test Results'
+      - name: Create or update PR comment with test results
+        if: always() && steps.read-test.outcome == 'success'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-test-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          edit-mode: replace
+          body: |
+            ### Test Results
+            ```
+            ${{ steps.read-test.outputs.output }}
+            ```
+
+  # The Dockerfile's `dist` stage, extracted to the host: the published wheels
+  # come from the same stage the images install from, built by the same
+  # python:3.12-slim that runs them.
+  build-python-packages:
+    needs: [determine-version, test]
+    if: github.event_name == 'pull_request' || github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build wheels and locked requirements
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: dist
+          build-args: |
+            VERSION=${{ needs.determine-version.outputs.version }}
+          outputs: type=local,dest=dist
+          cache-from: type=gha,scope=dist
+          cache-to: type=gha,mode=max,scope=dist
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ needs.determine-version.outputs.version }}
+          path: dist/
+
+  build-docker-images:
+    needs: [determine-version, build-python-packages]
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'release' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    strategy:
+      matrix:
+        include:
+          - component: ionbeam
+            dockerfile: Dockerfile
+            target: ionbeam
+          - component: data-sources
+            dockerfile: Dockerfile
+            target: data-sources
+          - component: ecmwf-exporter
+            dockerfile: Dockerfile
+            target: ecmwf-exporter
+          - component: legacy-api
+            dockerfile: Dockerfile
+            target: legacy-api
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker registry
+        uses: docker/login-action@v3
+        with:
+          registry: eccr.ecmwf.int
+          username: ${{ secrets.ECMWF_DOCKER_REGISTRY_USERNAME }}
+          password: ${{ secrets.ECMWF_DOCKER_REGISTRY_ACCESS_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # The dist scope is the wheel layer build-python-packages already cached,
+      # so each image reuses those wheels instead of rebuilding them.
+      - name: Build and push ${{ matrix.component }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          push: true
+          tags: eccr.ecmwf.int/ionbeam-next/${{ matrix.component }}:${{ needs.determine-version.outputs.version }}
+          build-args: |
+            VERSION=${{ needs.determine-version.outputs.version }}
+          cache-from: |
+            type=gha,scope=${{ matrix.component }}
+            type=gha,scope=dist
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+  upload-release-assets:
+    if: github.event_name == 'release'
+    needs: [determine-version, build-python-packages]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ needs.determine-version.outputs.version }}
+          path: dist
+      - name: Upload wheels to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.whl --repo "${{ github.repository }}"
+
+  image-summary:
+    if: github.event_name == 'pull_request'
+    needs: [determine-version, build-docker-images]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find existing artifacts comment
+        uses: peter-evans/find-comment@v3
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '### Build Artifacts'
+      - name: Comment artifacts on PR
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          edit-mode: replace
+          body: |
+            ### Build Artifacts
+            **Docker**
+            ```
+            docker pull eccr.ecmwf.int/ionbeam-next/ionbeam:${{ needs.determine-version.outputs.version }}
+            docker pull eccr.ecmwf.int/ionbeam-next/data-sources:${{ needs.determine-version.outputs.version }}
+            docker pull eccr.ecmwf.int/ionbeam-next/ecmwf-exporter:${{ needs.determine-version.outputs.version }}
+            docker pull eccr.ecmwf.int/ionbeam-next/legacy-api:${{ needs.determine-version.outputs.version }}
+            ```
+            Deploy: set `image.tag: "${{ needs.determine-version.outputs.version }}"` in your local values overlay.

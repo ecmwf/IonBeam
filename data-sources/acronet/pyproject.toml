@@ -7,9 +7,11 @@ requires-python = ">=3.12"
 dependencies = [
     "click>=8.1.0",
     "httpx>=0.28.1",
+    "httpx-retries>=0.2.0",
     "ionbeam-client",
     "numpy>=2.3.4",
     "pandas>=2.3.3",
+    "pydantic-settings>=2.14",
     "pyyaml>=6.0.3",
     "structlog>=25.5.0",
 ]
@@ -19,3 +21,7 @@ ionbeam-client = { workspace = true }
 
 [project.scripts]
 acronet = "acronet:main"
+
+[build-system]
+requires = ["uv_build>=0.9.4,<0.10.0"]
+build-backend = "uv_build"

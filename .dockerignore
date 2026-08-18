@@ -1,11 +1,20 @@
-.git
+# Allowlist: the dist stage builds the workspace wheels from these manifests and
+# member sources. Everything else stays out of the build context.
+*
+!pyproject.toml
+!uv.lock
+!ionbeam
+!ionbeam-client
+!ionbeam-legacy-api
+!data-sources
+!exporters
+
+# Junk inside the allowed trees.
+**/node_modules
 **/__pycache__
 **/.venv
 **/.pytest_cache
 **/.mypy_cache
-dist
-build
-*.egg-info
-.gitignore
-.python-version
-deployment/
+**/*.egg-info
+**/dist
+**/build

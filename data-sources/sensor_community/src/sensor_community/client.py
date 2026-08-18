@@ -1,10 +1,5 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
 import asyncio
 import gzip
@@ -12,32 +7,43 @@ import io
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import AsyncIterator, Iterable
+from time import monotonic
+from typing import AsyncIterator, Iterable, Optional
+from uuid import UUID
 
 import httpx
+import ijson
 import numpy as np
 import pandas as pd
 import structlog
 from aiostream import stream
 from bs4 import BeautifulSoup
 from httpx_retries import Retry, RetryTransport
-from ionbeam_client import IonbeamClient, coerce_types
-from ionbeam_client.arrow_tools import (
-    dataframes_to_record_batches,
-    schema_from_ingestion_map,
-)
+from ionbeam_client import IonbeamClient
+from ionbeam_client.canonical_stream import canonical_record_batches
+from ionbeam_client.alignment import drop_undeclared_columns
 from ionbeam_client.models import (
-    CanonicalVariable,
-    DataIngestionMap,
-    DatasetMetadata,
+    DatasetSchema,
     IngestionMetadata,
-    LatitudeAxis,
-    LongitudeAxis,
-    MetadataVariable,
-    TimeAxis,
+    Tag,
+    TimeCoordinate,
+    cf,
+    geographic_point_coordinates,
 )
 
 from .models import SensorCommunityConfig
+
+# Archive CSV column -> the canonical column it lands in.
+ARCHIVE_COLUMNS = {
+    "timestamp": "time",
+    "temperature": "air_temperature",
+    "humidity": "relative_humidity",
+    "pressure": "air_pressure",
+    "pressure_sealevel": "air_pressure_at_sea_level",
+    "P0": "mass_concentration_of_pm1_ambient_aerosol_in_air",
+    "P1": "mass_concentration_of_pm10_ambient_aerosol_in_air",
+    "P2": "mass_concentration_of_pm2p5_ambient_aerosol_in_air",
+}
 
 
 @dataclass
@@ -58,62 +64,69 @@ class SensorDataChunk:
 
 retry_transport = RetryTransport(retry=Retry(total=5, backoff_factor=0.5))
 
+# sensor.community requires clients to identify themselves.
+USER_AGENT = "ionbeam (ECMWF; https://github.com/ecmwf/IonBeam)"
+
+# Live API value_type -> the canonical column it lands in.
+LIVE_VALUE_COLUMNS = {
+    "temperature": "air_temperature",
+    "humidity": "relative_humidity",
+    "pressure": "air_pressure",
+    "pressure_at_sealevel": "air_pressure_at_sea_level",
+    "P0": "mass_concentration_of_pm1_ambient_aerosol_in_air",
+    "P1": "mass_concentration_of_pm10_ambient_aerosol_in_air",
+    "P2": "mass_concentration_of_pm2p5_ambient_aerosol_in_air",
+}
+
+# Must outlive the live dump's 5-minute lookback.
+SEEN_IDS_RETENTION_SECONDS = 600
+
+
+def live_records_to_frame(records: list[dict]) -> pd.DataFrame:
+    rows = []
+    for record in records:
+        values = {
+            LIVE_VALUE_COLUMNS[v["value_type"]]: v["value"]
+            for v in record["sensordatavalues"]
+            if v["value_type"] in LIVE_VALUE_COLUMNS
+        }
+        if not values:
+            continue
+        rows.append(
+            {
+                "time": record["timestamp"],
+                "lat": record["location"]["latitude"],
+                "lon": record["location"]["longitude"],
+                "sensor_id": str(record["sensor"]["id"]),
+                "sensor_type": record["sensor"]["sensor_type"]["name"],
+                **values,
+            }
+        )
+    return pd.DataFrame(rows)
+
 
 class SensorCommunitySource:
     def __init__(self, config: SensorCommunityConfig):
         self._config = config
         self.logger = structlog.get_logger(__name__)
         self.metadata: IngestionMetadata = IngestionMetadata(
-            dataset=DatasetMetadata(
-                name="sensor.community",
-                description="raw IoT data collected from sensor.community",
-                subject_to_change_window=timedelta(days=1),
-                aggregation_span=timedelta(hours=1),
-                source_links=[],
-                keywords=["sensor.community", "iot", "data"],
-            ),
-            ingestion_map=DataIngestionMap(
-                datetime=TimeAxis(from_col="timestamp"),
-                lat=LatitudeAxis(standard_name="latitude", cf_unit="degrees_north"),
-                lon=LongitudeAxis(standard_name="longitude", cf_unit="degrees_east"),
-                canonical_variables=[
-                    CanonicalVariable(
-                        column="temperature",
-                        standard_name="air_temperature",
-                        cf_unit="degC",
-                    ),
-                    CanonicalVariable(
-                        column="humidity",
-                        standard_name="relative_humidity",
-                        cf_unit="1",
-                    ),
-                    CanonicalVariable(
-                        column="pressure", standard_name="air_pressure", cf_unit="Pa"
-                    ),
-                    CanonicalVariable(
-                        column="pressure_sealevel",
-                        standard_name="air_pressure_at_sea_level",
-                        cf_unit="Pa",
-                    ),
-                    CanonicalVariable(
-                        column="P0",
-                        standard_name="mass_concentration_of_pm1_ambient_aerosol_in_air",
-                        cf_unit="ug m-3",
-                    ),
-                    CanonicalVariable(
-                        column="P1",
-                        standard_name="mass_concentration_of_pm10_ambient_aerosol_in_air",
-                        cf_unit="ug m-3",
-                    ),
-                    CanonicalVariable(
-                        column="P2",
-                        standard_name="mass_concentration_of_pm2p5_ambient_aerosol_in_air",
-                        cf_unit="ug m-3",
-                    ),
+            version=3,
+            name="sensor.community",
+            dataset_schema=DatasetSchema(
+                time=TimeCoordinate(),
+                coordinates=geographic_point_coordinates(),
+                variables=[
+                    cf("air_temperature", "degC"),
+                    cf("relative_humidity", "%"),
+                    cf("air_pressure", "Pa"),
+                    cf("air_pressure_at_sea_level", "Pa"),
+                    cf("mass_concentration_of_pm1_ambient_aerosol_in_air", "ug m-3"),
+                    cf("mass_concentration_of_pm10_ambient_aerosol_in_air", "ug m-3"),
+                    cf("mass_concentration_of_pm2p5_ambient_aerosol_in_air", "ug m-3"),
                 ],
-                metadata_variables=[
-                    MetadataVariable(column="sensor_id", dtype="int32"),
-                    MetadataVariable(column="sensor_type"),
+                tags=[
+                    Tag(name="sensor_id"),
+                    Tag(name="sensor_type"),
                 ],
             ),
         )
@@ -123,10 +136,9 @@ class SensorCommunitySource:
         start_time: datetime,
         end_time: datetime,
         client: IonbeamClient,
+        ingestion_id: Optional[UUID] = None,
         limit=None,
     ) -> None:
-        schema = schema_from_ingestion_map(self.metadata.ingestion_map)
-        
         async def dataframe_stream() -> AsyncIterator[pd.DataFrame]:
             async for chunk in self.crawl_sensor_data_in_chunks(
                 start_time, end_time, limit
@@ -134,17 +146,14 @@ class SensorCommunitySource:
                 if chunk.data is not None and not chunk.data.empty:
                     yield chunk.data
 
-        batch_stream = dataframes_to_record_batches(
-            dataframe_stream(),
-            schema=schema,
-            preserve_index=False,
-        )
+        batch_stream = canonical_record_batches(dataframe_stream(), self.metadata)
 
         await client.ingest(
             batch_stream=batch_stream,
             metadata=self.metadata,
             start_time=start_time,
             end_time=end_time,
+            ingestion_id=ingestion_id,
         )
 
         self.logger.info(
@@ -153,13 +162,80 @@ class SensorCommunitySource:
             end=end_time.isoformat(),
         )
 
-    async def load_raw_to_df(self, url: str, client: httpx.AsyncClient):
-        try:
-            response = await client.get(url)
-            if response.status_code != 200:
-                self.logger.error("Fetching CSV %s failed", url)
-                return None
+    async def poll_live(self, client: IonbeamClient, stop: asyncio.Event) -> None:
+        """Ingest the live API dump (the last ~5 minutes of measurements,
+        regenerated every minute) until ``stop`` is set. Measurement ids are
+        marked seen only once ingested, so a failed poll retries them."""
+        seen: dict[int, float] = {}
 
+        async with httpx.AsyncClient(
+            timeout=self._config.timeout_seconds,
+            transport=retry_transport,
+            headers={"User-Agent": USER_AGENT},
+        ) as http:
+            while not stop.is_set():
+                started = monotonic()
+                seen = {
+                    measurement_id: at
+                    for measurement_id, at in seen.items()
+                    if started - at < SEEN_IDS_RETENTION_SECONDS
+                }
+                try:
+                    ingested = await self._ingest_live_dump(http, client, seen)
+                    seen.update((measurement_id, started) for measurement_id in ingested)
+                except Exception:
+                    self.logger.exception("Live poll failed; retrying next interval")
+
+                delay = self._config.poll_interval_seconds - (monotonic() - started)
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=max(delay, 0))
+                except asyncio.TimeoutError:
+                    pass
+
+    async def _ingest_live_dump(
+        self, http: httpx.AsyncClient, client: IonbeamClient, seen: dict[int, float]
+    ) -> set[int]:
+        response = await http.get(self._config.live_url)
+        response.raise_for_status()
+        # Stream-parse the dump: json.loads would materialize every record's
+        # dict tree at once (~15x the dump's bytes), and the dump grows with
+        # the network's diurnal cycle — parse peak must scale with the *new*
+        # records instead.
+        records = [
+            r
+            for r in ijson.items(response.content, "item", use_float=True)
+            if r["id"] not in seen
+        ]
+        frame = live_records_to_frame(records)
+
+        if not frame.empty:
+            times = pd.to_datetime(frame["time"], utc=True)
+            await client.ingest(
+                batch_stream=canonical_record_batches([frame], self.metadata),
+                metadata=self.metadata,
+                start_time=times.min().to_pydatetime(),
+                end_time=times.max().to_pydatetime(),
+            )
+            self.logger.info(
+                "Ingested live measurements",
+                records=len(frame),
+                start=times.min().isoformat(),
+                end=times.max().isoformat(),
+            )
+
+        return {r["id"] for r in records}
+
+    async def load_raw_to_df(self, url: str, client: httpx.AsyncClient):
+        # A 404 is a sensor with no archive file that day — checked, nothing
+        # there. Any other failure must raise: continuing would claim a range
+        # as swept that was skipped on error.
+        response = await client.get(url)
+        if response.status_code == 404:
+            self.logger.info("No archive CSV for sensor", url=url)
+            return None
+        response.raise_for_status()
+
+        try:
             raw_data = io.BytesIO(response.content)
 
             if url.endswith(".csv.gz"):
@@ -172,10 +248,12 @@ class SensorCommunitySource:
                 .replace("", np.nan)
                 .replace("unavailable", np.nan)
             )
-            df = coerce_types(df, self.metadata.ingestion_map)
-            return df
-        except Exception as e:
-            self.logger.exception(e)
+            df = df.rename(columns=ARCHIVE_COLUMNS)
+            return drop_undeclared_columns(df, self.metadata.dataset_schema)
+        except Exception:
+            # Corrupt content is permanent for this file; a re-fetch returns
+            # the same bytes, so skip it rather than poison the trigger.
+            self.logger.exception("Unreadable archive CSV", url=url)
             return None
 
     async def get_sensor_urls_by_date(
@@ -188,12 +266,11 @@ class SensorCommunitySource:
         ).format(year=timestamp.year, month=timestamp.month, day=timestamp.day)
         url = f"{self._config.base_url}{path}"
 
-        self.logger.info("Fetching sensor data for %s", timestamp)
+        self.logger.info("Fetching sensor data", date=str(timestamp))
         response = await client.get(url)
-
-        if response.status_code != 200:
-            self.logger.error("Request for sensors for %s failed", timestamp)
-            return
+        # An unreachable or unpublished day listing must raise, not read as an
+        # empty day — a claimed sweep of it would never be re-fetched.
+        response.raise_for_status()
 
         soup = BeautifulSoup(response.text, features="lxml")
 
@@ -246,7 +323,9 @@ class SensorCommunitySource:
         - canonicalized data is yielded as dataframe
         """
         async with httpx.AsyncClient(
-            timeout=self._config.timeout_seconds, transport=retry_transport
+            timeout=self._config.timeout_seconds,
+            transport=retry_transport,
+            headers={"User-Agent": USER_AGENT},
         ) as client:
             for chunk in self._split_by_day(start_time, end_time):
                 i = 0
@@ -265,13 +344,7 @@ class SensorCommunitySource:
                         ]
                         results = await asyncio.gather(*tasks)
                         for sensor, result in zip(sensor_group, results):
-                            if isinstance(result, Exception):
-                                self.logger.error(
-                                    "Failed to fetch sensor df %s \n %s",
-                                    result,
-                                    sensor_group,
-                                )
-                            elif result is not None:
+                            if result is not None:
                                 yield SensorDataChunk(
                                     f"{sensor.sensor_id}_{sensor.sensor_type}_{sensor.last_updated}",
                                     sensor,

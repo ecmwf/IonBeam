@@ -1,31 +1,21 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
 import logging
-import logging.handlers
-from pathlib import Path
+import sys
 
 import structlog
-from structlog import dev as structlog_dev
 from structlog.contextvars import merge_contextvars
 from structlog.processors import TimeStamper
 from structlog.stdlib import LoggerFactory, ProcessorFormatter
 
 
-def setup_logging(
-    level: int = logging.DEBUG,
-    log_dir: Path = Path("./logs"),
-    log_name: str = "ionbeam.log",
-) -> None:
-    log_dir.mkdir(parents=True, exist_ok=True)
-
+def setup_logging(level: int = logging.INFO) -> None:
+    """Route all logging (structlog and stdlib) to stderr: pretty-printed on a
+    terminal, JSON lines otherwise. Rotation and shipping belong to the
+    platform reading the stream."""
     timestamper = TimeStamper(fmt="iso", utc=True)
-    foreign_pre_chain = [
+    pre_chain = [
         merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
@@ -35,35 +25,24 @@ def setup_logging(
         structlog.processors.format_exc_info,
     ]
 
-    console = logging.StreamHandler()
-    console.setLevel(level)
-    console.setFormatter(
-        ProcessorFormatter(
-            processors=[
-                ProcessorFormatter.remove_processors_meta,
-                structlog_dev.ConsoleRenderer(colors=True),
-            ],
-            foreign_pre_chain=foreign_pre_chain,
-        )
+    renderer = (
+        structlog.dev.ConsoleRenderer(colors=True)
+        if sys.stderr.isatty()
+        else structlog.processors.JSONRenderer()
     )
-
-    file_handler = logging.handlers.WatchedFileHandler(str(log_dir / log_name))
-    file_handler.setLevel(level)
-    file_handler.setFormatter(
+    handler = logging.StreamHandler()
+    handler.setLevel(level)
+    handler.setFormatter(
         ProcessorFormatter(
-            processors=[
-                ProcessorFormatter.remove_processors_meta,
-                structlog.processors.JSONRenderer(),
-            ],
-            foreign_pre_chain=foreign_pre_chain,
+            processors=[ProcessorFormatter.remove_processors_meta, renderer],
+            foreign_pre_chain=pre_chain,
         )
     )
 
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(level)
-    root.addHandler(console)
-    root.addHandler(file_handler)
+    root.addHandler(handler)
 
     structlog.configure(
         processors=[
@@ -73,6 +52,7 @@ def setup_logging(
             structlog.stdlib.PositionalArgumentsFormatter(),
             timestamper,
             structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
             ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=LoggerFactory(),

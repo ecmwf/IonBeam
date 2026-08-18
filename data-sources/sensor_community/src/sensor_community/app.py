@@ -1,80 +1,63 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
 import asyncio
 import os
-import signal
+from contextlib import asynccontextmanager
 
 import click
 import structlog
 import yaml
-
-from ionbeam_client import IonbeamClient, IonbeamClientConfig
+from ionbeam_client import IonbeamClient, run_source
 
 from .client import SensorCommunitySource
 from .models import SensorCommunityConfig
 
-
 logger = structlog.get_logger(__name__)
 
 
-def load_config(config_path: str) -> dict:
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
+@asynccontextmanager
+async def live_poll(
+    source: SensorCommunitySource, client: IonbeamClient, shutdown: asyncio.Event
+):
+    poll_task = asyncio.create_task(source.poll_live(client, shutdown))
+    # a dead poll loop takes the pod down instead of degrading to triggers-only
+    poll_task.add_done_callback(lambda _: shutdown.set())
+    try:
+        yield
+    finally:
+        await poll_task
 
 
 async def run_app():
     config_path = os.getenv("SENSOR_COMMUNITY_CONFIG_PATH", "config.yaml")
     logger.info("Loading configuration", config_path=config_path)
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
 
-    config_dict = load_config(config_path)
-
-    ionbeam_config = IonbeamClientConfig(**config_dict.get("ionbeam", {}))
-    sensor_community_config = SensorCommunityConfig(
-        **config_dict.get("sensor_community", {})
+    source = SensorCommunitySource(
+        SensorCommunityConfig(**config.get("sensor_community", {}))
     )
 
-    source = SensorCommunitySource(sensor_community_config)
-    ionbeam_client = IonbeamClient(ionbeam_config)
+    def setup(client: IonbeamClient, shutdown: asyncio.Event):
+        async def handle_time_window(start_time, end_time, trigger_id) -> None:
+            logger.info(
+                "Handling archive time window",
+                start=start_time.isoformat(),
+                end=end_time.isoformat(),
+            )
+            await source.fetch(start_time, end_time, client, ingestion_id=trigger_id)
 
-    async def handle_time_window(start_time, end_time) -> None:
-        logger.info(
-            "Handling time window",
-            start=start_time.isoformat(),
-            end=end_time.isoformat(),
+        client.register_trigger_handler(
+            config.get("source_name", "sensor.community"), handle_time_window
         )
-        await source.fetch(start_time, end_time, ionbeam_client)
+        return live_poll(source, client, shutdown)
 
-    source_name = config_dict.get("source_name", "sensor.community")
-    ionbeam_client.register_trigger_handler(source_name, handle_time_window)
-
-    # Setup signal handlers for graceful shutdown
-    shutdown_event = asyncio.Event()
-
-    def signal_handler(signum, frame):
-        logger.info("Received shutdown signal", signal=signum)
-        shutdown_event.set()
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    logger.info("Starting Sensor.community data source", source_name=source_name)
-
-    async with ionbeam_client:
-        logger.info("Sensor.community data source running and listening for triggers")
-        await shutdown_event.wait()
-        logger.info("Shutting down")
-
-    logger.info("Sensor.community data source stopped")
+    await run_source("sensor.community", config, setup)
 
 
 @click.command()
-@click.option("--config", "-c", default="config.yaml", help="Path to config file")
+@click.option("--config", "-c", envvar="SENSOR_COMMUNITY_CONFIG_PATH", default="config.yaml", help="Path to config file")
 def main(config):
     """Sensor.community data source - Fetch data from Sensor.community air quality sensors."""
     os.environ["SENSOR_COMMUNITY_CONFIG_PATH"] = config

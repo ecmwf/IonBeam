@@ -1,15 +1,18 @@
 source_name: "acronet"
 
 ionbeam:
-  amqp_url: "amqp://guest:guest@localhost:5672/"
+  flight_url: "grpc://localhost:8815"
 
 acronet:
   base_url: "https://webdrops.cimafoundation.org/app/"
   token_endpoint: "https://testauth.cimafoundation.org/auth/realms/webdrops/protocol/openid-connect/token"
-  username: "your_username"
-  password: "your_password"
   client_id: "webdrops"
-  client_secret: "your_client_secret"
+  # Credentials come from ACRONET_USERNAME / ACRONET_PASSWORD /
+  # ACRONET_CLIENT_SECRET env vars (a k8s Secret in deployment). A value set
+  # here overrides the env var — local runs only.
+  # username: ""
+  # password: ""
+  # client_secret: ""
   timeout_seconds: 30.0
   max_retries: 3
   aggregation_minutes: 60

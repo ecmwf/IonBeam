@@ -1,15 +1,15 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
-from pydantic import BaseModel
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class NetAtmoMQTTConfig(BaseModel):
+class NetAtmoMQTTConfig(BaseSettings):
+    # Broker connection fields (host, credentials, client_id) come from MQTT_*
+    # env vars — a k8s Secret via envFrom, since the Helm chart never renders
+    # secrets into the ConfigMap; flush tuning comes from the config file.
+    model_config = SettingsConfigDict(env_prefix="MQTT_", extra="ignore")
+
     host: str
     port: int = 8883
     username: str

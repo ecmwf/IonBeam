@@ -1,93 +1,198 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import AsyncIterator, List, Optional, Set
+import asyncio
+import json
+import random
+import threading
+from dataclasses import dataclass
+from datetime import datetime
+from typing import AsyncIterator, Awaitable, Callable, List, Optional, Set
 from uuid import UUID, uuid4
 
-import aio_pika
 import pyarrow as pa
+import pyarrow.flight as flight
 import structlog
 
-from .amqp import (
-    AMQPConsumer,
-    AMQPPublisher,
-    ExportHandler,
-    TriggerHandler,
-    create_export_message_handler,
-    create_trigger_message_handler,
-    get_export_queue_name,
-    get_trigger_queue_name,
-)
-from .arrow_tools import schema_from_ingestion_map
-from .config import (
-    _ARROW_STORE_PATH,
-    _INGESTION_EXCHANGE,
-    _INGESTION_ROUTING_KEY,
-    IonbeamClientConfig,
-)
+from .config import IonbeamClientConfig
 from .models import IngestDataCommand, IngestionMetadata
-from .transfer import ArrowStore, LocalFileSystemStore
+from .schema_metadata import SCHEMA_HASH
+
+class IngestRejected(ValueError):
+    """The stream can never be ingested as-is (contract violation, empty
+    stream); retrying the same data is pointless."""
+
+
+@dataclass(frozen=True)
+class AvailableDataset:
+    """A pushed announcement that a dataset build can be fetched.
+
+    ``info`` is a server-minted :class:`flight.FlightInfo`; stream the data by
+    redeeming every endpoint's ticket with ``connection.do_get``, in endpoint
+    order. Structure and semantics travel in the streamed schema, readable via
+    :mod:`ionbeam_client.schema_metadata`.
+
+    A higher ``version`` of the same time range supersedes this build whenever
+    it arrives. No revision is published at or after ``revisable_until``, so
+    the build is immutable once the clock passes it.
+    """
+
+    id: UUID
+    dataset: str
+    start_time: datetime
+    end_time: datetime
+    version: int
+    revisable_until: datetime
+    info: flight.FlightInfo
+
+
+# The trigger's command id is deterministic per (schedule, boundary); a handler
+# that ingests under it (ingestion_id=trigger_id) makes a redelivered trigger
+# replay as the same claims and records instead of fresh data.
+TriggerHandler = Callable[[datetime, datetime, UUID], Awaitable[None]]
+# The handler reads the canonical data it needs itself (via do_get on the
+# connection), so it is handed the connection and the announcement, nothing
+# pre-fetched.
+ExportHandler = Callable[[flight.FlightClient, AvailableDataset], None]
+
+_MAX_RETRY_DELAY = 60.0
+
+# The client's side of a subscription exchange carries no record batches — only
+# per-event completion acks as app-metadata frames (the Flight-native channel
+# for application acknowledgements), so this schema is deliberately empty.
+_ACK_SCHEMA = pa.schema([])
+
+# Keepalive interval must exceed the server's 300s ping floor
+# (min_recv_ping_interval_without_data): faster pings sever the connection
+# mid-handler. max_pings_without_data=0 keeps pinging the quiet stream at all.
+_GRPC_KEEPALIVE_OPTIONS = [
+    ("grpc.keepalive_time_ms", 600_000),
+    ("grpc.keepalive_timeout_ms", 20_000),
+    ("grpc.http2.max_pings_without_data", 0),
+]
+
+
+class _FlightSubscription:
+    """A dedicated Flight connection holding one DoExchange stream open,
+    reconnecting until stopped."""
+
+    def __init__(
+        self,
+        name: str,
+        url: str,
+        command: dict,
+        on_batch: Callable[[flight.FlightClient, pa.RecordBatch], str],
+        retry_delay: float,
+        shutdown_timeout: float,
+    ):
+        self.logger = structlog.get_logger(__name__).bind(subscription=name)
+        self._url = url
+        self._descriptor = flight.FlightDescriptor.for_command(
+            json.dumps(command).encode("utf-8")
+        )
+        self._on_batch = on_batch
+        self._retry_delay = retry_delay
+        self._shutdown_timeout = shutdown_timeout
+        self._closing = threading.Event()
+        self._connection: Optional[flight.FlightClient] = None
+        self._reader: Optional[flight.FlightStreamReader] = None
+        self._thread = threading.Thread(
+            target=self._run, name=f"ionbeam-{name}", daemon=True
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        # Signal first so no new event is picked up, then cancel the read cursor to
+        # unblock an idle subscription. Joins for the full grace window so a running
+        # handler's in-flight work (an export, a fetch) completes; k8s SIGKILL at
+        # grace end is the hard bound.
+        self._closing.set()
+        reader = self._reader
+        if reader is not None:
+            try:
+                reader.cancel()
+            except flight.FlightError:
+                pass  # cancelling a stream that just died races shutdown
+        self._thread.join(timeout=self._shutdown_timeout)
+        if self._thread.is_alive():
+            self.logger.warning(
+                "Subscription handler still running at shutdown deadline",
+                timeout=self._shutdown_timeout,
+            )
+
+    def _run(self) -> None:
+        backoff = self._retry_delay
+        while not self._closing.is_set():
+            try:
+                self._connection = flight.connect(
+                    self._url, generic_options=_GRPC_KEEPALIVE_OPTIONS
+                )
+                self._stream(self._connection)
+                backoff = self._retry_delay
+            except Exception as exc:
+                if self._closing.is_set():
+                    return
+                self.logger.warning(
+                    "Subscription stream failed, reconnecting",
+                    error=str(exc),
+                    retry_in=backoff,
+                )
+            finally:
+                self._reader = None
+                connection, self._connection = self._connection, None
+                if connection is not None:
+                    try:
+                        connection.close()
+                    except flight.FlightError:
+                        pass  # closing a connection whose stream just died can race
+            # Full jitter, so replicas retrying a down server don't reconnect in lockstep.
+            self._closing.wait(random.uniform(0, backoff))
+            backoff = min(backoff * 2, _MAX_RETRY_DELAY)
+
+    def _stream(self, connection: flight.FlightClient) -> None:
+        writer, reader = connection.do_exchange(self._descriptor)
+        self._reader = reader
+        try:
+            # begin() flushes the descriptor so the server starts pushing; the
+            # writer then stays open to carry per-event completion acks back.
+            writer.begin(_ACK_SCHEMA)
+            self.logger.info("Subscription stream open")
+            for chunk in reader:
+                if self._closing.is_set():
+                    return
+                if chunk.data is None:
+                    continue
+                # A handler failure propagates and tears the stream down without
+                # acking, so the server leaves the event pending for redelivery.
+                # The handler returns the event id it completed; echoing it lets
+                # the server verify the ack matches what it delivered.
+                completed_id = self._on_batch(connection, chunk.data)
+                writer.write_metadata(completed_id.encode())
+        finally:
+            try:
+                writer.close()
+            except flight.FlightError:
+                pass  # the stream is already torn down when we were cancelled
 
 
 class IonbeamClient:
-    """Client for ingesting observations into Ionbeam and exporting processed datasets.
-
-    The IonbeamClient abstracts message queuing, data serialization, and Arrow stream
-    handling, allowing focus on source-specific collection and export logic. It uses
-    streaming ingestion with Apache Arrow batches for efficient processing of large
-    datasets with predictable memory overhead.
-
-    Args:
-        config: Configuration for AMQP connection and client behavior.
-
-    Example:
-        Basic usage with context manager::
-
-            from ionbeam_client import IonbeamClient, IonbeamClientConfig
-
-            config = IonbeamClientConfig()
-            
-            async with IonbeamClient(config) as client:
-                await client.ingest(
-                    batch_stream=generate_batches(),
-                    metadata=metadata,
-                    start_time=start,
-                    end_time=end
-                )
-    """
     def __init__(self, config: IonbeamClientConfig):
-        self.config = config or IonbeamClientConfig()
+        self.config = config
         self.logger = structlog.get_logger(__name__)
 
-        # Initialize Arrow store using internal configuration
-        # Currently uses local filesystem, will migrate to S3-compatible object store
-        self._arrow_store: ArrowStore = LocalFileSystemStore(
-            base_path=Path(_ARROW_STORE_PATH)
-        )
-
-        # Initialize publisher (will be configured with channel on connect)
-        self._publisher = AMQPPublisher(
-            routing_key=_INGESTION_ROUTING_KEY,
-            exchange=_INGESTION_EXCHANGE,
-            max_retries=self.config.max_retries,
-            retry_delay=self.config.retry_delay,
-        )
-
-        # Shared AMQP connection and channel
-        self._amqp_connection: Optional[aio_pika.abc.AbstractRobustConnection] = None
-        self._amqp_channel: Optional[aio_pika.abc.AbstractChannel] = None
-
-        # Consumers list
-        self._consumers: List[AMQPConsumer] = []
-
+        self._flight: Optional[flight.FlightClient] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._subscriptions: List[_FlightSubscription] = []
+        self._registered_datasets: dict[str, str] = {}
         self._connected = False
+        # Names this process to the server's consumer group for the lifetime of
+        # the client, across reconnects: a subscription that drops takes back
+        # its own unacked events on reattach instead of waiting out the bus's
+        # reclaim threshold. Replicas generate distinct ids and so never share
+        # pending work.
+        self._subscriber_id = uuid4().hex
 
     async def __aenter__(self) -> "IonbeamClient":
         await self.connect()
@@ -100,36 +205,17 @@ class IonbeamClient:
         if self._connected:
             return
 
-        self.logger.info("Connecting ionbeam client", url=self.config.amqp_url)
+        self.logger.info("Connecting ionbeam client", url=self.config.flight_url)
 
-        try:
-            # Create shared AMQP connection
-            self._amqp_connection = await aio_pika.connect_robust(
-                self.config.amqp_url,
-                timeout=self.config.connection_timeout,
-            )
-            self.logger.info("Established AMQP connection")
+        self._loop = asyncio.get_running_loop()
+        self._flight = flight.connect(
+            self.config.flight_url, generic_options=_GRPC_KEEPALIVE_OPTIONS
+        )
+        for subscription in self._subscriptions:
+            subscription.start()
 
-            # Create single shared channel for publisher and all consumers
-            self._amqp_channel = await self._amqp_connection.channel()
-            self.logger.debug("Created shared AMQP channel")
-
-            # Configure publisher with the shared channel
-            await self._publisher.set_channel(self._amqp_channel)
-
-            # Configure and start all consumers with the shared channel
-            for consumer in self._consumers:
-                await consumer.set_channel(self._amqp_channel)
-                # Call the stored setup handler to start consuming
-                if hasattr(consumer, "_setup_handler"):
-                    await consumer._setup_handler()  # type: ignore
-
-            self._connected = True
-            self.logger.info("Ionbeam client connected")
-
-        except Exception as e:
-            self.logger.error("Failed to connect ionbeam client", error=str(e))
-            raise
+        self._connected = True
+        self.logger.info("Ionbeam client connected")
 
     async def close(self) -> None:
         if not self._connected:
@@ -137,54 +223,44 @@ class IonbeamClient:
 
         self.logger.info("Closing ionbeam client")
 
-        # Stop all consumers
-        for consumer in self._consumers:
-            await consumer.stop()
+        for subscription in self._subscriptions:
+            await asyncio.to_thread(subscription.stop)
 
-        # Release publisher channel reference
-        await self._publisher.close()
-
-        # Close shared channel
-        if self._amqp_channel:
-            try:
-                await self._amqp_channel.close()
-                self.logger.debug("Closed shared AMQP channel")
-            except Exception as e:
-                self.logger.warning("Error closing AMQP channel", error=str(e))
-            finally:
-                self._amqp_channel = None
-
-        # Close shared connection
-        if self._amqp_connection:
-            try:
-                await self._amqp_connection.close()
-                self.logger.info("Closed AMQP connection")
-            except Exception as e:
-                self.logger.warning("Error closing AMQP connection", error=str(e))
-            finally:
-                self._amqp_connection = None
+        if self._flight is not None:
+            await asyncio.to_thread(self._flight.close)
+            self._flight = None
 
         self._connected = False
         self.logger.info("Ionbeam client closed")
 
-    def _generate_object_key(
-        self,
-        dataset_name: str,
-        start_time: datetime,
-        end_time: datetime,
-    ) -> str:
-        def format_timestamp(dt: datetime) -> str:
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            else:
-                dt = dt.astimezone(timezone.utc)
-            return dt.strftime("%Y%m%dT%H%M%SZ")
+    async def register_dataset(self, metadata: IngestionMetadata) -> None:
+        if not self._connected:
+            raise RuntimeError(
+                "Client not connected. Use async context manager or call connect() first."
+            )
 
-        start_s = format_timestamp(start_time)
-        end_s = format_timestamp(end_time)
-        now_s = format_timestamp(datetime.now(timezone.utc))
+        dataset_name = metadata.name
+        schema_hash = metadata.schema_hash()
+        if self._registered_datasets.get(dataset_name) == schema_hash:
+            return
 
-        return f"raw/{dataset_name}/{start_s}-{end_s}_{now_s}"
+        action = flight.Action(
+            "register_dataset",
+            metadata.model_dump_json().encode("utf-8"),
+        )
+        try:
+            results = await asyncio.to_thread(self._flight.do_action, action)
+            await asyncio.to_thread(list, results)
+        except flight.FlightError:
+            self.logger.exception("Failed to register dataset", dataset=dataset_name)
+            raise
+
+        self._registered_datasets[dataset_name] = schema_hash
+        self.logger.info(
+            "Dataset registered",
+            dataset=dataset_name,
+            schema_hash=schema_hash,
+        )
 
     async def ingest(
         self,
@@ -195,63 +271,15 @@ class IonbeamClient:
         *,
         ingestion_id: Optional[UUID] = None,
     ) -> IngestDataCommand:
-        """Ingest observation data into Ionbeam using streaming Arrow batches.
-
-        This method streams Apache Arrow RecordBatches incrementally, allowing efficient
-        processing of large datasets without loading everything into memory. The batch
-        stream is written to storage and an ingestion command is published to the message
-        broker for processing by Ionbeam Core.
-
-        Args:
-            batch_stream: Async iterator yielding Apache Arrow RecordBatches containing
-                observations. Each batch should conform to the schema defined by the
-                ingestion metadata.
-            metadata: Dataset metadata and column mapping definitions that describe the
-                data structure and canonical variable mappings.
-            start_time: Start of the time window covered by this ingestion.
-            end_time: End of the time window covered by this ingestion.
-            ingestion_id: Optional UUID to identify this ingestion. If not provided,
-                one will be generated automatically.
-
-        Returns:
-            IngestDataCommand containing the ingestion details and payload location.
-
-        Raises:
-            RuntimeError: If client is not connected. Use async context manager or call
-                connect() first.
-            ValueError: If the batch stream is empty.
-            Exception: If writing to the arrow store fails (e.g., PyArrow errors, disk
-                I/O errors) or if publishing the ingestion command to AMQP fails.
-
-        Example:
-            Basic ingestion::
-
-                from ionbeam_client.arrow_tools import schema_from_ingestion_map
-                import pyarrow as pa
-
-                schema = schema_from_ingestion_map(metadata.ingestion_map)
-
-                async def generate_batches():
-                    for session in await fetch_sessions(start, end):
-                        data = await fetch_observations(session)
-                        if data:
-                            yield pa.RecordBatch.from_pydict(data, schema=schema)
-
-                async with IonbeamClient(config) as client:
-                    await client.ingest(
-                        batch_stream=generate_batches(),
-                        metadata=metadata,
-                        start_time=datetime(2024, 1, 1),
-                        end_time=datetime(2024, 1, 2)
-                    )
-        """
         if not self._connected:
             raise RuntimeError(
                 "Client not connected. Use async context manager or call connect() first."
             )
 
+        await self.register_dataset(metadata)
+
         command_id = ingestion_id or uuid4()
-        dataset_name = metadata.dataset.name
+        dataset_name = metadata.name
 
         self.logger.info(
             "Starting ingestion",
@@ -261,285 +289,209 @@ class IonbeamClient:
             end_time=end_time.isoformat(),
         )
 
-        object_key = self._generate_object_key(dataset_name, start_time, end_time)
+        descriptor = flight.FlightDescriptor.for_command(
+            json.dumps(
+                {
+                    "op": "ingest",
+                    "id": str(command_id),
+                    "metadata": metadata.model_dump(mode="json"),
+                    "start": start_time.isoformat(),
+                    "end": end_time.isoformat(),
+                }
+            ).encode("utf-8")
+        )
 
-        schema = schema_from_ingestion_map(metadata.ingestion_map)
+        writer = None
+        reader = None
+        response = None
+        total_rows = 0
 
         try:
-            total_rows = await self._arrow_store.write_record_batches(
-                key=object_key,
-                batch_stream=batch_stream,
-                schema=schema,
-                overwrite=False,
-            )
+            async for batch in batch_stream:
+                if writer is None:
+                    self._check_stream_contract(batch.schema, metadata)
+                    writer, reader = await asyncio.to_thread(
+                        self._flight.do_put, descriptor, batch.schema
+                    )
+                await asyncio.to_thread(writer.write_batch, batch)
+                total_rows += batch.num_rows
 
-            self.logger.info(
-                "Wrote data to arrow store",
-                command_id=str(command_id),
-                key=object_key,
-                rows=total_rows,
-            )
-
-            if total_rows == 0:
+            if writer is None:
                 self.logger.warning(
                     "No data written (empty stream)",
                     command_id=str(command_id),
                 )
-                raise ValueError("Cannot ingest empty data stream")
+                raise IngestRejected("Cannot ingest empty data stream")
 
-        except Exception as e:
+            await asyncio.to_thread(writer.done_writing)
+            response = await asyncio.to_thread(reader.read)
+        except flight.FlightError as e:
             self.logger.error(
-                "Failed to write data to arrow store",
+                "Failed to ingest data stream",
                 command_id=str(command_id),
                 error=str(e),
             )
             raise
+        finally:
+            if writer is not None:
+                try:
+                    await asyncio.to_thread(writer.close)
+                except flight.FlightError:
+                    pass
 
-        command = IngestDataCommand(
+        ingested_rows = json.loads(response.to_pybytes().decode("utf-8"))["rows"]
+
+        self.logger.info(
+            "Ingestion completed successfully",
+            command_id=str(command_id),
+            dataset=dataset_name,
+            rows=total_rows,
+            ingested_rows=ingested_rows,
+        )
+
+        return IngestDataCommand(
             id=command_id,
             metadata=metadata,
-            payload_location=object_key,
             start_time=start_time,
             end_time=end_time,
         )
 
-        try:
-            await self._publisher.publish(command)
-
-            self.logger.info(
-                "Ingestion completed successfully",
-                command_id=str(command_id),
-                dataset=dataset_name,
-                rows=total_rows,
+    @staticmethod
+    def _check_stream_contract(schema: pa.Schema, metadata: IngestionMetadata) -> None:
+        """Fail fast at the source before opening a Flight stream the server will reject."""
+        expected = metadata.dataset_schema.canonical_columns
+        if list(schema.names) != expected:
+            raise IngestRejected(
+                f"stream columns {list(schema.names)} do not match the declared "
+                f"canonical columns {expected}; batch frames with "
+                "canonical_record_batches(frames, metadata)"
             )
-
-        except Exception as e:
-            self.logger.error(
-                "Failed to publish ingestion command",
-                command_id=str(command_id),
-                payload_location=object_key,
-                error=str(e),
+        stamped = (schema.metadata or {}).get(SCHEMA_HASH.encode())
+        if stamped != metadata.schema_hash().encode():
+            raise IngestRejected(
+                "stream schema is missing or carries a stale "
+                f"{SCHEMA_HASH} stamp; batch frames with "
+                "canonical_record_batches(frames, metadata)"
             )
-            self.logger.error(
-                "Data written but not published - manual recovery required",
-                payload_location=object_key,
-            )
-            raise
-
-        return command
 
     def register_trigger_handler(
         self,
         source_name: str,
         handler: TriggerHandler,
     ) -> None:
-        """Register a handler to respond to scheduler trigger commands.
-
-        The Ionbeam scheduler can trigger data sources on demand for backfills,
-        reingestion, or scheduled collection. This method registers a handler that
-        will be called when the scheduler sends a trigger command with a time window.
-
-        Args:
-            source_name: Name identifying this data source. Used to generate the
-                AMQP queue name.
-            handler: Async function that will be called with (start_time, end_time)
-                when triggered by the scheduler.
-
-        Raises:
-            RuntimeError: If called after the client is already connected. Must be
-                called before connect() or entering the async context manager.
-
-        Example::
-
-            client = IonbeamClient(config)
-
-            async def handle_trigger(start_time: datetime, end_time: datetime):
-                async def generate_batches():
-                    # Fetch data for the requested time window
-                    yield pa.RecordBatch.from_pydict({...})
-                
-                await client.ingest(
-                    batch_stream=generate_batches(),
-                    metadata=metadata,
-                    start_time=start_time,
-                    end_time=end_time
-                )
-
-            client.register_trigger_handler("meteotracker", handle_trigger)
-
-            async with client:
-                await asyncio.Event().wait()  # Wait for triggers
-        """
         if self._connected:
             raise RuntimeError(
                 "Cannot register trigger handler after connecting. Call this before connect()."
             )
 
-        # Generate queue name for this trigger source
-        queue_name = get_trigger_queue_name(source_name)
+        bound_logger = self.logger.bind(component="trigger", source=source_name)
+        bound_logger.info("Registering trigger handler")
 
-        self.logger.info(
-            "Registering trigger handler",
-            source=source_name,
-            queue=queue_name,
+        def on_batch(connection: flight.FlightClient, batch: pa.RecordBatch) -> str:
+            command_id = batch.column("id")[0].as_py()
+            start = batch.column("start")[0].as_py()
+            end = batch.column("end")[0].as_py()
+
+            bound_logger.info(
+                "Received trigger command",
+                start=start.isoformat(),
+                end=end.isoformat(),
+            )
+
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    handler(start, end, UUID(command_id)), self._loop
+                ).result()
+                bound_logger.info("Trigger handler completed successfully")
+            except Exception:
+                # Propagate: the subscription tears down unacked, so the bus
+                # redelivers the trigger instead of losing the fetch.
+                bound_logger.exception("Failed to handle trigger command")
+                raise
+            return command_id
+
+        self._subscriptions.append(
+            _FlightSubscription(
+                name=f"triggers-{source_name}",
+                url=self.config.flight_url,
+                command={
+                    "op": "await_triggers",
+                    "source_name": source_name,
+                    "subscriber": self._subscriber_id,
+                },
+                on_batch=on_batch,
+                retry_delay=self.config.retry_delay,
+                shutdown_timeout=self.config.shutdown_timeout,
+            )
         )
-
-        # Create consumer for this trigger queue
-        consumer = AMQPConsumer(
-            queue_name=queue_name,
-            prefetch_count=1,
-        )
-        self._consumers.append(consumer)
-
-        # Store handler setup for later use during connect()
-        async def setup_handler():
-            message_handler = create_trigger_message_handler(handler, source_name)
-            await consumer.start(message_handler)
-
-        # Store the setup coroutine to be called after set_channel during connect
-        consumer._setup_handler = setup_handler  # type: ignore
 
     def register_export_handler(
         self,
         exporter_name: str,
         handler: ExportHandler,
         dataset_filter: Optional[Set[str]] = None,
-        batch_size: Optional[int] = None,
     ) -> None:
-        """Register a handler to export completed datasets.
-
-        Export handlers subscribe to the event stream of completed datasets from
-        Ionbeam Core. When a dataset aggregation completes, your handler receives a
-        DataSetAvailableEvent with streaming access to the aggregated data as Arrow
-        batches.
-
-        Args:
-            exporter_name: Name identifying this exporter. Used to generate the
-                AMQP queue name.
-            handler: Async function called with (event, batch_stream) for each
-                completed dataset.
-            dataset_filter: Optional set of dataset names to process. If None,
-                all datasets are processed.
-            batch_size: Optional batch size for reading record batches. If None,
-                uses config.write_batch_size.
-
-        Raises:
-            RuntimeError: If called after the client is already connected. Must be
-                called before connect() or entering the async context manager.
-
-        Example:
-            Basic export handler::
-
-                from ionbeam_client.models import DataSetAvailableEvent
-
-                async def export_handler(event: DataSetAvailableEvent, batch_stream):
-                    print(f"Exporting {event.metadata.name}")
-                    print(f"Window: {event.start_time} to {event.end_time}")
-                    
-                    async for batch in batch_stream:
-                        await write_to_target_system(batch)
-
-                client.register_export_handler("ecmwf_exporter", export_handler)
-
-            Filtered export::
-
-                client.register_export_handler(
-                    exporter_name="filtered_exporter",
-                    handler=export_handler,
-                    dataset_filter={"netatmo", "meteotracker"}
-                )
-        """
         if self._connected:
             raise RuntimeError(
                 "Cannot register export handler after connecting. Call this before connect()."
             )
 
-        # Generate queue and exchange names for this exporter
-        queue_name = get_export_queue_name(exporter_name)
-        exchange_name = "ionbeam.dataset.available"
-
-        self.logger.info(
+        bound_logger = self.logger.bind(component="export", exporter=exporter_name)
+        bound_logger.info(
             "Registering export handler",
-            exporter=exporter_name,
-            queue=queue_name,
-            exchange=exchange_name,
             dataset_filter=sorted(dataset_filter) if dataset_filter else None,
         )
 
-        # Create consumer for this export queue
-        consumer = AMQPConsumer(
-            queue_name=queue_name,
-            exchange_name=exchange_name,
-            exchange_type=aio_pika.ExchangeType.FANOUT,
-            prefetch_count=1,
-        )
-        self._consumers.append(consumer)
-
-        # Store handler setup for later use during connect()
-        async def setup_handler():
-            message_handler = create_export_message_handler(
-                handler,
-                self._arrow_store,
-                exporter_name,
-                dataset_filter=dataset_filter,
-                batch_size=batch_size or self.config.write_batch_size,
+        def on_batch(connection: flight.FlightClient, batch: pa.RecordBatch) -> str:
+            event = AvailableDataset(
+                id=UUID(batch.column("id")[0].as_py()),
+                dataset=batch.column("dataset")[0].as_py(),
+                start_time=batch.column("start")[0].as_py(),
+                end_time=batch.column("end")[0].as_py(),
+                version=batch.column("version")[0].as_py(),
+                revisable_until=batch.column("revisable_until")[0].as_py(),
+                info=flight.FlightInfo.deserialize(batch.column("info")[0].as_py()),
             )
-            await consumer.start(message_handler)
 
-        # Store the setup coroutine to be called after set_channel during connect
-        consumer._setup_handler = setup_handler  # type: ignore
+            bound_logger.info(
+                "Received dataset available event",
+                event_id=str(event.id),
+                dataset=event.dataset,
+                start=event.start_time.isoformat(),
+                end=event.end_time.isoformat(),
+                version=event.version,
+                revisable_until=event.revisable_until.isoformat(),
+            )
 
+            try:
+                handler(connection, event)
+                bound_logger.info(
+                    "Export handler completed successfully",
+                    event_id=str(event.id),
+                    dataset=event.dataset,
+                )
+            except Exception:
+                # Propagate: the subscription tears down unacked, so the bus
+                # redelivers the event instead of losing the export.
+                bound_logger.exception("Failed to handle dataset available event")
+                raise
+            return str(event.id)
 
-async def ingest(
-    batch_stream: AsyncIterator[pa.RecordBatch],
-    metadata: IngestionMetadata,
-    start_time: datetime,
-    end_time: datetime,
-    config: IonbeamClientConfig,
-) -> IngestDataCommand:
-    """Convenience function for standalone ingestion without managing client lifecycle.
+        command = {
+            "op": "await_datasets",
+            "exporter_name": exporter_name,
+            "subscriber": self._subscriber_id,
+        }
+        if dataset_filter:
+            command["datasets"] = sorted(dataset_filter)
 
-    This function creates an IonbeamClient, ingests data, and automatically handles
-    connection management. Use this for one-off ingestions. For repeated ingestions
-    or when registering handlers, use the IonbeamClient class directly.
-
-    Args:
-        batch_stream: Async iterator yielding Apache Arrow RecordBatches.
-        metadata: Dataset metadata and column mapping definitions.
-        start_time: Start of the time window covered by this ingestion.
-        end_time: End of the time window covered by this ingestion.
-        config: Client configuration for AMQP connection.
-
-    Returns:
-        IngestDataCommand containing the ingestion details.
-
-    Raises:
-        RuntimeError: If client connection fails.
-        ValueError: If the batch stream is empty.
-        Exception: If writing to the arrow store fails (e.g., PyArrow errors, disk
-            I/O errors) or if publishing the ingestion command to AMQP fails.
-
-    Example::
-
-        from ionbeam_client import ingest, IonbeamClientConfig
-
-        config = IonbeamClientConfig()
-        
-        async def generate_batches():
-            yield pa.RecordBatch.from_pydict({...})
-
-        await ingest(
-            batch_stream=generate_batches(),
-            metadata=metadata,
-            start_time=datetime(2024, 1, 1),
-            end_time=datetime(2024, 1, 2),
-            config=config
-        )
-    """
-    async with IonbeamClient(config) as client:
-        return await client.ingest(
-            batch_stream=batch_stream,
-            metadata=metadata,
-            start_time=start_time,
-            end_time=end_time,
+        self._subscriptions.append(
+            _FlightSubscription(
+                name=f"datasets-{exporter_name}",
+                url=self.config.flight_url,
+                command=command,
+                on_batch=on_batch,
+                retry_delay=self.config.retry_delay,
+                shutdown_timeout=self.config.shutdown_timeout,
+            )
         )

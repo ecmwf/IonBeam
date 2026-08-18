@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "ionbeam-client",
     "aiomqtt>=2.4.0",
+    "pydantic-settings>=2.14",
     "pyyaml>=6.0.3",
     "click>=8.1.0",
 ]
@@ -16,3 +17,7 @@ ionbeam-client = { workspace = true }
 
 [project.scripts]
 eumetnet = "eumetnet:main"
+
+[build-system]
+requires = ["uv_build>=0.9.4,<0.10.0"]
+build-backend = "uv_build"

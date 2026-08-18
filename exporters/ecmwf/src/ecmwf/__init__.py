@@ -1,12 +1,15 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
 from .app import main
-from .exporter import ODBExporter, ODBExporterConfig, VarNoMapping
+from .exporter import ODBExporter, ODBExporterConfig, ReportIdentity
+from .varno_map import VARIABLE_MAP, VarNoMapping
 
-__all__ = ["main", "ODBExporter", "ODBExporterConfig", "VarNoMapping"]
+__all__ = [
+    "main",
+    "ODBExporter",
+    "ODBExporterConfig",
+    "ReportIdentity",
+    "VARIABLE_MAP",
+    "VarNoMapping",
+]

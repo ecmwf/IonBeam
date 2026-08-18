@@ -1,26 +1,58 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
-from . import arrow_tools, constants, models, transfer
-from .amqp import ExportHandler, TriggerHandler
-from .client import IonbeamClient, ingest
+from . import canonical_stream, models, schema_metadata, schemes
+from .canonical_stream import canonical_record_batches
+from .client import (
+    AvailableDataset,
+    ExportHandler,
+    IngestRejected,
+    IonbeamClient,
+    TriggerHandler,
+)
 from .config import IonbeamClientConfig
-from .dataframe_tools import coerce_types
+from .alignment import align_to_schema, coerce_types
+from .models import (
+    CfSemantics,
+    Coordinate,
+    DatasetSchema,
+    DatasetMetadata,
+    IngestionMetadata,
+    ScalarDType,
+    Semantics,
+    Tag,
+    TimeCoordinate,
+    Variable,
+    cf,
+    geographic_point_coordinates,
+)
+from .runner import run_source
 
 __all__ = [
     "IonbeamClient",
-    "ingest",
     "IonbeamClientConfig",
+    "AvailableDataset",
     "ExportHandler",
+    "IngestRejected",
     "TriggerHandler",
+    "align_to_schema",
+    "canonical_record_batches",
+    "cf",
     "coerce_types",
+    "run_source",
+    "Coordinate",
+    "DatasetSchema",
+    "DatasetMetadata",
+    "IngestionMetadata",
+    "ScalarDType",
+    "Semantics",
+    "CfSemantics",
+    "Tag",
+    "TimeCoordinate",
+    "Variable",
+    "geographic_point_coordinates",
     "models",
-    "arrow_tools",
-    "constants",
-    "transfer",
+    "canonical_stream",
+    "schema_metadata",
+    "schemes",
 ]

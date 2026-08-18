@@ -1,206 +1,152 @@
-# Ionbeam Client
+# ionbeam-client
 
-Python client for ingesting and exporting data with ionbeam.
-
-## What is it?
-
-The ionbeam client is a Python library that provides a simple interface for sending IoT and unconventional data to the ionbeam platform and consuming processed datasets.
+Python client library for implementing IonBeam data sources and exporters. Sources send observations as Arrow RecordBatches, and exporters retrieve built datasets through Arrow Flight.
 
 ## Installation
 
+Wheels are published to ECMWF's package index:
+
 ```bash
-pip install ionbeam-client
+pip install ionbeam-client --extra-index-url https://get.ecmwf.int/repository/pypi-private-hosted/simple/
 ```
 
-## Configuration
+Inside this repository, the workspace already provides the package. The bundled sources and exporters under `data-sources/` and `exporters/` provide complete integration examples.
+
+## Declaring a dataset
+
+A source declares a dataset name, a contract version, and the schema of the columns it sends. The core stores build and presentation settings separately, keyed by dataset name.
 
 ```python
-from ionbeam_client import IonbeamClientConfig
+from ionbeam_client.models import (
+    DatasetSchema,
+    IngestionMetadata,
+    Tag,
+    TimeCoordinate,
+    cf,
+    geographic_point_coordinates,
+)
 
-config = IonbeamClientConfig(
-    amqp_url="amqp://guest:guest@localhost:5672/",
-    arrow_store_path="./data/raw/"
+metadata = IngestionMetadata(
+    name="weather_stations",
+    version=1,
+    dataset_schema=DatasetSchema(
+        time=TimeCoordinate(),  # phenomenon time; keeps its declared name ("time")
+        coordinates=geographic_point_coordinates(),  # lat/lon in EPSG:4326
+        variables=[cf("air_temperature", "degC")],
+        tags=[Tag(name="station_id")],
+    ),
 )
 ```
 
-## Data Ingestion
+`cf(name, unit)` declares a variable whose canonical name is its CF standard name. For other vocabularies, construct `Variable(name=..., semantics=..., unit=...)` directly. Increment `version` when changing the schema; registration rejects a changed schema that retains the previous version.
 
-### Basic Ingestion
+## Ingesting
 
-Use basic ingestion when you have a standalone script that fetches data on its own schedule or in response to external triggers.
+`IonbeamClient.ingest` registers the dataset and streams batches for a declared time range. Use `canonical_record_batches` to project upstream frames onto the declared schema, coerce data types, and attach the schema hash required by the server:
 
 ```python
 import asyncio
 from datetime import datetime, timezone
-import pyarrow as pa
+
+import pandas as pd
 from ionbeam_client import IonbeamClient, IonbeamClientConfig
-from ionbeam_client.models import IngestionMetadata, DatasetMetadata, DataIngestionMap, TimeAxis, LatitudeAxis, LongitudeAxis, CanonicalVariable
+from ionbeam_client.canonical_stream import canonical_record_batches
 
-config = IonbeamClientConfig(
-    amqp_url="amqp://localhost:5672/",
-    arrow_store_path="./data/raw/"
-)
+start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+end = datetime(2026, 1, 2, tzinfo=timezone.utc)
 
-metadata = IngestionMetadata(
-    dataset=DatasetMetadata(
-        name="example_weather",
-        description="Example weather data",
-        source_links=[],
-        keywords=["weather"]
-    ),
-    ingestion_map=DataIngestionMap(
-        datetime=TimeAxis(),
-        lat=LatitudeAxis(standard_name="latitude", cf_unit="degrees_north"),
-        lon=LongitudeAxis(standard_name="longitude", cf_unit="degrees_east"),
-        canonical_variables=[
-            CanonicalVariable(
-                column="air_temperature__degC__2__point__PT0S",
-                standard_name="air_temperature",
-                cf_unit="degC",
-                level=2.0
-            )
-        ],
-        metadata_variables=[]
+
+def fetch_frames():
+    yield pd.DataFrame(
+        {
+            "time": pd.date_range(start, end, freq="1h", tz="UTC")[:-1],
+            "lat": 52.5,
+            "lon": 13.4,
+            "air_temperature": [20.0 + i * 0.5 for i in range(24)],
+            "station_id": "st-001",
+        }
     )
-)
 
-async def generate_batches():
-    """Generate sample Arrow RecordBatches."""
-    schema = pa.schema([
-        ("datetime", pa.timestamp("ns", tz="UTC")),
-        ("lat", pa.float64()),
-        ("lon", pa.float64()),
-        ("air_temperature__degC__2__point__PT0S", pa.float64())
-    ])
-    
-    data = {
-        "datetime": [datetime(2024, 1, 1, i, tzinfo=timezone.utc) for i in range(24)],
-        "lat": [52.5] * 24,
-        "lon": [13.4] * 24,
-        "air_temperature__degC__2__point__PT0S": [20.0 + i * 0.5 for i in range(24)]
-    }
-    
-    batch = pa.RecordBatch.from_pydict(data, schema=schema)
-    yield batch
 
 async def main():
-    async with IonbeamClient(config) as client:
+    client = IonbeamClient(IonbeamClientConfig(flight_url="grpc://localhost:8815"))
+    async with client:
         await client.ingest(
-            batch_stream=generate_batches(),
+            batch_stream=canonical_record_batches(fetch_frames(), metadata),
             metadata=metadata,
-            start_time=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            end_time=datetime(2024, 1, 2, tzinfo=timezone.utc)
+            start_time=start,
+            end_time=end,
         )
 
+
 asyncio.run(main())
 ```
 
-### Scheduled Ingestion (Trigger Handler)
+`start_time` and `end_time` define the range checked by the ingestion operation. The core records coverage for that range even if it contains no rows. A long-running stream can produce completed windows before it closes.
 
-Use trigger handlers when you want ionbeam to control when your data source runs. This allows ionbeam core to handle scheduling, backfilling, and re-ingestion of data sources it doesn't own. This is optional and not required - you can manage scheduling yourself using cron or other tools.
+## Running a triggered source
 
-When using trigger handlers, ionbeam will invoke your handler function with the time window to fetch data for. This centralizes scheduling configuration and enables ionbeam to coordinate backfills or re-ingestion without code changes.
+The core scheduler can send a source the time ranges it should fetch. This allows schedules and backfills to be configured centrally. Register the trigger handler before connecting. `run_source` loads configuration and manages signals, the liveness endpoint, and the connection lifecycle:
 
 ```python
-from datetime import datetime
+import asyncio
 
-config = IonbeamClientConfig(
-    amqp_url="amqp://localhost:5672/",
-    arrow_store_path="./data/raw/"
-)
+from ionbeam_client import IonbeamClient, run_source
 
-client = IonbeamClient(config)
 
-async def fetch_and_ingest(start_time: datetime, end_time: datetime):
-    """Handler invoked by ionbeam scheduler with the time window to fetch."""
-    async def generate_batches():
-        schema = pa.schema([
-            ("datetime", pa.timestamp("ns", tz="UTC")),
-            ("lat", pa.float64()),
-            ("lon", pa.float64()),
-            ("air_temperature__degC__2__point__PT0S", pa.float64())
-        ])
-        
-        # Fetch data for the requested time window
-        data = await fetch_from_api(start_time, end_time)
-        batch = pa.RecordBatch.from_pydict(data, schema=schema)
-        yield batch
-    
-    await client.ingest(
-        batch_stream=generate_batches(),
-        metadata=metadata,
-        start_time=start_time,
-        end_time=end_time
+def setup(client: IonbeamClient, shutdown: asyncio.Event) -> None:
+    async def handle_window(start, end, trigger_id) -> None:
+        await client.ingest(
+            batch_stream=canonical_record_batches(fetch_frames(start, end), metadata),
+            metadata=metadata,
+            start_time=start,
+            end_time=end,
+            ingestion_id=trigger_id,
+        )
+
+    client.register_trigger_handler("weather_stations", handle_window)
+
+
+asyncio.run(run_source("weather_stations", {"ionbeam": {"flight_url": "grpc://localhost:8815"}}, setup))
+```
+
+The `source_name` must match a `scheduler.windows` entry in the core config. A trigger is acknowledged only after the handler completes, so a source that dies mid-fetch has the trigger redelivered.
+
+## Exporting
+
+An exporter subscribes to dataset notifications. Its handler receives an `AvailableDataset` and a Flight connection. The event's `info` contains a `FlightInfo` ticket for the referenced build, which can be read with `connection.do_get(event.info.endpoints[0].ticket)`.
+
+To assemble a wider range, call `GetFlightInfo` with a `dataset_range` command. The bundled ODB exporter uses this operation to reconstruct an analysis cycle after each event:
+
+```python
+import json
+
+import pyarrow.flight as flight
+from ionbeam_client import AvailableDataset, IonbeamClient, IonbeamClientConfig
+
+
+def export_handler(connection: flight.FlightClient, event: AvailableDataset) -> None:
+    descriptor = flight.FlightDescriptor.for_command(
+        json.dumps(
+            {
+                "op": "dataset_range",
+                "dataset": event.dataset,
+                "start": event.start_time.isoformat(),
+                "end": event.end_time.isoformat(),
+            }
+        ).encode()
     )
+    info = connection.get_flight_info(descriptor)
+    for chunk in connection.do_get(info.endpoints[0].ticket):
+        write_onward(chunk.data)  # the canonical dataset schema, sorted by time
 
-# Register handler - source_name must match ionbeam config
-client.register_trigger_handler("my_source", fetch_and_ingest)
 
-async def main():
-    async with client:
-        await asyncio.Event().wait()
-
-asyncio.run(main())
-```
-
-## Data Export
-
-Export handlers allow you to subscribe to and consume canonicalized datasets produced by ionbeam. When ionbeam completes aggregating a time window of data for a dataset, it publishes an event that your export handler receives along with a stream of Arrow batches containing the processed data.
-
-Export handlers are used to create materialized views of ionbeam data for specific applications:
-
-- **ODB Generation**: Transform ionbeam data into ECMWF's ODB format for numerical weather prediction
-- **Parquet/DuckDB Databases**: Build queryable databases that power APIs or analytical tools
-- **Custom Formats**: Export to application-specific formats or external systems
-
-### Basic Export Handler
-
-```python
-import pyarrow as pa
-from ionbeam_client import IonbeamClient, IonbeamClientConfig
-from ionbeam_client.models import DataSetAvailableEvent
-
-config = IonbeamClientConfig(
-    amqp_url="amqp://localhost:5672/",
-    arrow_store_path="./data/raw/"
-)
-
-async def export_handler(event: DataSetAvailableEvent, batch_stream):
-    """Process aggregated dataset batches from ionbeam."""
-    async for batch in batch_stream:
-        df = batch.to_pandas()
-        print(f"Received {len(df)} rows from {event.metadata.name}")
-        print(f"Time window: {event.start_time} to {event.end_time}")
-        # Export to your target system
-        await write_to_parquet(df, event.metadata.name)
-
-client = IonbeamClient(config)
+client = IonbeamClient(IonbeamClientConfig(flight_url="grpc://localhost:8815"))
 client.register_export_handler(
     exporter_name="my_exporter",
-    handler=export_handler
-)
-
-async def main():
-    async with client:
-        await asyncio.Event().wait()
-
-asyncio.run(main())
-```
-
-### Filtered Export
-
-Filter which datasets your exporter processes by specifying a dataset filter:
-
-```python
-async def export_netatmo(event: DataSetAvailableEvent, batch_stream):
-    """Only processes netatmo datasets."""
-    async for batch in batch_stream:
-        df = batch.to_pandas()
-        await write_to_database(df)
-
-client.register_export_handler(
-    exporter_name="netatmo_exporter",
-    handler=export_netatmo,
-    dataset_filter={"netatmo", "netatmo_mqtt"}
+    handler=export_handler,
+    dataset_filter={"weather_stations"},  # omit to receive every dataset
 )
 ```
+
+Run an exporter with `run_source`, as for a data source. The client acknowledges an event after the handler returns. If the handler raises an exception, the event remains pending for redelivery. A revision is delivered as a new event, so handlers must be idempotent. Replicas that share an `exporter_name` divide that exporter's events between them.

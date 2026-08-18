@@ -1,16 +1,16 @@
 ionbeam:
-  amqp_url: "amqp://guest:guest@localhost:5672/"
-  connection_timeout: 30
-  max_retries: 3
+  flight_url: "grpc://localhost:8815"
   retry_delay: 1.0
-  write_batch_size: 65536
 
 netatmo_mqtt:
   host: "mqtt.example.com"
   port: 8883
-  username: "your_username"
-  password: "your_password"
   client_id: "ionbeam_netatmo_client"
+  # Credentials come from MQTT_USERNAME / MQTT_PASSWORD env vars (a k8s
+  # Secret in deployment). A value set here overrides the env var — local
+  # runs only.
+  # username: ""
+  # password: ""
   keepalive: 120
   use_tls: true
   flush_interval_seconds: 60

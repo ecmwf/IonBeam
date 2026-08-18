@@ -26,6 +26,8 @@ pygeoapi-config.yaml
 data/
 data-projections/
 data-raw/
+odb/
+test_output/
 
 
 !*.example.env
@@ -36,4 +38,13 @@ data-raw/
 /pygeoapi.yaml
 /docker-compose.yaml
 
+# Local scratch artifacts (ad-hoc plotting / station extraction)
+/extract_station.py
+/plot_wind*.py
+/wind_*.png
+/station_*.jsonl
 /scratch/
+docs/_build/
+ionbeam-admin/
+/compactor/
+logs/

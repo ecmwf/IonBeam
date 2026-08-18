@@ -1,37 +1,23 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
 import random
 import string
 from datetime import datetime, timedelta
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
+from uuid import UUID
 
 import pandas as pd
 import structlog
 from ionbeam_client import IonbeamClient
-from ionbeam_client.arrow_tools import (
-    dataframes_to_record_batches,
-    schema_from_ingestion_map,
-)
-from ionbeam_client.constants import (
-    LatitudeColumn,
-    LongitudeColumn,
-    ObservationTimestampColumn,
-)
+from ionbeam_client.canonical_stream import canonical_record_batches
 from ionbeam_client.models import (
-    CanonicalVariable,
-    DataIngestionMap,
-    DatasetMetadata,
+    DatasetSchema,
     IngestionMetadata,
-    LatitudeAxis,
-    LongitudeAxis,
-    MetadataVariable,
-    TimeAxis,
+    Tag,
+    TimeCoordinate,
+    cf,
+    geographic_point_coordinates,
 )
 
 from .models import IonCannonConfig
@@ -40,48 +26,29 @@ from .models import IonCannonConfig
 class IonCannonSource:
     """
     IonCannon: A configurable load test source that generates synthetic data
-    based on DataIngestionMap configurations.
+    based on DatasetSchema configurations.
     """
 
     def __init__(self, config: IonCannonConfig):
         self.config = config
         self.logger = structlog.get_logger(__name__)
 
-        # Define metadata similar to netatmo structure
         self.metadata: IngestionMetadata = IngestionMetadata(
-            dataset=DatasetMetadata(
-                name="ioncannon",
-                aggregation_span=timedelta(hours=1),
-                description="Synthetic load test data for performance testing",
-                source_links=[],
-                keywords=["synthetic", "loadtest", "performance"],
-            ),
-            ingestion_map=DataIngestionMap(
-                datetime=TimeAxis(from_col=ObservationTimestampColumn),
-                lat=LatitudeAxis(standard_name="latitude", cf_unit="degrees_north"),
-                lon=LongitudeAxis(standard_name="longitude", cf_unit="degrees_east"),
-                canonical_variables=[
-                    CanonicalVariable(
-                        column="temperature",
-                        standard_name="air_temperature",
-                        cf_unit="degC",
-                    ),
-                    CanonicalVariable(
-                        column="pressure", standard_name="air_pressure", cf_unit="Pa"
-                    ),
-                    CanonicalVariable(
-                        column="humidity",
-                        standard_name="relative_humidity",
-                        cf_unit="1",
-                    ),
-                    CanonicalVariable(
-                        column="wind_speed", standard_name="wind_speed", cf_unit="m s-1"
-                    ),
+            version=3,
+            name="ioncannon",
+            dataset_schema=DatasetSchema(
+                time=TimeCoordinate(),
+                coordinates=geographic_point_coordinates(),
+                variables=[
+                    cf("air_temperature", "degC"),
+                    cf("air_pressure", "Pa"),
+                    cf("relative_humidity", "%"),
+                    cf("wind_speed", "m s-1"),
                 ],
-                metadata_variables=[
-                    MetadataVariable(column="station_id"),
-                    MetadataVariable(column="sensor_type"),
-                    MetadataVariable(column="location_type"),
+                tags=[
+                    Tag(name="station_id"),
+                    Tag(name="sensor_type"),
+                    Tag(name="location_type"),
                 ],
             ),
         )
@@ -97,8 +64,8 @@ class IonCannonSource:
         pools = {}
         cardinality = self.config.metadata_cardinality
 
-        for var in self.metadata.ingestion_map.metadata_variables:
-            column_name = var.column
+        for var in self.metadata.dataset_schema.tags:
+            column_name = var.name
             pool = []
             for i in range(cardinality):
                 suffix = "".join(
@@ -126,19 +93,19 @@ class IonCannonSource:
 
             for timestamp in timestamps:
                 row = {
-                    ObservationTimestampColumn: timestamp,
-                    LatitudeColumn: lat,
-                    LongitudeColumn: lon,
+                    "time": timestamp,
+                    "lat": lat,
+                    "lon": lon,
                     "station_id": f"SYNTH_{station_id:04d}",
                 }
 
-                for var in self.metadata.ingestion_map.canonical_variables:
-                    row[var.column] = random.uniform(0, 100)
+                for var in self.metadata.dataset_schema.variables:
+                    row[var.name] = random.uniform(0, 100)
 
-                for var in self.metadata.ingestion_map.metadata_variables:
-                    if var.column != "station_id":
-                        row[var.column] = random.choice(
-                            self._metadata_value_pools[var.column]
+                for var in self.metadata.dataset_schema.tags:
+                    if var.name != "station_id":
+                        row[var.name] = random.choice(
+                            self._metadata_value_pools[var.name]
                         )
 
                 rows.append(row)
@@ -151,6 +118,7 @@ class IonCannonSource:
         start_time: datetime,
         end_time: datetime,
         client: IonbeamClient,
+        ingestion_id: Optional[UUID] = None,
     ) -> None:
         """Fetch and ingest IonCannon synthetic data for the given time window."""
 
@@ -160,24 +128,18 @@ class IonCannonSource:
             end=end_time.isoformat(),
         )
 
-        schema = schema_from_ingestion_map(self.metadata.ingestion_map)
-
         async def dataframe_stream() -> AsyncIterator[pd.DataFrame]:
             async for df in self.generate_data_chunk(start_time, end_time):
-                if df is not None and not df.empty:
-                    yield df
+                yield df
 
-        batch_stream = dataframes_to_record_batches(
-            dataframe_stream(),
-            schema=schema,
-            preserve_index=False,
-        )
+        batch_stream = canonical_record_batches(dataframe_stream(), self.metadata)
 
         await client.ingest(
             batch_stream=batch_stream,
             metadata=self.metadata,
             start_time=start_time,
             end_time=end_time,
+            ingestion_id=ingestion_id,
         )
 
         self.logger.info(

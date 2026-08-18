@@ -1,10 +1,5 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
 from pydantic import BaseModel, Field
 
@@ -12,23 +7,14 @@ from pydantic import BaseModel, Field
 class IonbeamClientConfig(BaseModel):
     """Configuration for the Ionbeam client.
 
-    This class configures the connection and behavior of the Ionbeam client,
-    including AMQP message broker settings and retry behavior.
-
     Attributes:
-        amqp_url: RabbitMQ connection string. Default: "amqp://guest:guest@localhost:5672/"
-        connection_timeout: Connection timeout in seconds. Default: 30
-        max_retries: Number of retry attempts for failed operations. Default: 3
-        retry_delay: Delay between retries in seconds. Default: 1.0
+        flight_url: Ionbeam Arrow Flight endpoint. Default: "grpc://localhost:8815"
+        retry_delay: Delay before reconnecting a dropped subscription stream, in seconds. Default: 1.0
+        shutdown_timeout: Seconds to let an in-flight trigger/export handler finish
+            on close before abandoning it. Size to the pod's termination grace
+            period so a handler is never cut short mid-work. Default: 25.0
     """
-    amqp_url: str = Field(default="amqp://guest:guest@localhost:5672/")
-    connection_timeout: int = Field(default=30)
-    max_retries: int = Field(default=3)
+
+    flight_url: str = Field(default="grpc://localhost:8815")
     retry_delay: float = Field(default=1.0)
-
-
-_INGESTION_EXCHANGE: str = "ionbeam.ingestion"
-_INGESTION_ROUTING_KEY: str = "ingestV1"
-
-# Arrow store configuration - will migrate to S3-compatible object store
-_ARROW_STORE_PATH: str = "/data"
+    shutdown_timeout: float = Field(default=25.0)

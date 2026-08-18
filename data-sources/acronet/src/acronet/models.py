@@ -1,19 +1,22 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
 from dataclasses import dataclass
 from datetime import timedelta
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class AcronetConfig(BaseModel):
-    """Configuration for the Acronet data source."""
+class AcronetConfig(BaseSettings):
+    """Configuration for the Acronet data source.
+
+    Non-secret fields come from the config file; credentials (username,
+    password, client_secret) come from ACRONET_* env vars — a k8s Secret via
+    envFrom, since the Helm chart never renders secrets into the ConfigMap.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="ACRONET_", extra="ignore")
 
     base_url: str = "https://webdrops.cimafoundation.org/app/"
     token_endpoint: str = "https://testauth.cimafoundation.org/auth/realms/webdrops/protocol/openid-connect/token"

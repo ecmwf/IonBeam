@@ -1,24 +1,11 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
-from prometheus_client import Counter, Histogram, CollectorRegistry
+from prometheus_client import Counter, Gauge, Histogram, CollectorRegistry
 
 
 class IngestionMetrics:
     def __init__(self, registry: CollectorRegistry) -> None:
-        self._data_points = Histogram(
-            name="ionbeam_ingestion_data_points_per_operation",
-            documentation="Data points (observations) ingested per operation",
-            labelnames=["dataset"],
-            buckets=[10, 100, 1_000, 10_000, 100_000, 1_000_000],
-            registry=registry,
-        )
-
         self._data_points_total = Counter(
             name="ionbeam_ingestion_data_points_total",
             documentation="Total data points (observations) ingested successfully",
@@ -41,15 +28,44 @@ class IngestionMetrics:
             registry=registry,
         )
 
-        self._errors_total = Counter(
-            name="ionbeam_ingestion_errors_total",
-            documentation="Total ingestion errors by type",
-            labelnames=["dataset", "error_type"],
+        self._null_values_total = Counter(
+            name="ionbeam_ingestion_null_values_total",
+            documentation="Null values observed during ingestion by declared source column",
+            labelnames=["dataset", "column"],
             registry=registry,
         )
 
+        self._dropped_time_rows_total = Counter(
+            name="ionbeam_ingestion_dropped_time_rows_total",
+            documentation="Rows dropped because the structural time could not be parsed",
+            labelnames=["dataset", "column"],
+            registry=registry,
+        )
+
+        self._lateness_samples_total = Counter(
+            name="ionbeam_ingestion_lateness_samples_total",
+            documentation=(
+                "Per-datum lateness observations by content novelty: 'new' rows "
+                "(unseen content — genuinely new or a changed value like a QC pass) "
+                "are recorded into the histogram; 'duplicate' rows (byte-identical to "
+                "content already seen in their aggregation window) are suppressed; "
+                "'sealed' rows belong to a window already final and are skipped"
+            ),
+            labelnames=["dataset", "kind"],
+            registry=registry,
+        )
+
+        self._last_success_timestamp = Gauge(
+            name="ionbeam_ingestion_last_success_timestamp_seconds",
+            documentation="Unix time of the last completed ingestion per dataset; staleness marks a stalled or silent source",
+            labelnames=["dataset"],
+            registry=registry,
+        )
+
+    def record_success(self, dataset: str) -> None:
+        self._last_success_timestamp.labels(dataset=dataset).set_to_current_time()
+
     def observe_data_points(self, dataset: str, count: int) -> None:
-        self._data_points.labels(dataset=dataset).observe(count)
         self._data_points_total.labels(dataset=dataset).inc(count)
 
     def observe_duration(self, dataset: str, seconds: float) -> None:
@@ -58,5 +74,25 @@ class IngestionMetrics:
     def record_batch_processed(self, dataset: str) -> None:
         self._batches_processed_total.labels(dataset=dataset).inc()
 
-    def record_error(self, dataset: str, error_type: str) -> None:
-        self._errors_total.labels(dataset=dataset, error_type=error_type).inc()
+    def record_null_values(self, dataset: str, column: str, count: int) -> None:
+        if count:
+            self._null_values_total.labels(dataset=dataset, column=column).inc(count)
+
+    def record_dropped_time_rows(self, dataset: str, column: str, count: int) -> None:
+        if count:
+            self._dropped_time_rows_total.labels(dataset=dataset, column=column).inc(count)
+
+    def record_lateness_samples(
+        self, dataset: str, new: int, duplicate: int, sealed: int
+    ) -> None:
+        """new = unseen content, recorded into the histogram (a changed value counts
+        as new); duplicate = byte-identical to already-seen content, suppressed;
+        sealed = rows for an already-final window, skipped. The
+        duplicate/(new+duplicate) ratio shows the dedup working live; a persistent
+        sealed stream marks a source delivering data too late to ever build."""
+        if new:
+            self._lateness_samples_total.labels(dataset=dataset, kind="new").inc(new)
+        if duplicate:
+            self._lateness_samples_total.labels(dataset=dataset, kind="duplicate").inc(duplicate)
+        if sealed:
+            self._lateness_samples_total.labels(dataset=dataset, kind="sealed").inc(sealed)

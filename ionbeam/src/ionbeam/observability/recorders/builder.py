@@ -1,12 +1,7 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
-from prometheus_client import Counter, Histogram, CollectorRegistry
+from prometheus_client import Counter, Gauge, Histogram, CollectorRegistry
 
 
 class BuilderMetrics:
@@ -75,11 +70,19 @@ class BuilderMetrics:
             registry=registry,
         )
 
+        self._last_success_timestamp = Gauge(
+            name="ionbeam_builder_last_success_timestamp_seconds",
+            documentation="Unix time of the last successful window build per dataset; staleness marks a stalled builder",
+            labelnames=["dataset"],
+            registry=registry,
+        )
+
     def build_started(self, dataset: str) -> None:
         self._windows_started_total.labels(dataset=dataset).inc()
 
     def build_succeeded(self, dataset: str) -> None:
         self._windows_succeeded_total.labels(dataset=dataset).inc()
+        self._last_success_timestamp.labels(dataset=dataset).set_to_current_time()
 
     def build_failed(self, dataset: str) -> None:
         self._windows_failed_total.labels(dataset=dataset).inc()

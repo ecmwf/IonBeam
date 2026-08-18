@@ -1,16 +1,12 @@
-# (C) Copyright 2025- ECMWF and individual contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation nor
-# does it submit to any jurisdiction.
+# SPDX-FileCopyrightText: 2025- European Centre for Medium-Range Weather Forecasts (ECMWF)
+# SPDX-License-Identifier: Apache-2.0
 
-from datetime import timedelta
-from typing import List, Optional
-from uuid import UUID, uuid4
+from datetime import datetime, timedelta
+from uuid import UUID, uuid5
 
 from pydantic import BaseModel, Field, field_validator
+
+_SCHEDULE_NAMESPACE = UUID("6b3f5a2e-9d41-4c8a-b7e0-1f2a3c4d5e6f")
 
 
 class SourceSchedule(BaseModel):
@@ -18,6 +14,10 @@ class SourceSchedule(BaseModel):
 
     Defines when and how often a data source should be triggered,
     along with the time window for each trigger.
+
+    The ``id`` is derived from the schedule's content, so every replica parsing
+    the same configuration computes the same identity — the basis for
+    exactly-once firing across replicas.
     """
 
     source_name: str = Field(..., description="Name of the data source to trigger")
@@ -30,9 +30,14 @@ class SourceSchedule(BaseModel):
     window_lag: timedelta = Field(
         default=timedelta(0), description="Lag offset before window end (>= 0)"
     )
-    id: UUID = Field(
-        default_factory=uuid4, description="Unique identifier for this schedule"
-    )
+
+    @property
+    def id(self) -> UUID:
+        content = (
+            f"{self.source_name}|{self.window_size}"
+            f"|{self.trigger_interval}|{self.window_lag}"
+        )
+        return uuid5(_SCHEDULE_NAMESPACE, content)
 
     @field_validator("window_size")
     @classmethod
@@ -55,14 +60,7 @@ class SourceSchedule(BaseModel):
             raise ValueError("window_lag must be >= 0")
         return v
 
-    def get_window_bounds(self, trigger_time) -> tuple:
+    def get_window_bounds(self, trigger_time: datetime) -> tuple[datetime, datetime]:
         end = trigger_time - self.window_lag
         start = end - self.window_size
         return start, end
-
-
-class SchedulerConfig(BaseModel):
-    windows: Optional[List[SourceSchedule]] = Field(
-        default=None, description="List of source schedules to run"
-    )
-    enabled: bool = Field(default=True, description="Whether the scheduler is enabled")
