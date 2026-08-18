@@ -1,0 +1,25 @@
+%%{init: {"flowchart": {"diagramPadding": 12, "nodeSpacing": 55, "rankSpacing": 110, "htmlLabels": true}}}%%
+flowchart LR
+
+subgraph CLIENTS["Flight clients — ionbeam-client"]
+  SRC@{ shape: procs, label: "Data sources<br/>source_name · subscriber" }
+  EXP@{ shape: procs, label: "Exporters<br/>exporter_name · subscriber" }
+end
+
+OPS["Operator tooling"]
+
+CORE["IonBeam core<br/>Arrow Flight endpoint · N replicas"]
+
+SRC -->|"DoAction register_dataset<br/>DoPut ingest"| CORE
+SRC -.->|"DoExchange await_triggers<br/>triggers pushed down the open stream"| CORE
+EXP -->|"GetFlightInfo dataset_range<br/>DoGet dataset"| CORE
+EXP -.->|"DoExchange await_datasets<br/>events pushed down the open stream"| CORE
+OPS -.->|"DoAction trigger_source · health_check"| CORE
+
+classDef inside fill:#44546A,stroke:#2D3A50,color:#FFFFFF
+classDef outside fill:transparent,stroke:#8A8F98,color:#8A8F98
+
+class SRC,EXP,CORE inside
+class OPS outside
+
+style CLIENTS fill:transparent,stroke:#9AA0A6,stroke-width:1px

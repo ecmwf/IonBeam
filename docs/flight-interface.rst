@@ -5,19 +5,19 @@ Flight Interface
 
    This interface is under active development and may change significantly. Do not rely on it as a stable contract yet.
 
-This document specifies the Arrow Flight interface for implementing data sources and exporters. IonBeam exposes a single Arrow Flight (gRPC) endpoint. Control envelopes are JSON documents carried in Flight command descriptors, tickets, and action bodies. Observation and dataset payloads travel inline on the same connection as Apache Arrow RecordBatch streams; there is no message broker and no shared object storage between IonBeam and its integrators.
+This document specifies the Arrow Flight interface for data sources and exporters. IonBeam exposes a single Arrow Flight (gRPC) endpoint. Flight command descriptors, tickets, and action bodies carry JSON control documents. ``DoPut`` and ``DoGet`` carry observation and dataset payloads as Apache Arrow RecordBatch streams. Integrators do not require access to IonBeam's message bus or object storage.
 
 The **ionbeam-client** Python library implements this interface (see :ref:`ionbeam-client/index:IonBeam Client`); most integrators use it rather than speaking Flight directly.
 
 Lifecycle
 ---------
 
-One dataset's path through the interface, from raw observations to a resolved read. Every arrow touching the endpoint is one of the RPCs specified below; the stores are internal, shown for where the data rests between calls:
+The following diagram shows the RPCs used from ingestion to dataset retrieval. The internal stores show where data is retained between calls.
 
 .. mermaid:: flight-lifecycle.mmd
    :zoom:
 
-Ingested rows land in the time-series buffer while coverage claims schedule the windows they touch. A due window is built once: queried from the buffer, written to the canonical store as an immutable versioned file under its day partition, announced to subscribers. Reads resolve against those files alone — ``GetFlightInfo`` lists just the requested days' partitions and picks each window's current version, so the returned ticket names exact immutable keys and ``DoGet`` streams them untouched by later rebuilds.
+Ingested rows are written to the time-series store, while coverage claims determine when their windows can be built. Each build is stored as an immutable, versioned file and announced to subscribers. ``GetFlightInfo`` resolves the current version for each requested window and returns a ticket for those files. A later rebuild does not change an existing ticket.
 
 RPC Surface
 -----------
@@ -136,9 +136,9 @@ Command descriptor:
       "end": "2024-01-01T13:00:00Z"
     }
 
-Response: after the client finishes writing, the server replies on the ``DoPut`` metadata channel with ``{"rows": <ingested row count>}``. Batches are ingested as they arrive; a full server-side queue backpressures the client.
+After the client finishes writing, the server replies on the ``DoPut`` metadata channel with ``{"rows": <ingested row count>}``. The server ingests batches as they arrive. If its queue is full, flow control pauses the client.
 
-If an upload fails mid-stream, the claims already published stand, since their observations are in the database. The source recovers the unclaimed tail by retrying the command: claim and record ids derive deterministically from the ingestion ``id``, so a replay is not mistaken for new data. Under the readiness rules a partially covered window is never published.
+If an upload fails, observations from completed batches remain in the database together with their coverage claims. The source can retry the command to send the remaining data. Claim and record identifiers are derived from the ingestion ``id``, so the retry reuses their identities. The readiness rules prevent publication of a window without complete claimed coverage.
 
 Constraints:
 
@@ -159,7 +159,8 @@ Command descriptor:
 
     {
       "op": "await_triggers",
-      "source_name": "weather_stations"
+      "source_name": "weather_stations",
+      "subscriber": "6f1d9c0a4b8e4f2ab3d5c7e9f0a1b2c3"
     }
 
 The server pushes one RecordBatch per trigger with the schema:
@@ -184,6 +185,8 @@ The server pushes one RecordBatch per trigger with the schema:
 Constraints:
 
 - ``source_name`` must match the name the scheduler is configured to trigger
+- ``subscriber`` identifies one process in the consumer group named by ``source_name``. Replicas must use distinct values.
+- A process that reconnects with the same ``subscriber`` immediately resumes its unacknowledged triggers. If the field is omitted, the server creates a new value for each connection and returns pending triggers to the consumer group after the reclaim idle threshold.
 - The stream stays open until the client disconnects; clients should reconnect on failure
 - After handling a trigger, the client acknowledges it by writing the ``id`` back on the exchange's return channel; the server redelivers unacknowledged triggers
 
@@ -201,7 +204,8 @@ Command descriptor:
     {
       "op": "await_datasets",
       "exporter_name": "ecmwf",
-      "datasets": ["weather_stations"]
+      "datasets": ["weather_stations"],
+      "subscriber": "6f1d9c0a4b8e4f2ab3d5c7e9f0a1b2c3"
     }
 
 ``datasets`` is optional; omit it to receive events for all datasets. The server pushes one single-row RecordBatch per event with the schema:
@@ -239,19 +243,22 @@ Constraints:
 
 - The time window ``[start, end)`` aligns to the dataset's aggregation span boundaries
 - Every subscribed exporter identity receives every event (fanout); a rebuilt window emits a fresh event with a higher ``version``
-- ``version`` order is authoritative: apply a higher version of a window whenever one arrives. ``revisable_until`` bounds when that can still happen — a window whose last build was published before its seal emits no further event, so absence of an event is never a completeness signal; the deadline is how a client knows it may stop tracking the window
-- After handling an event, the client acknowledges it by writing the event ``id`` back on the return channel; the server redelivers unacknowledged events. The return channel carries acknowledgements only. Redelivery can also follow a *successful* handling whose acknowledgement was lost in a disconnect, so handlers must be idempotent even about work they have already completed
+- ``subscriber`` names one consuming process within the group ``exporter_name`` identifies, on the same terms as :ref:`flight-interface:Source Triggers (DoExchange)`
+- A higher ``version`` supersedes lower versions of the same window.
+- ``revisable_until`` is the earliest time at which the client can treat the current version as final. The absence of a later event does not by itself indicate completeness.
+- After handling an event, the client acknowledges it by writing the event ``id`` to the return channel. The return channel carries acknowledgements only.
+- The server redelivers unacknowledged events. This can include an event that the client processed successfully but failed to acknowledge before disconnecting, so handlers must be idempotent.
 - Read columns by name and ignore unknown columns: the server may append columns to this schema without notice
 - The ``FlightInfo`` ticket is opaque: pass it to ``DoGet`` unchanged, never parse it
 - The dataset's production metadata (description, aggregation span, presentation fields) is embedded in the ``FlightInfo`` schema's metadata, recoverable with ``ionbeam_client.schema_metadata.dataset_metadata``
-- The subscription delivers one event at a time and waits for its acknowledgement, so a slow handler stalls every event behind it. Keep handlers cheap — record what arrived and reconcile expensive work separately, as the bundled ODB exporter does with its stamp-then-reconcile cycle
+- The subscription sends one event at a time and waits for its acknowledgement. A slow handler therefore delays subsequent events. For expensive work, record the event first and perform reconciliation separately, as the bundled ODB exporter does.
 
 Reading Datasets (GetFlightInfo / DoGet)
 ----------------------------------------
 
 Direction: exporter → IonBeam.
 
-Exporters stream a built dataset with ``DoGet``. Tickets are issued by the server — inside the ``FlightInfo`` of a pushed dataset event or a ``GetFlightInfo`` response — and are opaque to clients.
+Exporters retrieve a built dataset with ``DoGet``. The server supplies an opaque ticket in either a dataset event's ``FlightInfo`` or a ``GetFlightInfo`` response. Clients must pass this ticket to ``DoGet`` without modification.
 
 Builds are resolved via ``GetFlightInfo`` with a command descriptor:
 
@@ -259,7 +266,7 @@ Builds are resolved via ``GetFlightInfo`` with a command descriptor:
 
     {"op": "dataset_range", "dataset": "weather_stations", "start": "2024-01-01T12:00:00Z", "end": "2024-01-01T13:00:00Z"}
 
-It resolves the current build of every window starting in ``[start, end)`` — how an exporter rebuilds a cycle from whatever has been published so far. The returned ``FlightInfo`` carries the dataset schema and the ``DoGet`` ticket; the call fails when the range holds no builds.
+The command resolves the current build of every window that starts in ``[start, end)``. An exporter can use this operation to reconstruct a range from the builds available at the time of the request. The returned ``FlightInfo`` contains the dataset schema and a ``DoGet`` ticket. The call fails if the range contains no builds.
 
 The streamed data follows the canonical dataset schema; see :ref:`dataset-schema:Dataset Schema`.
 

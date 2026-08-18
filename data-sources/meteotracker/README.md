@@ -1,5 +1,7 @@
 # meteotracker
 
-Data source for MeteoTracker: mobile weather sensors whose observations arrive as per-trip sessions. The core's scheduler triggers it with a time window; it fetches the window's session metadata, streams each session's point data, tags rows with the living lab derived from the session author, and ingests over Flight. Sessions upload well after the trip ends; windows stay revisable for the hot-store retention, which is what accommodates the late tail — the source itself fetches exactly the triggered window.
+Data source for MeteoTracker mobile weather sensors, whose observations are grouped into sessions for individual trips. For each scheduled time window, the source retrieves session metadata and point observations, adds the living lab derived from the session author, and sends the rows over Flight.
+
+Sessions may be uploaded after a trip ends. IonBeam can revise the corresponding datasets while their observations remain within hot-store retention. The source itself requests only the scheduled time window.
 
 Run it with `uv run meteotracker -c config.yaml` (see `config.example.yaml`). API credentials come from the `METEOTRACKER_USERNAME` and `METEOTRACKER_PASSWORD` environment variables — a Kubernetes Secret in deployment.

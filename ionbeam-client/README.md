@@ -1,6 +1,6 @@
 # ionbeam-client
 
-Python client library for writing ionbeam data sources and exporters. It speaks Arrow Flight: sources stream IoT and unconventional observations in as Arrow RecordBatches, and exporters stream built datasets back out.
+Python client library for implementing IonBeam data sources and exporters. Sources send observations as Arrow RecordBatches, and exporters retrieve built datasets through Arrow Flight.
 
 ## Installation
 
@@ -10,11 +10,11 @@ Wheels are published to ECMWF's package index:
 pip install ionbeam-client --extra-index-url https://get.ecmwf.int/repository/pypi-private-hosted/simple/
 ```
 
-Inside this repository the workspace already provides it; the bundled sources and exporters under `data-sources/` and `exporters/` are complete working integrations to crib from.
+Inside this repository, the workspace already provides the package. The bundled sources and exporters under `data-sources/` and `exporters/` provide complete integration examples.
 
 ## Declaring a dataset
 
-A source declares its dataset once: a name, a contract version, and the schema of the columns it streams. Everything about how the output dataset is built and presented lives server-side, keyed by the dataset name.
+A source declares a dataset name, a contract version, and the schema of the columns it sends. The core stores build and presentation settings separately, keyed by dataset name.
 
 ```python
 from ionbeam_client.models import (
@@ -38,11 +38,11 @@ metadata = IngestionMetadata(
 )
 ```
 
-`cf(name, unit)` declares a variable whose canonical name is its CF standard name; variables under other vocabularies use `Variable(name=..., semantics=..., unit=...)` directly. Bump `version` on intentional schema changes — the server rejects a changed schema under an unchanged version.
+`cf(name, unit)` declares a variable whose canonical name is its CF standard name. For other vocabularies, construct `Variable(name=..., semantics=..., unit=...)` directly. Increment `version` when changing the schema; registration rejects a changed schema that retains the previous version.
 
 ## Ingesting
 
-`IonbeamClient.ingest` registers the dataset and streams batches for a declared time range. Frames from the upstream API become canonical RecordBatches with `canonical_record_batches`, which projects each frame onto the declared schema, coerces dtypes, and stamps the schema hash the server verifies:
+`IonbeamClient.ingest` registers the dataset and streams batches for a declared time range. Use `canonical_record_batches` to project upstream frames onto the declared schema, coerce data types, and attach the schema hash required by the server:
 
 ```python
 import asyncio
@@ -82,11 +82,11 @@ async def main():
 asyncio.run(main())
 ```
 
-The declared `start_time`/`end_time` is the range this operation claims to have swept — the server tracks coverage against it, so a range with no rows still counts as checked. Long streams are fine: the server claims coverage and builds completed windows while the stream is still open.
+`start_time` and `end_time` define the range checked by the ingestion operation. The core records coverage for that range even if it contains no rows. A long-running stream can produce completed windows before it closes.
 
 ## Running a triggered source
 
-The core's scheduler can drive a source: it pushes trigger commands naming the time range to fetch, so scheduling and backfills are configured centrally. Register the handler before connecting; `run_source` wires config, signal handling, a liveness endpoint, and the connection lifecycle:
+The core scheduler can send a source the time ranges it should fetch. This allows schedules and backfills to be configured centrally. Register the trigger handler before connecting. `run_source` loads configuration and manages signals, the liveness endpoint, and the connection lifecycle:
 
 ```python
 import asyncio
@@ -114,7 +114,9 @@ The `source_name` must match a `scheduler.windows` entry in the core config. A t
 
 ## Exporting
 
-An exporter subscribes to dataset availability. The handler receives an `AvailableDataset` announcement and a live Flight connection. The announcement's `info` is a server-minted `FlightInfo` whose ticket streams that exact build (`connection.do_get(event.info.endpoints[0].ticket)`); an exporter that instead assembles a wider range resolves the current builds with `GetFlightInfo` (`op: "dataset_range"`) — the bundled ODB exporter rebuilds its whole analysis cycle this way on every event:
+An exporter subscribes to dataset notifications. Its handler receives an `AvailableDataset` and a Flight connection. The event's `info` contains a `FlightInfo` ticket for the referenced build, which can be read with `connection.do_get(event.info.endpoints[0].ticket)`.
+
+To assemble a wider range, call `GetFlightInfo` with a `dataset_range` command. The bundled ODB exporter uses this operation to reconstruct an analysis cycle after each event:
 
 ```python
 import json
@@ -147,4 +149,4 @@ client.register_export_handler(
 )
 ```
 
-Run it under `run_source` like a data source. The event is acknowledged only after the handler returns; raising leaves it pending for redelivery, and a revisable window that rebuilds arrives as a fresh event, so handlers must be idempotent. Replicas sharing an `exporter_name` split the event stream between them.
+Run an exporter with `run_source`, as for a data source. The client acknowledges an event after the handler returns. If the handler raises an exception, the event remains pending for redelivery. A revision is delivered as a new event, so handlers must be idempotent. Replicas that share an `exporter_name` divide that exporter's events between them.

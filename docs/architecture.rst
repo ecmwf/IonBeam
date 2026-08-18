@@ -4,10 +4,10 @@ Architecture
 Overview
 --------
 
-IonBeam decouples data ingestion, aggregation, and export behind a single Arrow Flight (gRPC) endpoint. The platform consists of three component types:
+IonBeam exposes a single Arrow Flight (gRPC) endpoint for ingestion and dataset access. The platform has three component types:
 
 Data sources
-  Services that collect observations from external APIs. Each source (MeteoTracker, Acronet, EUMETNET E-SOH, Sensor.Community, ...) runs independently. It streams observations into the Flight endpoint and receives trigger commands pushed over a ``DoExchange`` subscription to the same endpoint.
+  Services that collect observations from external APIs and send them to IonBeam. A source can also open a ``DoExchange`` subscription to receive scheduled trigger commands.
 
 IonBeam core
   The service hosting the Flight endpoint and the handlers behind it:
@@ -18,29 +18,29 @@ IonBeam core
   - Source scheduler: publishes trigger commands to data sources on wall-clock-aligned intervals
 
 Exporters
-  Services that consume built datasets and write them to external systems. Each exporter (ECMWF/ODB, ...) runs independently and receives dataset events pushed over its Flight subscription.
+  Services that retrieve completed datasets and write them to external systems. Exporters receive dataset notifications through a Flight subscription.
 
-Built datasets are canonical GeoParquet. Each geographic dataset carries a WKB ``ib_geometry`` column tagged with the ``geoarrow.wkb`` Arrow extension and a stable per-observation ``ib_id``, so the files are directly queryable by GeoArrow-aware tools. Every platform-synthesized column lives under the ``ib_`` prefix — declared source columns may use any other name. A stateless PyGeoAPI server serves the store as an OGC API — Features service, one collection per dataset, with no export step or second copy (:doc:`using-the-data`).
+Built datasets use GeoParquet. Geographic datasets include a WKB ``ib_geometry`` column tagged with the ``geoarrow.wkb`` Arrow extension and a stable ``ib_id`` for each observation. IonBeam reserves the ``ib_`` prefix for columns it adds; source declarations may use any other name.
 
 .. mermaid:: architecture-diagram.mmd
   :zoom:
 
 Solid arrows carry data; dashed arrows carry control events.
 
-Every component runs with any number of replicas; :ref:`architecture:Scaling` describes the mechanisms.
+The core and supported client services can run with multiple replicas. :ref:`architecture:Scaling` describes the coordination mechanisms and current limits.
 
 Data Flow
 ---------
 
 Data flows through four stages:
 
-1. Data sources call :ref:`flight-interface:Ingest (DoPut)` and stream Arrow RecordBatches with a JSON envelope. The ingestion handler validates, normalises, and writes each batch to InfluxDB as it arrives, and publishes coverage claims — each naming the per-window records it delivered rows under — while the stream is still open (:ref:`domain:Coverage Claims`).
+1. Data sources stream Arrow RecordBatches with :ref:`flight-interface:Ingest (DoPut)`. The ingestion handler validates each batch and writes it to InfluxDB. As data arrives, the handler also publishes the coverage claims used to determine whether a window is ready to build (:ref:`domain:Coverage Claims`).
 
-2. The coordinator stores each claim for gap analysis and folds its records into their windows' desired sets. When a window's content changes, the window is scheduled to build at the moment it becomes worth building: its settle time for a first build, its rebuild debounce for a revision (:ref:`domain:Window Readiness`).
+2. The coordinator stores the claims and checks them for gaps. It schedules a first build after the window's settle duration. If later data changes an existing build, it schedules a revision after the configured rebuild debounce (:ref:`domain:Window Readiness`).
 
-3. A builder claims each due window, queries InfluxDB for its observations, writes the dataset to the arrow store, and publishes a ``DataSetAvailableEvent`` that fans out to all subscribed exporters.
+3. A builder claims a due window and queries its observations from InfluxDB. After writing the result to the arrow store, it publishes a ``DataSetAvailableEvent`` for subscribed exporters.
 
-4. Exporters receive the event over :ref:`flight-interface:Dataset Events (DoExchange)`, stream the dataset back with ``DoGet``, and transform it to their target format, such as ODB. PyGeoAPI reads the canonical GeoParquet directly instead.
+4. Exporters receive the event over :ref:`flight-interface:Dataset Events (DoExchange)`, stream the dataset back with ``DoGet``, and transform it to their target format, such as ODB.
 
 Worked examples of the window mechanics, including late data and streaming ingestion, are in :ref:`domain:Coverage Claims` and :ref:`domain:Out-of-Order Processing`.
 
@@ -49,7 +49,14 @@ Flight Endpoint
 
 All integration happens through the one Arrow Flight endpoint hosted by the core service. Data sources register their dataset and stream observations in with ``DoPut``; exporters subscribe with ``DoExchange`` and stream built datasets back with ``DoGet``. :doc:`flight-interface` specifies the full contract.
 
-Internally, an event bus carries control messages: source triggers and dataset availability, never bulk data. The bus is in-memory in single-process deployments and Valkey streams otherwise, so events reach subscribers regardless of which replica produced them. The Flight endpoint subscribes on behalf of connected clients and pushes events down their ``DoExchange`` streams; integrators never interact with the bus directly.
+.. mermaid:: service-topology.mmd
+  :zoom:
+
+Clients initiate every Flight RPC. For subscriptions, a client opens a long-lived ``DoExchange`` stream over which the core sends triggers or dataset notifications.
+
+An internal event bus carries source triggers and dataset notifications. Observation and dataset payloads do not pass through this bus. Single-process deployments use an in-memory implementation; distributed deployments use Valkey streams.
+
+The Flight endpoint connects each client subscription to the event bus and sends messages over the client's ``DoExchange`` stream. Integrators do not access the event bus directly.
 
 Storage
 -------
@@ -72,7 +79,7 @@ InfluxDB holds observations only for the hot period in which windows can still b
 Scaling
 -------
 
-Every service runs with any number of replicas. Replicas hold no coordination state of their own: everything needed to pick up a unit of work lives in Valkey or the storage layer, so replicas can be added, removed, or restarted without draining the pipeline.
+The service tier supports horizontal scaling, subject to the limits described in :ref:`architecture:Stateful backends`. Replicas do not hold coordination state locally. Valkey and the storage layer retain the information required for another replica to continue scheduled work.
 
 Trigger claims
 ~~~~~~~~~~~~~~
@@ -84,7 +91,9 @@ Event delivery
 
 The event bus runs on Valkey streams with one consumer group per subscriber identity. A client names its identity when it opens its ``DoExchange`` subscription (the ``source_name`` or ``exporter_name`` in the descriptor). Each distinct identity receives every matching event. Replicas sharing an identity form one group and split the events between them, so scaling an exporter to five replicas divides its event stream five ways with no server-side configuration. The groups live in Valkey, outside any core process; a client subscribed through one core replica receives events published through any other.
 
-Delivery is at-least-once. The Flight server acknowledges an event to the bus only after the client reports that its handler finished. A client that dies mid-handler leaves the event pending, and another consumer reclaims it once it has been idle longer than a threshold sized above the slowest handler's run time. An event that fails eight deliveries is parked on a bounded dead-letter stream. Redelivery is safe because the operations behind it are idempotent: ingestion claims carry deterministic ids, and a redelivered dataset event names the same immutable build files.
+Trigger and dataset-event delivery is at least once. The Flight server acknowledges an event to the bus only after the client reports that its handler has completed. If a client disconnects before acknowledgement, the event remains pending and becomes available to another consumer after the configured idle threshold.
+
+After eight failed deliveries, the event moves to a bounded dead-letter stream. Clients must handle redelivery idempotently. Ingestion claims use stable identifiers, and a redelivered dataset event refers to the same immutable build files.
 
 Build leases
 ~~~~~~~~~~~~
@@ -111,7 +120,9 @@ The stamp and span name the window (matching its manifest entry), the version or
 
 The day is spelled as hive ``key=value`` segments in the platform's reserved ``ib_`` namespace: an engine pointed at the store can opt into hive parsing and prune on them, no declared column can collide with them, and a reader that does not opt in sees plain path segments. Aggregation spans divide one day and windows are epoch-aligned, so every window nests inside its partition — the rows under an ``ib_day`` are exactly that day's rows, and selecting a partition selects the whole day. Readers prune by the window interval in the name or by the time column's Parquet statistics; each file is written time-sorted.
 
-A rebuild writes the next version's file beside the current one and never touches an existing file. Readers pick the highest version, and a periodic sweep deletes a window's older versions once its current build has stood for a grace period. Local-filesystem writes finish with a rename and S3 writes with a multipart-upload completion, so a reader never sees a partial file.
+A rebuild writes a new version without modifying the existing file. Readers select the highest version. After a grace period, a periodic sweep removes older versions of the window.
+
+Local filesystem writes complete with a rename, while S3 writes complete through multipart upload. In both cases, the completed object becomes visible atomically.
 
 Stateful backends
 ~~~~~~~~~~~~~~~~~

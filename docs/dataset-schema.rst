@@ -5,14 +5,16 @@ Dataset Schema
 
    This schema is under active development and may change significantly. Do not rely on it as a stable contract yet.
 
-Datasets produced by IonBeam are streamed to exporters as Arrow RecordBatches over the Flight endpoint (see :ref:`flight-interface:Reading Datasets (GetFlightInfo / DoGet)`). Each dataset represents a single time window of aggregated observations. Column names are plain identifiers; everything a consumer needs to interpret a column travels as Arrow field metadata, so a batch is self-describing without access to the source's code.
+IonBeam streams built datasets as Arrow RecordBatches over the Flight endpoint (see :ref:`flight-interface:Reading Datasets (GetFlightInfo / DoGet)`). Each build represents one time window. Arrow field metadata describes the role, semantics, and unit of each column, so consumers do not need access to source-specific code.
 
 Declaring a Schema
 ------------------
 
-A source declares its dataset with ``IngestionMetadata``: the dataset name, a version, and a ``DatasetSchema`` listing the time axis, coordinates, variables, and tags, all by canonical name. A source renames its feed's raw columns inside its own transform, before the frames reach the client library.
+A source registers ``IngestionMetadata`` containing a dataset name, a version, and a ``DatasetSchema``. The schema lists the time axis, coordinates, variables, and tags by their canonical names. Source-specific transformations must rename input columns before passing frames to the client library.
 
-The ``ib_`` prefix is the platform's namespace and no declared name may use it. The declared time column is the phenomenon time — the actual UTC instant each observation is about, never a nominal, receipt, or reference time — and it keeps its declared name end-to-end; consumers locate it by its ``role=time`` field metadata, exactly as latitude and longitude are located by their axis and CRS metadata. Geographic datasets additionally gain the synthesized ``ib_geometry`` and ``ib_id`` columns at build time. Any other name is free, including the plain words a source's own standard uses (``time``, ``year``, ``source``, …), so a feed's native schema can be described as closely as its standard allows.
+IonBeam reserves the ``ib_`` prefix, and dataset declarations cannot use it. The declared time column represents phenomenon time: the UTC instant to which an observation applies, rather than its receipt or reference time. Its name is preserved throughout the pipeline. Consumers locate it through the ``role=time`` field metadata, and locate spatial coordinates through axis and CRS metadata.
+
+At build time, IonBeam adds ``ib_geometry`` and ``ib_id`` to geographic datasets. All other names are available to the source declaration, including names defined by the source's native standard.
 
 .. code-block:: python
 
@@ -42,21 +44,25 @@ The ``ib_`` prefix is the platform's namespace and no declared name may use it. 
 Semantics
 ---------
 
-A variable's governed identity is its ``semantics``: a typed model discriminated on ``scheme``. Each scheme uses its own standard's vocabulary and validates its own shape at declaration time.
+The optional ``semantics`` field gives a variable an identity from a governed vocabulary. Its typed model is selected by ``scheme`` and validated when the dataset is registered.
 
 ``CfSemantics``
    ``standard_name`` from the CF Standard Name Table, with optional ``level`` (sensor height in metres), ``cell_method`` (CF Conventions §7.3), and ``period`` (ISO-8601 duration).
 
 A variable with no semantics is an ungoverned named column: it is stored and served normally, and exporters that match on semantics skip it.
 
-Exporters match variables on the *quantity* a declaration denotes. The ODB exporter reduces semantics through ``ecmwf.varno_map.quantity``, which drops ``level``, ``period``, and the point-vs-mean distinction while keeping quantity-changing methods (``sum``, ``minimum``, ``maximum``), then looks the result up in its in-code varno map. The map therefore never mirrors any source's declaration flavour. The declared ``unit`` is a sibling field, converted to each target's expected unit with ``cf_units``.
+Exporters match variables by the *quantity* represented by their declarations. The ODB exporter derives this quantity with ``ecmwf.varno_map.quantity``. It ignores ``level``, ``period``, and the distinction between point and mean values, but retains methods that change the quantity, such as ``sum``, ``minimum``, and ``maximum``. The result is matched against the exporter's varno map.
+
+Units are declared separately from semantics. Exporters use ``cf_units`` to convert values to the units required by their target format.
 
 Coordinates: CRS and Units
 --------------------------
 
-IonBeam interprets geographic coordinates in ``EPSG:4326``/``CRS84`` only, and does not reproject; a source in another CRS reprojects before ingesting. Coordinates declared with x/y axes in any other CRS are stored and served untouched, but every geo product (the GeoParquet projection, the Features API, ODB geolocation) skips them, and registration logs a warning saying so.
+IonBeam interprets geographic coordinates only in ``EPSG:4326`` or ``CRS84`` and does not perform reprojection. Sources using another CRS must reproject their coordinates before ingestion. Coordinates declared with x/y axes in another CRS are stored unchanged but excluded from GeoParquet geometry and ODB geolocation. Registration logs a warning for these coordinates.
 
-Coordinates whose values IonBeam interprets are structural, the same tier as the time axis, and their units are enforced at registration: a geographic x/y coordinate must declare a unit convertible to degrees, and a z coordinate carrying ``CfSemantics(standard_name="altitude")`` one convertible to metres. Registration fails otherwise. Exporters convert from the declared unit to their target's expected unit (the ODB exporter writes ``lat@hdr``/``lon@hdr`` in degrees and ``stalt@hdr`` in metres), so an altitude declared in feet is legal and arrives converted. Units on all other coordinates are validated best-effort: a warning when they do not parse, never a rejection.
+Registration validates units for coordinates that IonBeam interprets. Geographic x/y coordinates must use units convertible to degrees. A z coordinate with ``CfSemantics(standard_name="altitude")`` must use a unit convertible to metres. The registration fails if either requirement is not met.
+
+Exporters convert declared coordinate units to the units required by their target. For example, the ODB exporter writes ``lat@hdr`` and ``lon@hdr`` in degrees and ``stalt@hdr`` in metres, so an altitude may be declared in feet. For other coordinates, an invalid unit produces a warning but does not prevent registration.
 
 Arrow Field Metadata
 --------------------
@@ -85,7 +91,7 @@ Schema-level metadata carries ``ionbeam.schema_hash`` (the declared contract's h
 Reading Datasets
 ----------------
 
-An export handler registered via ``IonbeamClient.register_export_handler()`` receives each availability announcement together with a live Flight connection. The announcement's ``info`` is a server-minted ``FlightInfo`` whose ticket streams the build via standard ``DoGet``; structure and semantics are read from the streamed schema through ``ionbeam_client.schema_metadata``:
+An export handler registered with ``IonbeamClient.register_export_handler()`` receives each availability notification and a Flight connection. The notification contains a ``FlightInfo`` with a ticket for the referenced build. Pass that ticket to ``DoGet``, then use ``ionbeam_client.schema_metadata`` to inspect the streamed schema:
 
 .. code-block:: python
 

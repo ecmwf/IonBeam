@@ -6,7 +6,7 @@ This document explains the domain concepts and processing logic in IonBeam: how 
 Dataset Configuration
 ---------------------
 
-A data source declares only its dataset name and data schema at ingestion (see :ref:`flight-interface:Ingest (DoPut)`). How the output dataset is built, presented, revised, and finalised is decided server-side, in the core service's dataset registry, keyed by dataset name. Datasets without a registry entry fall back to ``defaults``:
+A data source declares only its dataset name and schema at ingestion (see :ref:`flight-interface:Ingest (DoPut)`). The core service controls how the dataset is built, presented, revised, and finalised. These settings are stored in the dataset registry and keyed by dataset name. A dataset without a registry entry uses ``defaults``:
 
 .. code-block:: yaml
 
@@ -29,7 +29,7 @@ A data source declares only its dataset name and data schema at ingestion (see :
 Time Windows
 ------------
 
-Observations are partitioned into fixed-duration time windows by each dataset's ``aggregation_span``. Two timestamps matter throughout:
+Each dataset's ``aggregation_span`` divides observations into fixed-duration time windows. Two timestamps determine how an observation is processed:
 
 Observation time
   When the measurement was recorded. This determines which window an observation belongs to.
@@ -37,19 +37,19 @@ Observation time
 Arrival time
   When IonBeam ingests the observation. This may be seconds or days after the observation time, due to network delays, processing, or backfilling.
 
-Observation time assigns data to windows; arrival time decides when a window is worth building.
+Observation time assigns data to a window. Arrival time contributes to the decision about when that window should be built.
 
 Window Boundaries
 ~~~~~~~~~~~~~~~~~
 
-Windows are computed deterministically from the Unix epoch, so every replica and every ingestion run agrees on the same boundaries. An observation's window is found by truncating its timestamp to the nearest ``aggregation_span`` boundary; the window is ``[window_start, window_start + aggregation_span)``.
+Window boundaries are aligned to the Unix epoch and therefore do not depend on a particular replica or ingestion run. Truncating an observation timestamp to the preceding ``aggregation_span`` boundary gives ``window_start``. The resulting half-open interval is ``[window_start, window_start + aggregation_span)``.
 
 For ``aggregation_span: PT1H``, an observation at ``2024-01-15T14:23:45Z`` falls into ``[2024-01-15T14:00:00Z, 2024-01-15T15:00:00Z)``.
 
 Window Lifecycle
 ~~~~~~~~~~~~~~~~
 
-A window passes through three phases, each governing how late-arriving data is handled:
+A window passes through three phases. These phases balance prompt publication against the need to incorporate late data and eventually produce an immutable result.
 
 .. code-block:: text
 
@@ -62,23 +62,25 @@ A window passes through three phases, each governing how late-arriving data is h
                     │ measured per dataset │ rebuild_debounce               │ is never rewritten
 
 Settling
-  A freshly closed window waits before its first build for the *settle duration*: the measured 95th percentile of the dataset's arrival lateness. Ingestion records, for every datum, the gap between arrival time and observation time in a per-dataset histogram. The coordinator reads the percentile back and schedules the first build for ``window.end + settle``, so each source tunes its own wait. A dataset with no lateness history yet builds immediately and is revised during the provisional phase.
+  After a window closes, its first build waits for the *settle duration*. This duration is the measured 95th percentile of arrival lateness for the dataset. Ingestion records the difference between arrival time and observation time in a per-dataset histogram, and the coordinator schedules the first build for ``window.end + settle``. A dataset without lateness history has a settle duration of zero and may be revised during the provisional phase.
 
 Provisional
-  From its first build until the retention floor, a window is revisable: late data folds in by rebuilding the window and re-publishing it to exporters. Rebuilds are debounced by ``rebuild_debounce``: each arriving record defers the rebuild, so a wave of late arrivals or a backfill sweeping through historical windows coalesces into one rebuild shortly after the wave ends, rather than one per record.
+  From its first build until the retention limit, a window remains revisable. Late data schedules another build and a new notification to exporters. The ``rebuild_debounce`` setting delays each revision after the most recent arrival, allowing a group of late records or a backfill to be handled by one rebuild.
 
 Final
-  Once the hot-store retention has passed the window's end, the window is sealed and a late arrival can no longer rewrite it. Its observations stay in the time-series database until they age out; they are simply not folded into the immutable window. The floor is the retention because a window cannot be rebuilt from data the hot store has forgotten.
+  A window becomes final when its end is older than the hot-store retention period. Later observations may remain in the time-series database until they expire, but they do not change the published dataset. This limit is necessary because a complete rebuild is no longer possible after source observations expire from the hot store.
 
-The histogram counts what the store writes. A ``dedup_ingestion`` dataset suppresses redelivered content at the write, so a pull source re-fetching an overlapping span cannot inflate the percentile, while a changed value, such as a QC update, is novel content and counts as a genuine late arrival. Rows belonging to a window already past its retention floor are skipped outright: they can no longer affect any build, so they must not push the settle estimate upward.
+The lateness histogram counts rows written to the store. For a dataset with ``dedup_ingestion`` enabled, an identical redelivery is filtered before it can affect the histogram. A changed value, such as a quality-control update, is new content and contributes a new lateness measurement. Rows for final windows are not written and therefore do not affect the estimate.
 
 Coverage Claims
 ---------------
 
-An ingestion call declares the temporal range it covers up front (``start``/``end`` on the :ref:`flight-interface:Ingest (DoPut)` descriptor), but the coordinator does not wait for the stream to finish. As batches are written, the ingestion handler tracks the **watermark**, the latest observation time written so far. Each time the watermark crosses an aggregation window boundary it publishes a **coverage claim** (an internal ``DataAvailableEvent``) making two distinct statements:
+An ingestion call declares its temporal range in the ``start`` and ``end`` fields of the :ref:`flight-interface:Ingest (DoPut)` descriptor. The coordinator can process coverage before the stream finishes. As batches are written, the ingestion handler tracks a **watermark**: the latest observation time written so far. Whenever the watermark crosses an aggregation-window boundary, the handler publishes a **coverage claim** (an internal ``DataAvailableEvent``).
 
-- the claim's **span** says "this range was swept" — it distinguishes data that is missing from data that does not exist, which observation cadence alone cannot
-- the claim's **records** say "these windows received rows": one record per aggregation window the claim actually delivered observations into, each with the id every one of those rows was tagged with
+A coverage claim contains two kinds of information:
+
+- The claim's **span** records the range checked by the source. It distinguishes an empty interval from one the source has not checked.
+- The claim's **records** identify the windows that received rows. Each record contains the identifier attached to those rows.
 
 .. code-block:: text
 
@@ -93,18 +95,20 @@ An ingestion call declares the temporal range it covers up front (``start``/``en
     final claim                                   [12:02 ── 13:00]
       records                                       {12:00}
 
-Claim spans chain contiguously: each starts where the previous one ended, so coverage analysis never sees a false gap between them. Records exist only where rows landed — a swept-but-quiet window is covered by the claim's span and named by no record, so nothing downstream waits on rows that never existed. When the stream completes, a final claim covers the remaining tail through the declared ``end``, widened if data ran past it. Claim and record ids derive deterministically from the ingestion operation's ``id``, so a retried command re-publishes under identical ids and a replay is not mistaken for new data.
+Successive claim spans are contiguous: each begins where the previous span ended. This prevents coverage analysis from interpreting a batch boundary as a gap. A checked interval with no observations appears in the span but has no record, so downstream processing does not wait for rows that the source did not find.
+
+When the stream completes, a final claim extends coverage through the declared ``end``. If the stream contains later observations, the final span is extended to include them. Claim and record identifiers are derived from the ingestion operation's ``id``. Retrying the same operation therefore republishes the same identifiers.
 
 A bounded command whose data stays inside one aggregation window never crosses a boundary, so it publishes exactly one claim, spanning the declared range.
 
-Data older than the claimed range (out-of-order within one stream) widens the next claim's start downward, and the late rows get records in their own windows. Those fresh record ids change the affected windows' desired record sets and force rebuilds. This is the same mechanism that handles late data arriving across separate ingestion operations.
+If a stream contains observations older than its current claimed range, the next claim starts early enough to include them. The corresponding windows receive new records, which changes their desired record sets and schedules revisions where permitted. The same mechanism handles late data delivered by separate ingestion operations.
 
-If a stream fails mid-way, the claims already published stand: their observations are in the database and the coordinator knows it. The tail is never claimed, so no window is built from data the failure cut short. The source retries the command, and the deterministic ids make the replay idempotent.
+If a stream fails, observations and claims from completed batches remain valid. The unprocessed part of the declared range is not claimed, so it cannot make a window appear complete. The source can retry with the same ingestion identifier without creating distinct claim identities.
 
 Streaming ingestion
 ~~~~~~~~~~~~~~~~~~~
 
-Because windows build on claims rather than on stream completion, a single long-running ``DoPut`` produces datasets while it is still streaming:
+Windows become eligible from coverage claims rather than from stream completion. A long-running ``DoPut`` can therefore produce completed windows before the stream closes:
 
 .. code-block:: text
 
@@ -119,16 +123,16 @@ Because windows build on claims rather than on stream completion, a single long-
                            claimed by a builder at 11:30, built, published
     window [11:00-12:00)   coverage complete at claim 2, eligible ≈ 12:30, ...
 
-Each window's dataset lands roughly the aggregation span plus the settle duration behind the live data, for as long as the stream stays open.
+While the stream remains open, each window can be published after its end plus the settle duration.
 
 Out-of-Order Processing
 -----------------------
 
-Observations may arrive in any order: real-time streams can deliver historical backfills, and sources may publish with processing delays. The coordinator keeps every claim (for coverage analysis) and every record (as the audit log of who delivered which window's rows). For every claim it receives, the coordinator:
+Observations do not need to arrive in chronological order. A real-time stream may include a historical backfill, and a source may publish observations after processing delays. The coordinator retains claims for coverage analysis and records for the ingestion audit trail. For each claim, it:
 
 1. Folds each of the claim's records into that window's desired record set
 2. Re-analyses the dataset's coverage from the stored claim spans
-3. For every window the claim spans, compares the desired set against the last-built state to decide whether to schedule a build
+3. Compares each affected window's desired set with its last-built state and schedules a build when they differ
 
 The example below shows three ingestion operations touching one window:
 
@@ -155,35 +159,39 @@ For each record a claim carries:
 3. Retrieve ``observed_hash``, the hash when last built
 4. If ``desired_hash != observed_hash``, schedule the window for building
 
-The hash is computed over record ids, not over the observation data itself. If a new record covers the same data as a previous one, its fresh UUID still changes the hash and a rebuild is scheduled; the build's fold collapses the overlap (see :ref:`domain:Duplicate and Corrected Observations`). Because desired sets hold only records that delivered rows, a window's hash names exactly the row batches its build composes. The build queue keeps at most one entry per window, so repeated triggers for the same window coalesce into a single build.
+The hash represents record identifiers rather than observation values. A new record changes the hash even when it overlaps data from an earlier record, so the window is scheduled again. During the build, the fold resolves that overlap (see :ref:`domain:Duplicate and Corrected Observations`).
+
+The desired set contains only records that delivered rows to the window. Its hash therefore identifies the inputs selected for the build. The queue holds at most one entry for each window, so repeated scheduling requests are combined.
 
 Window Readiness
 ~~~~~~~~~~~~~~~~
 
-The coordinator only schedules windows whose claimed coverage can support a build, which prevents publishing partial datasets. For a provisional window it validates:
+The coordinator schedules a window only when its claimed coverage supports a complete build. For a provisional window, it validates:
 
 - **Coverage**: claim spans fully cover ``[window.start, window.end)``
-- **Gaps**: no temporal gaps exist between consecutive claim boundaries. Missing observations *within* a claim are by definition data that does not exist — the claim says the range was swept.
+- **Gaps**: no temporal gaps exist between consecutive claim boundaries. An interval inside a claim may contain no observations; the claim still records that the source checked it.
 - **Records**: at least one record delivered rows into the window; a covered window with no records holds no data and has nothing to build.
 
-Coverage and gap failures resolve only when new data arrives, and the claim carrying that data spans the affected windows and re-decides them.
+An incomplete window is reconsidered when a later claim changes its coverage.
 
-A window that passes is scheduled with an **eligibility time**, the moment it becomes worth building, and the queue holds it until then:
+A window that passes these checks receives an **eligibility time**. The queue retains the window until that time:
 
 - A first build is eligible at ``window.end + settle``
 - A rebuild is eligible at ``arrival + rebuild_debounce``, re-decided on every arrival
 
-A later claim that changes the window's desired set simply reschedules it; the queue keeps one entry per window. Because the delay lives in the queue rather than in a coordinator-side holding pen, a scheduled window builds when its time comes even if its source goes quiet. No later claim is needed to release it.
+A later claim that changes a window's desired set updates its queue entry. Eligibility time is stored with that entry, so no subsequent claim is required when the time arrives.
 
 Duplicate and Corrected Observations
 ------------------------------------
 
-Every stored row carries its record's id as a tag, so the time-series database preserves each record's delivery rather than upserting across them: history accumulates per record, and a build selects exactly the record set it wants. The consequence is that nothing in the write path collapses observations — that is the **build fold**'s job, and it is unconditional. A build reads its desired records' rows, groups them by observation identity (tag values and observation time), and keeps each identity's row from the latest-arrived record. Last claim wins, deterministically, over an explicit record set.
+Each stored row carries its record identifier as a tag. The time-series database therefore preserves deliveries from separate records instead of upserting across them. A build selects its desired record set and applies the **build fold** to resolve overlapping observations.
 
-Two mechanisms keep the volume feeding that fold proportionate:
+The fold groups rows by observation identity, defined by tag values and observation time. For each identity, it retains the row from the record that arrived last. This rule is applied to every published build.
 
-- Within one record, InfluxDB still upserts on (tags, record id, time) — a batch redelivering a row under the same record id overwrites itself.
-- Across records, datasets with ``dedup_ingestion`` enabled fingerprint every row against a per-window filter and store only content not already stored — a sweep source re-fetching six days of history writes just the novel slice. This is an efficiency knob, not a correctness one: redelivered content that does reach the store is identical under the fold and collapses at build time.
+Two mechanisms limit the volume processed by the fold:
+
+- Within one record, InfluxDB upserts on ``(tags, record id, time)``. Redelivering a row under the same record identifier overwrites that row.
+- Across records, ``dedup_ingestion`` fingerprints rows with a per-window filter and stores only content that has not been seen. This is an optimisation rather than a correctness requirement; the build fold also resolves identical content that reaches the store under different records.
 
 .. list-table::
    :header-rows: 1
@@ -202,40 +210,42 @@ Two mechanisms keep the volume feeding that fold proportionate:
      - Stored under the correcting record's tag; earlier deliveries kept
      - A revisable window rebuilds and the later-arrived record's row wins; a sealed window keeps its published values
 
-A correction reaches published datasets through the ordinary rebuild path: the ingestion operation that carried it publishes claims like any other, the fresh record ids change the desired hash of every window they landed rows in, and a revisable window rebuilds through the fold. A window past its retention floor keeps its published values; the correction stays queryable in the time-series database but is not folded into the sealed dataset.
+A correction uses the normal revision path. Its ingestion operation publishes claims, and the new record identifiers change the desired hash of each affected window. Revisable windows are rebuilt and the fold selects the corrected rows. Final windows retain their published values; the correction remains in the time-series database until retention removes it.
 
 Dataset Builder
 ---------------
 
-Builders are workers that lease due windows from the shared build queue and materialise them as Arrow datasets. Every builder replica polls the same queue. The atomic lease guarantees a window is built by one replica at a time, and a lease left behind by a crashed builder expires and returns the window to the queue (see :ref:`architecture:Scaling`).
+Builders lease due windows from the shared build queue and materialise them as Arrow datasets. Every builder replica polls the same queue. An atomic lease assigns a window to one replica at a time. If that replica stops before completing the build, the lease expires and the window returns to the queue (see :ref:`architecture:Scaling`).
 
 Build Order
 ~~~~~~~~~~~
 
-The queue is a sorted set scored by each window's eligibility time. A claim takes the earliest-eligible window whose time has passed; windows scheduled for the future are invisible to builders until they come due. Since a first build's eligibility is ``window.end + settle``, historical backlogs are processed before recent windows.
+The queue is a sorted set ordered by eligibility time. A builder claims the earliest eligible window whose time has passed. Future windows remain unavailable until their eligibility time. Since first builds use ``window.end + settle``, older eligible windows are processed before newer ones.
 
 Build Process
 ~~~~~~~~~~~~~
 
 For each leased window:
 
-1. Retrieve the desired record set and check ``desired_hash`` against ``observed_hash``; release the lease if they already match
-2. Query InfluxDB for exactly the desired records' rows in ``[window.start, window.end)``, streamed batch-by-batch without a server-side sort, keeping heavy work out of the database
-3. Verify every desired record's rows were reachable — anything less means the hot store lost or expired data, and the build defers rather than publish a partial record set
-4. Fold: collapse to one row per observation identity, the latest-arrived record winning
+1. Retrieve the desired record set and compare ``desired_hash`` with ``observed_hash``. If they match, release the lease without rebuilding.
+2. Query InfluxDB for the desired records in ``[window.start, window.end)``. Results are streamed in batches without a server-side sort.
+3. Verify that every desired record is available. If data has expired or is otherwise unavailable, defer the build instead of publishing a partial result.
+4. Apply the build fold, retaining the latest-arriving row for each observation identity.
 5. Sort by time in the builder's own memory, convert to Arrow RecordBatches matching the canonical schema, and write to the arrow store under the window's deterministic key
 6. Append the build to the window's manifest (see :ref:`domain:Window Manifests`)
 7. Publish a ``DataSetAvailableEvent`` with the dataset location, marked final when the window is past its retention floor
 8. Update ``observed_hash`` and release the lease
 
-Every published build passes through the fold — there is no other path to the canonical store. A window with no desired records has nothing to build and settles without publishing.
+The fold is applied to every published build. A window with no desired records does not produce a dataset.
 
-If the build fails (database timeout, storage error, an unreachable record set), the window is rescheduled and retried with exponential backoff; after repeated failures it is dropped and picked up again by the next claim that changes its content.
+If a database timeout, storage error, or unavailable record set prevents a build, the window is rescheduled with exponential backoff. After repeated failures, it is removed from the queue. A later claim that changes the window's content schedules it again.
 
 Window Manifests
 ~~~~~~~~~~~~~~~~
 
-Coordination state expires with the hot period, so each build also records durable provenance twice: its own entry is embedded in every build file's Parquet footer (schema metadata key ``ionbeam.build``), and the window's full build history lives under the dataset's ``_manifests/`` prefix (underscore-prefixed so standard dataset discovery skips it), each entry naming its build's exact file set. The manifest holds the window's identity, the declared schema of the latest build, and one entry per build: version, build time, record-set hash, schema hash, composition mode, row count, finality, software version, and the ingestion records folded in with their claimed spans and arrival times.
+Coordination state expires with the hot-store retention period, so durable provenance is stored with each build. The build entry appears in the Parquet footer under the ``ionbeam.build`` schema metadata key. The window's full build history is stored under the dataset's ``_manifests/`` prefix, which standard dataset discovery ignores.
+
+The manifest identifies the window and records the schema of its latest build. Each build entry includes its version, build time, record-set hash, schema hash, composition mode, row count, finality, software version, file set, and contributing ingestion records.
 
 The manifest is written after the build's files. A crash between the writes leaves the manifest one build behind; the next rebuild rewrites both.
 

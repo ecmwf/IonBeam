@@ -1,14 +1,16 @@
 IonBeam
 =======
 
-IonBeam is an orchestration system for bringing IoT and other unconventional observations into meteorological workflows. Behind a single Arrow Flight endpoint, the core service:
+IonBeam brings observations from IoT and other unconventional sources into meteorological workflows. It exposes a single Arrow Flight endpoint through which the core service:
 
-* Schedules data sources and ingests the observation streams they push
-* Validates and normalises observations into a canonical, self-describing schema; variables optionally carry typed semantics from a governed vocabulary, such as CF (Climate and Forecast) standard names
-* Builds time-windowed datasets and rebuilds them as late data arrives
-* Publishes built datasets as canonical GeoParquet, pushing availability events to subscribed exporters and streaming the data back to them over Flight
+* Sends scheduled triggers to data sources and receives their observation streams
+* Validates and normalises observations against a declared schema
+* Builds time-windowed datasets and revises them when late data arrives
+* Notifies exporters when datasets are available and streams the requested data
 
-Data sources and exporters run as separate Flight clients built on a shared client library, so new ones are added without changing the core. Every component runs with any number of replicas (:ref:`architecture:Scaling`).
+Variables may use typed semantics from a governed vocabulary, such as CF (Climate and Forecast) standard names. Built geographic datasets use GeoParquet.
+
+Data sources and exporters are separate services built with a shared client library. Valkey coordinates work across replicas where a component supports horizontal scaling (:ref:`architecture:Scaling`).
 
 .. toctree::
    :maxdepth: 2

@@ -20,9 +20,9 @@
 > [!IMPORTANT]
 > This software is **Emerging** and subject to ECMWF's guidelines on [Software Maturity](https://github.com/ecmwf/codex/raw/refs/heads/main/Project%20Maturity).
 
-**IonBeam** is an orchestration system for bringing IoT and other unconventional observations into meteorological workflows. The core service schedules data sources, ingests the observations they push, tracks coverage of each time window, and builds time-windowed datasets, all served over Arrow Flight. Data sources and exporters run as separate Flight clients written with a shared client library, so new ones can be added without changes to the core, and each component can run with multiple replicas.
+**IonBeam** brings observations from IoT and other unconventional sources into meteorological workflows. Data sources send observations to the core service, which organises them into time windows and builds datasets for downstream use. Exporters retrieve those datasets and convert them to formats such as ECMWF ODB. All three component types communicate through Arrow Flight.
 
-The bundled components form a meteorological pipeline: data sources that pull from IoT networks such as MeteoTracker and Sensor.Community, and exporters that write the built datasets onward as ECMWF ODB files. The schema itself is agnostic of any metadata convention; the bundled sources declare their variables with CF (Climate and Forecast) semantics, one of the governed vocabularies a declaration can use.
+Data sources and exporters are separate services built with the shared `ionbeam-client` library. The repository includes integrations for networks such as MeteoTracker and Sensor.Community, together with an ODB exporter. Dataset declarations are not tied to one metadata convention; the bundled sources use CF (Climate and Forecast) semantics.
 
 ## Quick Start
 
@@ -33,7 +33,7 @@ uv sync --all-packages
 uv run ionbeam -c ionbeam/config.local.yaml start
 ```
 
-This starts the core with in-memory adapters and a local dataset directory, no external services required. The Flight endpoint listens on `grpc://localhost:8815`; metrics are served on `http://localhost:8000`.
+This starts the core with in-memory adapters and a local dataset directory. No external services are required. The Flight endpoint listens on `grpc://localhost:8815`, and metrics are served at `http://localhost:8000`.
 
 To push synthetic observations through it, run the bundled load generator in a second shell:
 
@@ -45,66 +45,45 @@ It ingests a time range whenever the core triggers it. Enable the `scheduler` se
 
 ## Architecture
 
-Scheduling, ingestion, window coordination and dataset building all happen in the core service. Data sources and exporters connect as Arrow Flight clients and can be started, stopped and scaled independently of it. Solid arrows carry data; dashed arrows carry control events.
+IonBeam exposes a single Arrow Flight endpoint. Data sources send observations to this endpoint, while exporters retrieve completed datasets from it. Data sources and exporters are independently deployed clients of the core service. They also open long-lived `DoExchange` streams through which the core sends triggers and dataset notifications.
+
+Solid arrows represent data transfer; dashed arrows represent control messages.
 
 ```mermaid
-%%{init: {"flowchart": {"diagramPadding": 12, "nodeSpacing": 60, "rankSpacing": 70, "htmlLabels": true}}}%%
-flowchart TB
+%%{init: {"flowchart": {"diagramPadding": 12, "nodeSpacing": 55, "rankSpacing": 110, "htmlLabels": true}}}%%
+flowchart LR
 
-EXT["External IoT APIs<br/>MeteoTracker · Acronet · EUMETNET E-SOH · Sensor.Community"]
-
-SOURCES@{ shape: procs, label: "Data sources<br/>one service per integration" }
-
-subgraph CORE["IonBeam core — Flight endpoint · N replicas"]
-  SCHED["Source<br/>scheduler"]
-  ING["Ingestion<br/>handler"]
-  COORD["Coordinator<br/>handler"]
-  BUILD["Builder<br/>handler"]
+subgraph CLIENTS["Flight clients — ionbeam-client"]
+  SRC@{ shape: procs, label: "Data sources<br/>source_name · subscriber" }
+  EXP@{ shape: procs, label: "Exporters<br/>exporter_name · subscriber" }
 end
 
-subgraph STORES["Storage"]
-  INFLUX[("InfluxDB 3<br/>observations")]
-  VALKEY[("Valkey<br/>coordination")]
-  ARROW[("Arrow store<br/>built datasets")]
-end
+OPS["Operator tooling"]
 
-EXPORTERS@{ shape: procs, label: "Exporters<br/>one service per target" }
-PYGEO["PyGeoAPI<br/>OGC Features API"]
-OUTPUTS["ODB files"]
+CORE["IonBeam core<br/>Arrow Flight endpoint · N replicas"]
 
-EXT -->|"HTTP / MQTT"| SOURCES
-SCHED -.->|"triggers<br/>DoExchange push"| SOURCES
-SOURCES -->|"DoPut<br/>RecordBatch stream"| ING
-ING -->|"write observations"| INFLUX
-ING -.->|"coverage claims"| COORD
-COORD <-.->|"claims + records<br/>schedule windows"| VALKEY
-BUILD <-.->|"claim due windows<br/>build state"| VALKEY
-INFLUX -->|"query window"| BUILD
-BUILD -->|"write dataset"| ARROW
-BUILD -.->|"dataset events<br/>DoExchange push"| EXPORTERS
-ARROW -->|"DoGet<br/>RecordBatch stream"| EXPORTERS
-EXPORTERS --> OUTPUTS
-ARROW -->|"canonical GeoParquet"| PYGEO
-
-COORD ~~~ BUILD
+SRC -->|"DoAction register_dataset<br/>DoPut ingest"| CORE
+SRC -.->|"DoExchange await_triggers<br/>triggers pushed down the open stream"| CORE
+EXP -->|"GetFlightInfo dataset_range<br/>DoGet dataset"| CORE
+EXP -.->|"DoExchange await_datasets<br/>events pushed down the open stream"| CORE
+OPS -.->|"DoAction trigger_source · health_check"| CORE
 
 classDef inside fill:#44546A,stroke:#2D3A50,color:#FFFFFF
 classDef outside fill:transparent,stroke:#8A8F98,color:#8A8F98
 
-class SOURCES,SCHED,ING,COORD,BUILD,EXPORTERS,PYGEO,INFLUX,VALKEY,ARROW inside
-class EXT,OUTPUTS outside
+class SRC,EXP,CORE inside
+class OPS outside
 
-style CORE fill:transparent,stroke:#9AA0A6,stroke-width:1px
-style STORES fill:transparent,stroke:#9AA0A6,stroke-width:1px
+style CLIENTS fill:transparent,stroke:#9AA0A6,stroke-width:1px
 ```
 
-Every service runs with any number of replicas, with coordination in Valkey:
+Valkey coordinates work across core, data-source, and exporter replicas:
 
 - an atomic claim picks one scheduler replica to fire each trigger boundary
 - replicas of a source or exporter share one event-stream consumer group and split the events between them
 - builders lease due windows from a shared queue, so a crashed replica's work returns to the pool
 
-Delivery is at-least-once end to end, with deterministic ids making retries idempotent. [docs/architecture.rst](docs/architecture.rst) covers the mechanisms.
+Trigger and dataset-event delivery is at least once. Stable identifiers allow clients to handle redelivery without duplicating work. [docs/architecture.rst](docs/architecture.rst) describes the data flow, storage, and scaling model.
 
 The repository is a [uv](https://docs.astral.sh/uv/) workspace:
 
@@ -112,17 +91,20 @@ The repository is a [uv](https://docs.astral.sh/uv/) workspace:
 - [ionbeam-client/](ionbeam-client/) — client library shared by data sources and exporters
 - [data-sources/](data-sources/) — the bundled data sources: Flight clients that pull from external IoT APIs and push observations in
 - [exporters/](exporters/) — the bundled exporters: Flight clients that subscribe to built datasets and write ODB
-- [ionbeam-legacy-api/](ionbeam-legacy-api/) — the previous public HTTP API, served unchanged from the new system
 
 Deployment configurations (container stacks, Kubernetes chart) are maintained outside the repository and are not published yet.
 
 ## Writing data sources and exporters
 
-New data sources and exporters are written with [ionbeam-client](ionbeam-client/). A source registers its dataset schema and streams Arrow RecordBatches into the core with `client.ingest(...)`, either on its own schedule or through a trigger handler driven by the core's scheduler. An exporter registers a handler that receives each built dataset as a stream of RecordBatches. The [ionbeam-client README](ionbeam-client/README.md) has working examples of both.
+New data sources and exporters use [ionbeam-client](ionbeam-client/). A source registers a dataset schema and streams Arrow RecordBatches with `client.ingest(...)`. It may run on its own schedule or respond to triggers from the core scheduler.
+
+An exporter registers a handler for completed datasets. The [ionbeam-client README](ionbeam-client/README.md) provides working examples of both component types.
 
 ## Configuration
 
-Each component reads one YAML file, passed with `-c` or via its config environment variable. Annotated examples live alongside each component: [ionbeam/config.example.yaml](ionbeam/config.example.yaml) (the core: Flight endpoint, storage backends, scheduler windows, dataset registry), `data-sources/*/config.example.yaml` and `exporters/*/config.example.yaml` (each points `ionbeam.flight_url` at the core). [ionbeam/config.local.yaml](ionbeam/config.local.yaml) is a ready-made local setup using in-memory adapters.
+Each component reads a YAML configuration file, supplied with `-c` or through its configuration environment variable. The annotated [core example](ionbeam/config.example.yaml) covers the Flight endpoint, storage backends, scheduler windows, and dataset registry. Examples for data sources and exporters are stored beside their respective components and point `ionbeam.flight_url` at the core.
+
+[ionbeam/config.local.yaml](ionbeam/config.local.yaml) provides a local configuration with in-memory adapters.
 
 ## Testing
 

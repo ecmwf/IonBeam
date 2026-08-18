@@ -1,5 +1,7 @@
 # eumetnet
 
-Data source for EUMETNET's E-SOH MQTT feed of surface observations. It holds a persistent MQTT session, buffers incoming GeoJSON messages, and flushes them to the Flight endpoint on a size/interval threshold: each flush deduplicates by publication time, pivots per-parameter messages into wide rows with their QC codes, and ingests under a stable id so a failed flush retries as the same data.
+Data source for EUMETNET's E-SOH MQTT feed of surface observations. It maintains a persistent MQTT session and buffers incoming GeoJSON messages until a size or time threshold is reached. Before sending a batch to the Flight endpoint, it deduplicates messages by publication time and pivots per-parameter messages into rows with their quality-control codes. A stable ingestion identifier allows a failed batch to be retried with the same identity.
 
-Run it with `uv run eumetnet -c config.yaml` (see `config.example.yaml`). Broker credentials come from the `MQTT_USERNAME` and `MQTT_PASSWORD` environment variables — a Kubernetes Secret in deployment. One replica per broker session: the MQTT session is keyed to the client id.
+Run it with `uv run eumetnet -c config.yaml` (see `config.example.yaml`). Broker credentials come from the `MQTT_USERNAME` and `MQTT_PASSWORD` environment variables and should be provided through a Kubernetes Secret in deployment.
+
+Run one replica per broker session. The MQTT broker associates each session with a client identifier.
